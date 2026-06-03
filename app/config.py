@@ -48,7 +48,7 @@ def get_settings() -> Settings:
         telegram_bot_username=os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
         max_bot_username=os.getenv("MAX_BOT_USERNAME", "").strip().lstrip("@"),
         max_bot_token=os.getenv("MAX_BOT_TOKEN", "").strip(),
-        max_api_base_url=os.getenv("MAX_API_BASE_URL", "https://botapi.max.ru").strip().rstrip("/"),
+        max_api_base_url=os.getenv("MAX_API_BASE_URL", "https://platform-api.max.ru").strip().rstrip("/"),
         max_webhook_secret=os.getenv("MAX_WEBHOOK_SECRET", "").strip(),
         dev_auth_code_log=_bool_env("DEV_AUTH_CODE_LOG", default=False),
         smtp_host=os.getenv("SMTP_HOST", "").strip(),

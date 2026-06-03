@@ -69,7 +69,7 @@ def _max_request(
         clean_query = {key: value for key, value in query.items() if value is not None}
         url = f"{url}?{urllib.parse.urlencode(clean_query)}"
     data = None
-    headers = {"Authorization": f"Bearer {settings.max_bot_token}"}
+    headers = {"Authorization": settings.max_bot_token}
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"

@@ -235,6 +235,31 @@ input:focus {
   font-size: 14px;
 }
 
+.hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hint-actions a,
+.hint-actions button {
+  min-height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--blue);
+  font-weight: 800;
+  padding: 0 12px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.hint-actions button {
+  cursor: pointer;
+}
+
 .dashboard-head {
   display: flex;
   align-items: center;

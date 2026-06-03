@@ -19,7 +19,7 @@ def main() -> None:
         raise SystemExit("MAX_BOT_USERNAME and MAX_BOT_TOKEN must be configured")
 
     marker: int | None = None
-    print("MAX polling started. Press Ctrl+C to stop.")
+    print("MAX polling started. Press Ctrl+C to stop.", flush=True)
     while True:
         try:
             data = get_max_updates(settings, marker=marker)
@@ -31,11 +31,11 @@ def main() -> None:
                 if isinstance(update, dict):
                     result = process_max_update(settings, update)
                     if result.get("handled"):
-                        print(f"MAX login confirmed: {result.get('state')}")
+                        print(f"MAX login confirmed: {result.get('state')}", flush=True)
         except KeyboardInterrupt:
             raise
         except Exception as exc:
-            print(f"MAX polling error: {exc}")
+            print(f"MAX polling error: {exc}", flush=True)
             delay = 15 if "too.many.requests" in str(exc) or "HTTP 429" in str(exc) else 3
             time.sleep(delay)
 
