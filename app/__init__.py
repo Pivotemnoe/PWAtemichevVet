@@ -1,0 +1,1 @@
+"""TemichevVet PWA backend."""

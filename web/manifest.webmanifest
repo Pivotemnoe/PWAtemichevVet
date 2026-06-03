@@ -1,0 +1,17 @@
+{
+  "name": "TemichevVet",
+  "short_name": "TemichevVet",
+  "description": "Помощник по здоровью питомца: жалобы, история, питание и подписка.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7fbff",
+  "theme_color": "#1476d4",
+  "icons": [
+    {
+      "src": "/static/assets/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

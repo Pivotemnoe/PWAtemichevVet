@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1476d4" />
+    <title>TemichevVet</title>
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="/static/assets/icon.svg" alt="" width="40" height="40" />
+          <div>
+            <div class="brand-name">TemichevVet</div>
+            <div class="brand-subtitle">Здоровье питомца</div>
+          </div>
+        </div>
+        <button class="icon-button" id="installBtn" type="button" hidden title="Установить">
+          <span aria-hidden="true">↓</span>
+        </button>
+      </header>
+
+      <main>
+        <section class="auth-view" id="authView">
+          <div class="intro-panel">
+            <img src="/static/assets/icon.svg" alt="" class="intro-logo" />
+            <h1>Войдите в TemichevVet</h1>
+            <p>Выберите удобный способ входа. Телефон и SMS на первом этапе не используем.</p>
+          </div>
+
+          <div class="auth-grid">
+            <form class="panel" id="emailForm">
+              <h2>Email</h2>
+              <label>
+                <span>Email</span>
+                <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
+              </label>
+              <button class="primary-button" type="submit">Получить код</button>
+              <div class="code-row" id="codeRow" hidden>
+                <label>
+                  <span>Код</span>
+                  <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
+                </label>
+                <button class="secondary-button" id="verifyCodeBtn" type="button">Войти</button>
+              </div>
+              <p class="hint" id="emailHint">Код действует 10 минут.</p>
+            </form>
+
+            <div class="panel auth-options">
+              <h2>Мессенджеры</h2>
+              <button class="messenger-button" id="telegramBtn" type="button">
+                <span>Telegram</span>
+                <small>Опционально, если доступен</small>
+              </button>
+              <button class="messenger-button" id="maxBtn" type="button">
+                <span>MAX</span>
+                <small>После модерации бота</small>
+              </button>
+              <p class="hint" id="messengerHint">MAX-вход включим, когда будет токен и имя бота.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="dashboard-view" id="dashboardView" hidden>
+          <div class="dashboard-head">
+            <div>
+              <p class="section-label">Рабочая зона</p>
+              <h1>Что нужно сделать?</h1>
+            </div>
+            <button class="secondary-button" id="logoutBtn" type="button">Выйти</button>
+          </div>
+
+          <div class="action-grid">
+            <button class="action-tile" data-action="triage" type="button">
+              <span class="tile-icon">🩺</span>
+              <span>Разобрать жалобу</span>
+            </button>
+            <button class="action-tile" data-action="pets" type="button">
+              <span class="tile-icon">🐾</span>
+              <span>Мои питомцы</span>
+            </button>
+            <button class="action-tile" data-action="food" type="button">
+              <span class="tile-icon">🍽️</span>
+              <span>Питание</span>
+            </button>
+            <button class="action-tile" data-action="subscription" type="button">
+              <span class="tile-icon">💳</span>
+              <span>Подписка</span>
+            </button>
+          </div>
+
+          <div class="workspace" id="workspace">
+            <h2>TemichevVet PWA подключена</h2>
+            <p>Следующий этап — подключение реальных сценариев питомцев, питания, разборов и оплаты к общей логике продукта.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
