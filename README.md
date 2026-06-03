@@ -11,7 +11,8 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - Email one-time-code login.
 - Telegram login placeholder.
 - MAX deep-link login with webhook and local polling support.
-- SQLite schema for web users, auth challenges, sessions, and external account links.
+- Personal cabinet: pets, pet cards, history, observations, weight, reminders, food checks, feedback.
+- SQLite schema for web users, auth challenges, sessions, external account links, pets, reminders, history, and observations.
 - Production deployment notes for VPS + nginx.
 
 ## Local Run
@@ -69,11 +70,12 @@ git push -u origin main
 - `docs/ROADMAP.md`: implementation stages and priorities.
 - `docs/DEPLOYMENT.md`: local run, environment variables, Docker, production checklist.
 - `docs/PRODUCTION.md`: live VPS layout, domains, services, and health checks.
+- `docs/SECURITY_PRIVACY.md`: personal data, ownership checks, SQLite/PostgreSQL path.
 
 ## Next Steps
 
 1. Add SMTP provider for production email login.
-2. Connect product APIs: pets, triage, food, subscription, payment.
-3. Add Telegram bot deep-link login as optional channel.
+2. Move Plus/YooKassa payment flow from Telegram bot into PWA with server-side validation.
+3. Connect full LLM triage prompts and subscription limits.
 4. Add backups and monitoring for the PWA SQLite database.
-5. Replace the temporary MVP screens with the full product flows.
+5. Prepare PostgreSQL migration before active growth.

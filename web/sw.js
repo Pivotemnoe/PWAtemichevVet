@@ -1,10 +1,14 @@
-const CACHE_NAME = "temichevvet-pwa-v2";
+const CACHE_NAME = "temichevvet-pwa-cabinet-ux-4";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260603-max-login",
-  "/static/app.js?v=20260603-max-login",
+  "/static/styles.css?v=20260603-cabinet-ux-4",
+  "/static/app.js?v=20260603-cabinet-ux-4",
   "/static/manifest.webmanifest",
-  "/static/assets/icon.svg"
+  "/static/assets/icon.svg",
+  "/static/assets/logo_temichevvet.jpg",
+  "/static/assets/triage_banner.jpg",
+  "/static/assets/subscription_banner.jpg",
+  "/static/assets/onb_step1_add_pet.jpg"
 ];
 
 self.addEventListener("install", (event) => {

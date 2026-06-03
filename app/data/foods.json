@@ -1,0 +1,2112 @@
+[
+  {
+    "name": "Морковь",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "полезна в умеренном количестве, содержит бета-каротин",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет, если не перекармливать",
+    "advice": "давать кусочками как лакомство, не как основу рациона",
+    "category": "овощи"
+  },
+  {
+    "name": "Огурец",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "низкокалорийный продукт, хорошо переносится",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет",
+    "advice": "можно давать небольшими кусочками",
+    "category": "овощи"
+  },
+  {
+    "name": "Кабачок",
+    "allowed": true,
+    "why": {
+        "toxicity": "нет",
+        "effects": "подходит для чувствительного ЖКТ",
+        "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет ограничений",
+    "advice": "можно давать варёным или сырым",
+    "category": "овощи"
+  },
+  {
+    "name": "Тыква",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "поддерживает пищеварение",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет рисков",
+    "advice": "давать варёной, в небольших порциях",
+    "category": "овощи"
+  },
+  {
+    "name": "Картофель сырой",
+    "allowed": false,
+    "why": {
+      "toxicity": "соланин",
+      "effects": "рвота, диарея, слабость",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже небольшой кусок сырого картофеля",
+    "advice": "сырая картошка запрещена",
+    "category": "овощи"
+  },
+  {
+    "name": "Картофель варёный",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "в больших количествах вызывает набор веса",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "переедание вызывает расстройства пищеварения",
+    "advice": "давать редко и без соли",
+    "category": "овощи"
+  },
+  {
+    "name": "Брокколи",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "полезные волокна, витамины",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет",
+    "advice": "в небольших количествах, сырая или варёная",
+    "category": "овощи"
+  },
+  {
+    "name": "Цветная капуста",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "лёгкая, гипоаллергенная",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет ограничений",
+    "advice": "подавать варёной или тушёной",
+    "category": "овощи"
+  },
+  {
+    "name": "Белокочанная капуста",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "может вызвать газообразование",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "переедание вызывает дискомфорт",
+    "advice": "давать понемногу",
+    "category": "овощи"
+  },
+  {
+    "name": "Лук",
+    "allowed": false,
+    "why": {
+      "toxicity": "тиосульфаты",
+      "effects": "анемия, рвота, слабость",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже при небольшом количестве",
+    "advice": "лук в любом виде запрещён",
+    "category": "овощи"
+  },
+  {
+    "name": "Чеснок",
+    "allowed": false,
+    "why": {
+      "toxicity": "органические сульфиды",
+      "effects": "анемия, интоксикация",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже 1–2 зубчика",
+    "advice": "строгий запрет",
+    "category": "овощи"
+  },
+  {
+    "name": "Свёкла",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "может вызвать мягкий стул",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет больших рисков",
+    "advice": "давать варёную в небольших количествах",
+    "category": "овощи"
+  },
+  {
+    "name": "Яблоко",
+    "allowed": true,
+    "why": {
+      "toxicity": "семена содержат следы цианида",
+      "effects": "полезные волокна",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "семечки нужно удалять",
+    "advice": "давать ломтиками без сердцевины",
+    "category": "фрукты"
+  },
+  {
+    "name": "Груша",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "много клетчатки",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "в большом количестве может вызвать диарею",
+    "advice": "давать понемногу",
+    "category": "фрукты"
+  },
+  {
+    "name": "Банан",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "много сахара и калия",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "переедание вызывает ожирение",
+    "advice": "давать небольшими порциями",
+    "category": "фрукты"
+  },
+  {
+    "name": "Апельсин",
+    "allowed": false,
+    "why": {
+      "toxicity": "нет, но высокая кислотность",
+      "effects": "раздражение ЖКТ, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже небольшие кусочки могут вызвать проблемы",
+    "advice": "цитрусовые запрещены",
+    "category": "фрукты"
+  },
+  {
+    "name": "Виноград",
+    "allowed": false,
+    "why": {
+      "toxicity": "неизвестный токсин",
+      "effects": "острая почечная недостаточность у собак",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже 1–2 ягоды",
+    "advice": "виноград и изюм — строгий запрет",
+    "category": "фрукты"
+  },
+  {
+    "name": "Изюм",
+    "allowed": false,
+    "why": {
+      "toxicity": "концентрированное токсичное вещество",
+      "effects": "острая почечная недостаточность",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "пара ягод — уже токсичная доза",
+    "advice": "строгий запрет",
+    "category": "фрукты"
+  },
+  {
+    "name": "Клубника",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "может вызвать аллергию",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "давать с осторожностью",
+    "advice": "по 1–2 ягоде",
+    "category": "ягоды"
+  },
+  {
+    "name": "Черника",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "антиоксиданты, полезна для зрения",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет рисков",
+    "advice": "можно использовать как лакомство",
+    "category": "ягоды"
+  },
+  {
+    "name": "Малина",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "натуральные кислоты",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "давать небольшими порциями",
+    "advice": "избегать перекорма",
+    "category": "ягоды"
+  },
+  {
+    "name": "Арбуз",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "много воды, мочегонный эффект",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "удалять корки и семечки",
+    "advice": "давать только мякоть",
+    "category": "фрукты"
+  },
+  {
+    "name": "Дыня",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "сложно переваривается у некоторых животных",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "давать очень понемногу",
+    "advice": "следить за стулом",
+    "category": "фрукты"
+  },
+  {
+    "name": "Курица",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "основа многих рационов",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "кости запрещены",
+    "advice": "давать варёное мясо без кожи и костей",
+    "category": "мясо"
+  },
+  {
+    "name": "Индейка",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "постный белок",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет рисков",
+    "advice": "варёную индейку можно давать как основу рациона",
+    "category": "мясо"
+  },
+  {
+    "name": "Говядина",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "питательный белок",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "не давать слишком жирные части",
+    "advice": "лучше варёная",
+    "category": "мясо"
+  },
+  {
+    "name": "Свинина",
+    "allowed": false,
+    "why": {
+      "toxicity": "риск паразитарных инфекций",
+      "effects": "сильная нагрузка на ЖКТ",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже в малых дозах нежелательна",
+    "advice": "свинина запрещена для собак и кошек",
+    "category": "мясо"
+  },
+  {
+    "name": "Баранина",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "жирноватое мясо",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "переедание вызывает панкреатит",
+    "advice": "давать нежирные куски",
+    "category": "мясо"
+  },
+  {
+    "name": "Рыба отварная",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "источник белка и минералов",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "не давать ежедневно",
+    "advice": "только без костей",
+    "category": "рыба"
+  },
+  {
+    "name": "Сырая рыба",
+    "allowed": false,
+    "why": {
+      "toxicity": "паразиты, тиаминаза",
+      "effects": "дефицит витамина B1, расстройства ЖКТ",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна в любом количестве",
+    "advice": "строгий запрет",
+    "category": "рыба"
+  },
+  {
+    "name": "Творог",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "источник белка и кальция",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "жирные сорта вызывают диарею",
+    "advice": "давать нежирный (0–5%)",
+    "category": "молочные"
+  },
+  {
+    "name": "Кефир",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "поддерживает микробиоту",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "не давать при диарее",
+    "advice": "давать понемногу",
+    "category": "молочные"
+  },
+  {
+    "name": "Молоко",
+    "allowed": false,
+    "why": {
+      "toxicity": "лактазная недостаточность",
+      "effects": "диарея, газообразование",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже небольшое количество вызывает расстройства",
+    "advice": "молоко не рекомендуется",
+    "category": "молочные"
+  },
+  {
+    "name": "Йогурт натуральный",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "полезные бактерии",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "сахаросодержащие варианты запрещены",
+    "advice": "давать только несладкий",
+    "category": "молочные"
+  },
+  {
+    "name": "Сыр",
+    "allowed": true,
+    "why": {
+      "toxicity": "высокая соль и жирность",
+      "effects": "при переедании может вызвать рвоту и панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать много",
+    "advice": "только как лакомство",
+    "category": "молочные"
+  },
+  {
+    "name": "Яйцо варёное",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "источник белка",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "1–2 раза в неделю",
+    "advice": "давать без соли",
+    "category": "яйца"
+  },
+  {
+    "name": "Яйцо сырое",
+    "allowed": false,
+    "why": {
+      "toxicity": "сальмонелла, авидин",
+      "effects": "снижение биодоступности биотина",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасно сырым",
+    "advice": "давать только варёное",
+    "category": "яйца"
+  },
+  {
+    "name": "Гречка",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "хорошо переносится, гипоаллергенна",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет рисков",
+    "advice": "давать варёной, без соли",
+    "category": "крупы"
+  },
+  {
+    "name": "Рис",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "укрепляет стул",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет ограничений",
+    "advice": "подходит при расстройствах ЖКТ",
+    "category": "крупы"
+  },
+  {
+    "name": "Овсянка",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "хороший источник клетчатки",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "не перекармливать",
+    "advice": "лучше варить на воде",
+    "category": "крупы"
+  },
+  {
+    "name": "Перловка",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "тяжело переваривается",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать часто",
+    "advice": "использовать редко",
+    "category": "крупы"
+  },
+  {
+    "name": "Хлеб белый",
+    "allowed": false,
+    "why": {
+      "toxicity": "нет, но много сахара и дрожжей",
+      "effects": "вздутие, расстройство ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не рекомендуется даже понемногу",
+    "advice": "хлеб не является безопасным продуктом",
+    "category": "злаки"
+  },
+  {
+    "name": "Хлеб чёрный",
+    "allowed": false,
+    "why": {
+      "toxicity": "кислоты и дрожжи",
+      "effects": "газообразование, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не рекомендуется",
+    "advice": "исключить полностью",
+    "category": "злаки"
+  },
+  {
+    "name": "Макароны",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "углеводный продукт, может вызвать ожирение",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "дать чуть-чуть можно",
+    "advice": "лучше не включать в основу рациона",
+    "category": "злаки"
+  },
+  {
+    "name": "Кукуруза",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "крупные волокна, расход энергии",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "початки опасны, зерна — можно",
+    "advice": "давать только зёрна без початка",
+    "category": "злаки"
+  },
+  {
+    "name": "Попкорн",
+    "allowed": false,
+    "why": {
+      "toxicity": "масло, соль, ароматизаторы",
+      "effects": "рвота, диарея, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны приправы",
+    "advice": "строгий запрет",
+    "category": "злаки"
+  },
+    {
+    "name": "Мёд",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "высокое содержание сахаров, может вызывать ожирение",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "более 1 чайной ложки приводит к расстройству ЖКТ",
+    "advice": "давать только как редкое лакомство, не ежедневно",
+    "category": "сладости"
+  },
+  {
+    "name": "Шоколад",
+    "allowed": false,
+    "why": {
+      "toxicity": "теобромин и кофеин",
+      "effects": "рвота, судороги, аритмия, токсическое поражение сердца",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже несколько граммов",
+    "advice": "при поедании — срочно в клинику",
+    "category": "токсичное"
+  },
+  {
+    "name": "Ксилит (заменитель сахара)",
+    "allowed": false,
+    "why": {
+      "toxicity": "сильный гипогликемический агент",
+      "effects": "резкое падение сахара, судороги, отказ печени",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "микрограммы опасны для собак",
+    "advice": "держать подальше от животных, немедленно обращаться в клинику при поедании",
+    "category": "токсичное"
+  },
+  {
+    "name": "Печенье",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, жиры, дрожжи",
+      "effects": "ожирение, диарея, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже маленькое количество нежелательно",
+    "advice": "строго избегать",
+    "category": "сладости"
+  },
+  {
+    "name": "Торт",
+    "allowed": false,
+    "why": {
+      "toxicity": "шоколад, жиры, сахар",
+      "effects": "интоксикация, панкреатит",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна даже небольшая порция",
+    "advice": "запрещено полностью",
+    "category": "сладости"
+  },
+  {
+    "name": "Конфеты",
+    "allowed": false,
+    "why": {
+      "toxicity": "ксилит, сахар, шоколад",
+      "effects": "гипогликемия, токсичность",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая конфета опасна",
+    "advice": "строгий запрет",
+    "category": "сладости"
+  },
+  {
+    "name": "Мороженое",
+    "allowed": false,
+    "why": {
+      "toxicity": "лактоза, сахар, ароматизаторы",
+      "effects": "диарея, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже 1 ложка может вызвать расстройство",
+    "advice": "исключить полностью",
+    "category": "сладости"
+  },
+  {
+    "name": "Халва",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, масла",
+      "effects": "панкреатит, ожирение",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любое количество вредно",
+    "advice": "не давать никогда",
+    "category": "сладости"
+  },
+  {
+    "name": "Арахис",
+    "allowed": false,
+    "why": {
+      "toxicity": "аллергены, жирность",
+      "effects": "аллергия, рвота, панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "несколько орехов могут вызвать реакцию",
+    "advice": "лучше исключить полностью",
+    "category": "орехи"
+  },
+  {
+    "name": "Миндаль",
+    "allowed": false,
+    "why": {
+      "toxicity": "цианиды",
+      "effects": "угнетение дыхания, судороги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже 1 орех",
+    "advice": "держать вне доступа",
+    "category": "орехи"
+  },
+  {
+    "name": "Грецкий орех",
+    "allowed": false,
+    "why": {
+      "toxicity": "плесневые токсины",
+      "effects": "неврологические расстройства",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "несколько орехов могут быть токсичны",
+    "advice": "запрещено",
+    "category": "орехи"
+  },
+  {
+    "name": "Фисташки",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, жиры",
+      "effects": "рвота, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны для ЖКТ",
+    "advice": "не давать",
+    "category": "орехи"
+  },
+  {
+    "name": "Кешью",
+    "allowed": false,
+    "why": {
+      "toxicity": "аллергены, жиры",
+      "effects": "панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "несколько орехов вредны",
+    "advice": "лучше избегать",
+    "category": "орехи"
+  },
+  {
+    "name": "Кока-кола",
+    "allowed": false,
+    "why": {
+      "toxicity": "кофеин, сахар",
+      "effects": "тремор, аритмия",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна даже чайная ложка",
+    "advice": "категорически нельзя",
+    "category": "напитки"
+  },
+  {
+    "name": "Чай чёрный",
+    "allowed": false,
+    "why": {
+      "toxicity": "кофеин",
+      "effects": "возбуждение, аритмия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать ни в каком виде",
+    "advice": "запрещён",
+    "category": "напитки"
+  },
+  {
+    "name": "Кофе",
+    "allowed": false,
+    "why": {
+      "toxicity": "кофеин",
+      "effects": "тахикардия, судороги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже несколько капель",
+    "advice": "строгий запрет",
+    "category": "напитки"
+  },
+  {
+    "name": "Какао",
+    "allowed": false,
+    "why": {
+      "toxicity": "теобромин",
+      "effects": "те же риски, что у шоколада",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасно в любом количестве",
+    "advice": "всегда избегать",
+    "category": "напитки"
+  },
+  {
+    "name": "Алкоголь",
+    "allowed": false,
+    "why": {
+      "toxicity": "этанол",
+      "effects": "подавление дыхания, кома",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "минимальная доза опасна",
+    "advice": "категорический запрет",
+    "category": "напитки"
+  },
+  {
+    "name": "Энергетики",
+    "allowed": false,
+    "why": {
+      "toxicity": "кофеин, таурин",
+      "effects": "тахикардия, судороги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "пара глотков — уже токсично",
+    "advice": "не допускать контакт",
+    "category": "напитки"
+  },
+  {
+    "name": "Масло подсолнечное",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "повышает жирность рациона",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "более 1 чайной ложки вызывает диарею",
+    "advice": "использовать минимально",
+    "category": "масла"
+  },
+  {
+    "name": "Оливковое масло",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "мягко влияет на пищеварение",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "более 1 чайной ложки может вызвать жидкий стул",
+    "advice": "давать с осторожностью",
+    "category": "масла"
+  },
+  {
+    "name": "Сливочное масло",
+    "allowed": false,
+    "why": {
+      "toxicity": "высокий жир",
+      "effects": "панкреатит, ожирение",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасна даже маленькая порция",
+    "advice": "исключить",
+    "category": "масла"
+  },
+  {
+    "name": "Майонез",
+    "allowed": false,
+    "why": {
+      "toxicity": "жир, уксус, специи",
+      "effects": "рвота, диарея, панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "малые дозы вредны",
+    "advice": "строго запрещено",
+    "category": "соусы"
+  },
+  {
+    "name": "Кетчуп",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, соль",
+      "effects": "интоксикация, понос",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен любой объём",
+    "advice": "не давать",
+    "category": "соусы"
+  },
+  {
+    "name": "Соевый соус",
+    "allowed": false,
+    "why": {
+      "toxicity": "очень много соли",
+      "effects": "рвота, судороги от гипернатриемии",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "чайная ложка опасна",
+    "advice": "категорически запрещено",
+    "category": "соусы"
+  },
+  {
+    "name": "Жевательная резинка",
+    "allowed": false,
+    "why": {
+      "toxicity": "ксилит",
+      "effects": "резкое падение сахара, отказ печени",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже четверть пластины токсична",
+    "advice": "немедленно в клинику при поедании",
+    "category": "токсичное"
+  },
+  {
+    "name": "Сладкая газировка",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, кислоты",
+      "effects": "диарея, рвота",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "несколько глотков вредны",
+    "advice": "исключить полностью",
+    "category": "напитки"
+  },
+  {
+    "name": "Разрыхлитель теста",
+    "allowed": false,
+    "why": {
+      "toxicity": "алюминиевые соли",
+      "effects": "рвота, угнетение нервной системы",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже крупинки",
+    "advice": "держать недоступно",
+    "category": "токсичное"
+  },
+  {
+    "name": "Сода пищевая",
+    "allowed": false,
+    "why": {
+      "toxicity": "щелочь",
+      "effects": "нарушение кислотности желудка",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "небольшие дозы опасны",
+    "advice": "не допускать поедания",
+    "category": "токсичное"
+  },
+  {
+    "name": "Дрожжи",
+    "allowed": false,
+    "why": {
+      "toxicity": "брожение в желудке",
+      "effects": "вздутие, алкогольная интоксикация",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "несколько грамм уже опасны",
+    "advice": "держать подальше",
+    "category": "токсичное"
+  },
+  {
+    "name": "Соль",
+    "allowed": false,
+    "why": {
+      "toxicity": "натрий",
+      "effects": "гипернатриемия, судороги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже щепотка вредна",
+    "advice": "не добавлять соль в пищу животным",
+    "category": "токсичное"
+  },
+  {
+    "name": "Сахар",
+    "allowed": false,
+    "why": {
+      "toxicity": "нет прямой токсичности, но вред ЖКТ",
+      "effects": "ожирение, кариес, диабет",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любое количество нежелательно",
+    "advice": "избегать сладкого",
+    "category": "сладости"
+  },
+  {
+    "name": "Пицца",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, жир, специи",
+      "effects": "отравление, панкреатит",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "1 кусочек опасен",
+    "advice": "не давать никогда",
+    "category": "готовая еда"
+  },
+    {
+    "name": "Алоэ",
+    "allowed": false,
+    "why": {
+      "toxicity": "алоины",
+      "effects": "рвота, диарея, раздражение ЖКТ",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже маленькие кусочки листа",
+    "advice": "держать растение вне доступа животных",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Монстера",
+    "allowed": false,
+    "why": {
+      "toxicity": "оксалаты кальция",
+      "effects": "отёки рта, слюнотечение, боль при глотании",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже небольшое количество листа",
+    "advice": "убрать растение в недоступное место",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Фикус",
+    "allowed": false,
+    "why": {
+      "toxicity": "латексный сок",
+      "effects": "рвота, раздражение слизистых",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасно попадание любого количества листьев",
+    "advice": "следить, чтобы питомец не грыз растение",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Лилия",
+    "allowed": false,
+    "why": {
+      "toxicity": "неустановленные нефротоксины",
+      "effects": "острая почечная недостаточность у кошек",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна даже пыльца на шерсти",
+    "advice": "держать лилии вне дома, если есть кошки",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Диффенбахия",
+    "allowed": false,
+    "why": {
+      "toxicity": "оксалаты",
+      "effects": "отёк гортани, боль, слюнотечение",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "несколько миллиграмм сока растения",
+    "advice": "не держать дома с животными",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Орхидея",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "растение безопасно",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет",
+    "advice": "не поощрять поедание листьев",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Папоротник",
+    "allowed": false,
+    "why": {
+      "toxicity": "ферны",
+      "effects": "повреждение ЖКТ, анемия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "небольшие дозы уже вредны",
+    "advice": "домашним животным запрещён",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Замиокулькас",
+    "allowed": false,
+    "why": {
+      "toxicity": "оксалаты",
+      "effects": "раздражение слизистых, рвота",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любое количество опасно",
+    "advice": "держать вне доступа",
+    "category": "комнатные растения"
+  },
+  {
+    "name": "Мята",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "может вызывать лёгкую диарею",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "перекармливать нежелательно",
+    "advice": "давать понемногу",
+    "category": "растения"
+  },
+  {
+    "name": "Петрушка",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "источник витаминов",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "в больших дозах возможна аллергия",
+    "advice": "использовать как маленькое дополнение",
+    "category": "растения"
+  },
+  {
+    "name": "Укроп",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "улучшает пищеварение",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет",
+    "advice": "давать мелко нарезанным",
+    "category": "растения"
+  },
+  {
+    "name": "Тимьян",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "небольшие количества безопасны",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "много специй не рекомендовано",
+    "advice": "только небольшие количества",
+    "category": "специи"
+  },
+  {
+    "name": "Розмарин",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "противовоспалительный эффект",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "много специй вызывает расстройства ЖКТ",
+    "advice": "давать в очень малых дозах",
+    "category": "специи"
+  },
+  {
+    "name": "Перец черный",
+    "allowed": false,
+    "why": {
+      "toxicity": "жгучие компоненты",
+      "effects": "раздражение слизистых, рвота",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасна даже щепотка",
+    "advice": "строгий запрет",
+    "category": "специи"
+  },
+  {
+    "name": "Куркума",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "мягкий противовоспалительный эффект",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет при малых дозах",
+    "advice": "использовать минимально",
+    "category": "специи"
+  },
+  {
+    "name": "Корица",
+    "allowed": false,
+    "why": {
+      "toxicity": "кумарин",
+      "effects": "повреждение печени",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасна даже чайная ложка",
+    "advice": "исключить в любых количествах",
+    "category": "специи"
+  },
+  {
+    "name": "Грибы шампиньоны",
+    "allowed": false,
+    "why": {
+      "toxicity": "сложность переваривания",
+      "effects": "вздутие, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже небольшие порции вредны",
+    "advice": "лучше полностью исключить",
+    "category": "грибы"
+  },
+  {
+    "name": "Белые грибы",
+    "allowed": false,
+    "why": {
+      "toxicity": "трудноперевариваемые волокна",
+      "effects": "расстройства ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "вред даже от малых доз",
+    "advice": "запрещено",
+    "category": "грибы"
+  },
+  {
+    "name": "Сушёные грибы",
+    "allowed": false,
+    "why": {
+      "toxicity": "высокая концентрация токсинов",
+      "effects": "тяжёлые отравления",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "очень опасны",
+    "advice": "держать подальше от животных",
+    "category": "грибы"
+  },
+  {
+    "name": "Колбаса варёная",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, специи, жиры",
+      "effects": "панкреатит, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже кусочек вреден",
+    "advice": "не давать",
+    "category": "мясные изделия"
+  },
+  {
+    "name": "Колбаса копчёная",
+    "allowed": false,
+    "why": {
+      "toxicity": "нитриты, специи, жиры",
+      "effects": "токсическое воздействие на ЖКТ и печень",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "очень опасно",
+    "advice": "строгий запрет",
+    "category": "мясные изделия"
+  },
+  {
+    "name": "Сосиски",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, специи, нитриты",
+      "effects": "расстройства пищеварения",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любое количество нежелательно",
+    "advice": "не давать",
+    "category": "мясные изделия"
+  },
+  {
+    "name": "Ветчина",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль и жир",
+      "effects": "нагрузка на поджелудочную",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны даже маленькие кусочки",
+    "advice": "исключить",
+    "category": "мясные изделия"
+  },
+  {
+    "name": "Тушёнка",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, жир",
+      "effects": "панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже чайная ложка вредна",
+    "advice": "не давать",
+    "category": "консервы"
+  },
+  {
+    "name": "Консервированный тунец",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, масло",
+      "effects": "расстройства ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасно даже понемногу",
+    "advice": "не давать тунец из банки",
+    "category": "консервы"
+  },
+  {
+    "name": "Шпроты",
+    "allowed": false,
+    "why": {
+      "toxicity": "копчение, соль",
+      "effects": "интоксикация",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая доза вредна",
+    "advice": "запрещено полностью",
+    "category": "консервы"
+  },
+  {
+    "name": "Гренки магазинные",
+    "allowed": false,
+    "why": {
+      "toxicity": "специи, усилители вкуса",
+      "effects": "расстройство ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны даже пара кусочков",
+    "advice": "не давать",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Чипсы",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, ароматизаторы, жир",
+      "effects": "панкреатит и интоксикация",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "1–2 чипсины уже вредны",
+    "advice": "категорически нельзя",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Сухарики",
+    "allowed": false,
+    "why": {
+      "toxicity": "специи, соль",
+      "effects": "диарея, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже маленькое количество вредно",
+    "advice": "не давать животным",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Соевое мясо",
+    "allowed": false,
+    "why": {
+      "toxicity": "антипитательные вещества",
+      "effects": "вздутие, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасно даже в малых дозах",
+    "advice": "исключить полностью",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Фастфуд (бургер, наггетсы)",
+    "allowed": false,
+    "why": {
+      "toxicity": "жир, специи, лук, чеснок",
+      "effects": "панкреатит, отравление",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая порция опасна",
+    "advice": "строгий запрет",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Пельмени",
+    "allowed": false,
+    "why": {
+      "toxicity": "специи, соль",
+      "effects": "отравление, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать ни в каком виде",
+    "advice": "исключить полностью",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Суши",
+    "allowed": false,
+    "why": {
+      "toxicity": "сырая рыба, специи, соевый соус",
+      "effects": "паразиты, интоксикация",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасны даже 1–2 кусочка",
+    "advice": "категорически нельзя",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Острая пища",
+    "allowed": false,
+    "why": {
+      "toxicity": "капсаицин",
+      "effects": "ожог слизистых, рвота",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "острое в любом количестве вредно",
+    "advice": "исключить",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Сухие корма для людей (сухпаёк)",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, специи, консерванты",
+      "effects": "интоксикация, обезвоживание",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "вредны даже малые дозы",
+    "advice": "не давать",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Изюм в выпечке",
+    "allowed": false,
+    "why": {
+      "toxicity": "токсин винограда",
+      "effects": "острая почечная недостаточность",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже кусочек выпечки опасен",
+    "advice": "держать недоступно",
+    "category": "сладости"
+  },
+  {
+    "name": "Шоколадная выпечка",
+    "allowed": false,
+    "why": {
+      "toxicity": "теобромин",
+      "effects": "те же риски, что и шоколад",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая доза токсична",
+    "advice": "категорический запрет",
+    "category": "сладости"
+  },
+  {
+    "name": "Авокадо",
+    "allowed": false,
+    "why": {
+      "toxicity": "персин",
+      "effects": "рвота, диарея, сердечные нарушения",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна даже небольшая порция мякоти",
+    "advice": "не давать, хранить недоступно",
+    "category": "фрукты"
+  },
+  {
+    "name": "Хурма",
+    "allowed": false,
+    "why": {
+      "toxicity": "высокое содержание танинов",
+      "effects": "кишечная непроходимость, комки в желудке",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "несколько кусочков могут привести к закупорке",
+    "advice": "полностью исключить",
+    "category": "фрукты"
+  },
+  {
+    "name": "Киви",
+    "allowed": false,
+    "why": {
+      "toxicity": "кислоты",
+      "effects": "аллергия, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "малые порции вызывают раздражение ЖКТ",
+    "advice": "лучше избегать",
+    "category": "фрукты"
+  },
+  {
+    "name": "Гранат",
+    "allowed": false,
+    "why": {
+      "toxicity": "высокая кислотность, много косточек",
+      "effects": "рвота, боль в животе",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны даже несколько зёрен",
+    "advice": "не давать животным",
+    "category": "фрукты"
+  },
+  {
+    "name": "Кокос",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "высокая жирность может вызвать диарею",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "давать не более чайной ложки мякоти",
+    "advice": "использовать как редкое лакомство",
+    "category": "фрукты"
+  },
+  {
+    "name": "Манго",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "много сахара",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "следить за стулом, давать маленькими кусочками",
+    "advice": "мякоть без косточки",
+    "category": "фрукты"
+  },
+  {
+    "name": "Папайя",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "может улучшать пищеварение",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "давать немного",
+    "advice": "удалять семена",
+    "category": "фрукты"
+  },
+  {
+    "name": "Лайм",
+    "allowed": false,
+    "why": {
+      "toxicity": "кислота",
+      "effects": "рвота, раздражение желудка",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже кусочек опасен",
+    "advice": "цитрусовые запрещены",
+    "category": "фрукты"
+  },
+  {
+    "name": "Лимон",
+    "allowed": false,
+    "why": {
+      "toxicity": "лимонная кислота",
+      "effects": "рвота, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "небольшой кусок может вызвать проблемы",
+    "advice": "не давать",
+    "category": "фрукты"
+  },
+  {
+    "name": "Чай зелёный",
+    "allowed": false,
+    "why": {
+      "toxicity": "кофеин",
+      "effects": "возбуждение, тахикардия",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "несколько глотков токсичны",
+    "advice": "не давать",
+    "category": "напитки"
+  },
+  {
+    "name": "Горький шоколад",
+    "allowed": false,
+    "why": {
+      "toxicity": "теобромин (в высокой концентрации)",
+      "effects": "судороги, аритмия",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "ещё опаснее, чем молочный шоколад",
+    "advice": "категорически нельзя",
+    "category": "токсичное"
+  },
+  {
+    "name": "Белый шоколад",
+    "allowed": false,
+    "why": {
+      "toxicity": "нет теобромина, но много жира",
+      "effects": "панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "жирность даёт угрозу панкреатита",
+    "advice": "не давать",
+    "category": "сладости"
+  },
+  {
+    "name": "Жирный бульон",
+    "allowed": false,
+    "why": {
+      "toxicity": "очень высокая жирность",
+      "effects": "панкреатит, рвота",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасно даже несколько ложек",
+    "advice": "использовать только нежирный бульон без соли",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Сырок глазированный",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, глазурь, жир",
+      "effects": "диарея, панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже малая порция вредна",
+    "advice": "не давать",
+    "category": "сладости"
+  },
+  {
+    "name": "Пюре фруктовое детское",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "мягкое воздействие на ЖКТ",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "не давать много из-за сахара",
+    "advice": "выбирать без сахара",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Пюре овощное детское",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "гипоаллергенный продукт",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "нет ограничений",
+    "advice": "отлично подходит как мягкий вариант",
+    "category": "готовая еда"
+  },
+  {
+    "name": "Острая приправа",
+    "allowed": false,
+    "why": {
+      "toxicity": "капсаицин, специи",
+      "effects": "ожог слизистых, рвота",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любое количество вредно",
+    "advice": "не давать",
+    "category": "специи"
+  },
+  {
+    "name": "Лавровый лист",
+    "allowed": false,
+    "why": {
+      "toxicity": "эфирные масла",
+      "effects": "рвота, раздражение ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже 1 лист может вызвать проблему",
+    "advice": "не давать животным",
+    "category": "специи"
+  },
+  {
+    "name": "Майоран",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "в малых дозах безопасен",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "перебор специй вызывает рвоту",
+    "advice": "использовать минимум",
+    "category": "специи"
+  },
+  {
+    "name": "Хлеб бородинский",
+    "allowed": false,
+    "why": {
+      "toxicity": "кислоты, дрожжи, специи",
+      "effects": "вздутие, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать в любом виде",
+    "advice": "не подходит для животных",
+    "category": "злаки"
+  },
+  {
+    "name": "Хлеб цельнозерновой",
+    "allowed": false,
+    "why": {
+      "toxicity": "растительная клетчатка тяжелая",
+      "effects": "газы и диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "даже маленькие куски нежелательны",
+    "advice": "исключить",
+    "category": "злаки"
+  },
+  {
+    "name": "Булка сладкая",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, дрожжи",
+      "effects": "диарея, аллергия",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любое количество вредно",
+    "advice": "не давать",
+    "category": "выпечка"
+  },
+  {
+    "name": "Круассаны",
+    "allowed": false,
+    "why": {
+      "toxicity": "жир, масло",
+      "effects": "панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасны даже маленькие куски",
+    "advice": "держать недоступно",
+    "category": "выпечка"
+  },
+  {
+    "name": "Пирожные",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, кремы",
+      "effects": "панкреатит, ожирение",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любое количество вредно",
+    "advice": "не давать",
+    "category": "выпечка"
+  },
+  {
+    "name": "Мармелад",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, красители",
+      "effects": "аллергии и диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "небольшие порции вредны",
+    "advice": "не давать",
+    "category": "сладости"
+  },
+  {
+    "name": "Желе",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, добавки",
+      "effects": "рвота и диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "любая доза нежелательна",
+    "advice": "не подходит для животных",
+    "category": "сладости"
+  },
+  {
+    "name": "Изотоники",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, сахара",
+      "effects": "электролитные нарушения",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "несколько глотков могут быть опасны",
+    "advice": "не давать",
+    "category": "напитки"
+  },
+  {
+    "name": "Антифриз (этиленгликоль)",
+    "allowed": false,
+    "why": {
+      "toxicity": "сильнейший нефротоксин",
+      "effects": "острая почечная недостаточность, смерть",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже несколько капель смертельно опасны",
+    "advice": "при малейшем подозрении — срочно в клинику",
+    "category": "бытовая химия"
+  },
+  {
+    "name": "Моющее средство",
+    "allowed": false,
+    "why": {
+      "toxicity": "ПАВ",
+      "effects": "ожоги слизистых, рвота",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "микродозы опасны",
+    "advice": "держать недоступно",
+    "category": "бытовая химия"
+  },
+  {
+    "name": "Отбеливатель",
+    "allowed": false,
+    "why": {
+      "toxicity": "хлор",
+      "effects": "тяжёлые химические ожоги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "капля опасна",
+    "advice": "немедленно обращаться в клинику",
+    "category": "бытовая химия"
+  },
+  {
+    "name": "Парацетамол",
+    "allowed": false,
+    "why": {
+      "toxicity": "опасно для печени",
+      "effects": "гепатотоксичность, смерть у кошек",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "1 таблетка смертельна",
+    "advice": "никогда не давать животным человеческие лекарства",
+    "category": "лекарства"
+  },
+  {
+    "name": "Ибупрофен",
+    "allowed": false,
+    "why": {
+      "toxicity": "нестероидный противовоспалительный",
+      "effects": "кровотечения ЖКТ, почечная недостаточность",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "1 таблетка крайне опасна",
+    "advice": "строгий запрет",
+    "category": "лекарства"
+  },
+  {
+    "name": "Но-шпа",
+    "allowed": false,
+    "why": {
+      "toxicity": "спазмолитик, токсичен для животных",
+      "effects": "падение давления, судороги",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая доза опасна",
+    "advice": "не давать животным",
+    "category": "лекарства"
+  },
+  {
+    "name": "Активированный уголь",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет",
+      "effects": "адсорбирует токсины",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "опасности нет",
+    "advice": "использовать только по рекомендации врача",
+    "category": "лекарства"
+  },
+  {
+    "name": "Имбирь",
+    "allowed": false,
+    "why": {
+      "toxicity": "сильные эфирные масла",
+      "effects": "раздражение желудка, рвота",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "опасен в сыром виде",
+    "advice": "не использовать",
+    "category": "специи"
+  },
+  {
+    "name": "Хрен",
+    "allowed": false,
+    "why": {
+      "toxicity": "горчичные масла",
+      "effects": "ожог слизистых",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже в очень малых дозах",
+    "advice": "держать недоступно",
+    "category": "специи"
+  },
+  {
+    "name": "Борщ",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, соль, специи, жирная зажарка",
+      "effects": "раздражение ЖКТ, рвота, диарея, риск анемии из-за лука/чеснока",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже несколько ложек нежелательны, особенно если есть лук или чеснок",
+    "advice": "не давать борщ питомцам; если съел много или есть рвота/слабость — связаться с ветеринаром",
+    "category": "готовые блюда",
+    "keywords": ["борщ", "суп со свеклой", "свекольный суп", "борщик"]
+  },
+  {
+    "name": "Щи",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, соль, специи, кислая капуста",
+      "effects": "газообразование, диарея, раздражение желудка",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не подходит как еда даже в малой порции",
+    "advice": "не давать; безопаснее предложить обычный рацион или разрешённый продукт без соли",
+    "category": "готовые блюда",
+    "keywords": ["щи", "суп из капусты", "капустный суп"]
+  },
+  {
+    "name": "Солянка",
+    "allowed": false,
+    "why": {
+      "toxicity": "копчёности, колбаса, соль, специи, лук, кислые добавки",
+      "effects": "панкреатит, рвота, диарея, нагрузка на печень и почки",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасна даже небольшая порция",
+    "advice": "не давать ни кошкам, ни собакам",
+    "category": "готовые блюда",
+    "keywords": ["солянка", "мясная солянка", "суп с колбасой"]
+  },
+  {
+    "name": "Куриный суп со стола",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, лук, специи, жирный бульон",
+      "effects": "расстройство пищеварения, рвота, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "обычный человеческий суп нежелателен даже понемногу",
+    "advice": "если нужен бульон, он должен быть без соли, лука, чеснока и специй",
+    "category": "готовые блюда",
+    "keywords": ["куриный суп", "суп с курицей", "бульон", "домашний суп"]
+  },
+  {
+    "name": "Гуляш",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, соль, специи, жирный соус",
+      "effects": "рвота, диарея, панкреатит, риск токсического действия лука",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "не подходит даже как лакомство",
+    "advice": "не давать; безопаснее отдельный кусочек отварного мяса без соли и соуса",
+    "category": "готовые блюда",
+    "keywords": ["гуляш", "мясо с подливой", "подлива", "тушеное мясо", "тушёное мясо"]
+  },
+  {
+    "name": "Котлеты",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, соль, специи, жареный жир",
+      "effects": "рвота, диарея, панкреатит, токсическое действие лука/чеснока",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже маленькая котлета нежелательна",
+    "advice": "не давать котлеты со стола; если нужен белок — только отварное мясо без соли и добавок",
+    "category": "готовые блюда",
+    "keywords": ["котлета", "котлеты", "мясные котлеты", "куриная котлета", "рыбная котлета", "фарш"]
+  },
+  {
+    "name": "Тефтели и фрикадельки",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, соль, специи, жирный соус",
+      "effects": "раздражение ЖКТ, рвота, диарея",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "домашние тефтели обычно небезопасны из-за добавок",
+    "advice": "не давать готовое блюдо; допустимо только простое отварное мясо без добавок",
+    "category": "готовые блюда",
+    "keywords": ["тефтели", "фрикадельки", "мясные шарики", "ежики", "ёжики"]
+  },
+  {
+    "name": "Плов",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, чеснок, соль, специи, жир",
+      "effects": "рвота, диарея, панкреатит",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "порция плова со стола опасна",
+    "advice": "не давать; отдельно рис без соли можно только понемногу",
+    "category": "готовые блюда",
+    "keywords": ["плов", "рис с мясом", "узбекский плов"]
+  },
+  {
+    "name": "Паста с соусом",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, чеснок, лук, специи, сыр, сливочный или томатный соус",
+      "effects": "расстройство ЖКТ, рвота, диарея, риск панкреатита",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "обычная паста с соусом не подходит питомцам",
+    "advice": "не давать пасту с соусом; простые макароны без соли допустимы только редко и понемногу",
+    "category": "готовые блюда",
+    "keywords": ["паста", "спагетти", "карбонара", "болоньезе", "макароны с соусом", "лапша с соусом"]
+  },
+  {
+    "name": "Макароны по-флотски",
+    "allowed": false,
+    "why": {
+      "toxicity": "лук, соль, специи, жирный фарш",
+      "effects": "диарея, рвота, панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не давать как еду или лакомство",
+    "advice": "лучше выбрать отдельное отварное мясо без соли и добавок",
+    "category": "готовые блюда",
+    "keywords": ["макароны по-флотски", "макароны с фаршем", "паста с фаршем"]
+  },
+  {
+    "name": "Картофельное пюре со стола",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, масло, молоко, сливки",
+      "effects": "диарея, рвота, набор веса, раздражение ЖКТ",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "обычное пюре со стола нежелательно даже понемногу",
+    "advice": "если давать картофель, то только простой варёный без соли, масла и молока",
+    "category": "готовые блюда",
+    "keywords": ["пюре", "картофельное пюре", "толченка", "толчёнка", "картошка пюре"]
+  },
+  {
+    "name": "Жареная картошка",
+    "allowed": false,
+    "why": {
+      "toxicity": "жир, соль, специи, иногда лук",
+      "effects": "рвота, диарея, панкреатит",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "жареная еда со стола не подходит питомцам",
+    "advice": "не давать; безопаснее простой варёный картофель без соли и масла",
+    "category": "готовые блюда",
+    "keywords": ["жареная картошка", "картошка жареная", "картофель жареный", "фри", "картошка фри"]
+  },
+  {
+    "name": "Оливье",
+    "allowed": false,
+    "why": {
+      "toxicity": "майонез, колбаса, соль, лук, маринованные продукты",
+      "effects": "рвота, диарея, панкреатит, нагрузка на печень",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "не давать даже маленькую ложку",
+    "advice": "держать салат недоступно, особенно в праздники",
+    "category": "готовые блюда",
+    "keywords": ["оливье", "салат оливье", "новогодний салат"]
+  },
+  {
+    "name": "Винегрет",
+    "allowed": false,
+    "why": {
+      "toxicity": "соль, маринованные огурцы, лук, масло",
+      "effects": "раздражение ЖКТ, диарея, жажда",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "готовый винегрет со стола нежелателен",
+    "advice": "не давать; отдельные варёные овощи без соли можно обсуждать отдельно",
+    "category": "готовые блюда",
+    "keywords": ["винегрет", "салат винегрет", "свекольный салат"]
+  },
+  {
+    "name": "Салат с майонезом",
+    "allowed": false,
+    "why": {
+      "toxicity": "майонез, соль, специи, лук, колбаса или копчёности",
+      "effects": "рвота, диарея, панкреатит",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "любая порция нежелательна",
+    "advice": "не давать салаты с майонезом, соусами и солёными добавками",
+    "category": "готовые блюда",
+    "keywords": ["салат", "майонезный салат", "салат с майонезом", "крабовый салат", "мимоза", "селедка под шубой", "сельдь под шубой"]
+  },
+  {
+    "name": "Шаурма",
+    "allowed": false,
+    "why": {
+      "toxicity": "соусы, чеснок, лук, специи, соль, жир",
+      "effects": "рвота, диарея, панкреатит",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "даже небольшой кусок может навредить",
+    "advice": "не давать; держать упаковку и остатки недоступно",
+    "category": "готовые блюда",
+    "keywords": ["шаурма", "шаверма", "лаваш с мясом", "донер", "гирос"]
+  },
+  {
+    "name": "Блины и оладьи",
+    "allowed": false,
+    "why": {
+      "toxicity": "сахар, соль, масло, молоко, начинка",
+      "effects": "диарея, рвота, набор веса, обострение панкреатита",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "человеческие блины не подходят как лакомство",
+    "advice": "не давать блины с начинками, маслом, сметаной, сгущёнкой или сахаром",
+    "category": "готовые блюда",
+    "keywords": ["блины", "оладьи", "панкейки", "блинчики", "сырники"]
+  },
+  {
+    "name": "Гречневая каша на воде",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет, если без соли, масла и специй",
+      "effects": "обычно переносится нормально, но не заменяет полноценный рацион",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "переедание может вызвать расстройство пищеварения",
+    "advice": "можно немного только без соли, масла, молока и соусов",
+    "category": "готовые блюда",
+    "keywords": ["гречневая каша", "гречка на воде", "каша гречневая", "гречка без соли"]
+  },
+  {
+    "name": "Рисовая каша на воде",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет, если без соли, масла и специй",
+      "effects": "может временно помочь при чувствительном ЖКТ, но не является полноценным рационом",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "слишком много риса может закреплять стул",
+    "advice": "давать небольшими порциями, без соли, масла, молока и сахара",
+    "category": "готовые блюда",
+    "keywords": ["рисовая каша", "рис на воде", "каша рисовая", "рис без соли"]
+  },
+  {
+    "name": "Зелень свежая",
+    "allowed": true,
+    "why": {
+      "toxicity": "нет для укропа и петрушки в малом количестве",
+      "effects": "обычно безопасна как небольшая добавка, но не всем питомцам нравится и подходит",
+      "risk_level": "низкий"
+    },
+    "how_much_is_dangerous": "большие пучки могут вызвать рвоту или диарею",
+    "advice": "можно совсем немного укропа или петрушки; зелёный лук, щавель и пряные травы лучше не давать",
+    "category": "зелень",
+    "keywords": ["зелень", "укроп", "петрушка", "травы", "свежая зелень"]
+  },
+  {
+    "name": "Зелёный лук",
+    "allowed": false,
+    "why": {
+      "toxicity": "соединения лука",
+      "effects": "риск анемии, рвоты, слабости, расстройства ЖКТ",
+      "risk_level": "высокий"
+    },
+    "how_much_is_dangerous": "опасен даже в небольшом количестве, особенно для кошек",
+    "advice": "не давать и не оставлять блюда с зелёным луком в доступе",
+    "category": "зелень",
+    "keywords": ["зеленый лук", "зелёный лук", "лук перо", "перья лука", "лук зеленый", "лук зелёный"]
+  },
+  {
+    "name": "Щавель",
+    "allowed": false,
+    "why": {
+      "toxicity": "оксалаты и высокая кислотность",
+      "effects": "раздражение ЖКТ, риск проблем у животных с почками или мочевыводящей системой",
+      "risk_level": "средний"
+    },
+    "how_much_is_dangerous": "не использовать как добавку к рациону",
+    "advice": "не давать щавель и блюда с ним",
+    "category": "зелень",
+    "keywords": ["щавель", "щавелевый суп", "зелёный борщ", "зеленый борщ"]
+  }
+]
