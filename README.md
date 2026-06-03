@@ -12,7 +12,7 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - Telegram login placeholder.
 - MAX deep-link login with webhook and local polling support.
 - SQLite schema for web users, auth challenges, sessions, and external account links.
-- Deployment notes for VPS + nginx.
+- Production deployment notes for VPS + nginx.
 
 ## Local Run
 
@@ -47,7 +47,7 @@ For local development without a public HTTPS webhook, run polling in a second te
 .venv/bin/python scripts/max_poll.py
 ```
 
-Production should use `POST /api/webhooks/max` behind HTTPS and set `MAX_WEBHOOK_SECRET`.
+Production uses `POST /api/webhooks/max` behind HTTPS and requires `MAX_WEBHOOK_SECRET`.
 
 ## GitHub
 
@@ -68,11 +68,12 @@ git push -u origin main
 
 - `docs/ROADMAP.md`: implementation stages and priorities.
 - `docs/DEPLOYMENT.md`: local run, environment variables, Docker, production checklist.
+- `docs/PRODUCTION.md`: live VPS layout, domains, services, and health checks.
 
 ## Next Steps
 
 1. Add SMTP provider for production email login.
-2. Add MAX bot token and deep-link login after moderation.
+2. Connect product APIs: pets, triage, food, subscription, payment.
 3. Add Telegram bot deep-link login as optional channel.
-4. Connect product APIs: pets, triage, food, subscription, payment.
-5. Deploy behind HTTPS.
+4. Add backups and monitoring for the PWA SQLite database.
+5. Replace the temporary MVP screens with the full product flows.

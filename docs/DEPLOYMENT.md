@@ -46,3 +46,5 @@ The app listens on port `8080` by default.
 - Configure MAX webhook after the PWA is available over HTTPS.
 - Back up the SQLite database or switch to Postgres before active marketing traffic.
 - Add monitoring for 5xx errors and failed auth attempts.
+
+See `docs/PRODUCTION.md` for the current live VPS layout.
