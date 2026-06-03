@@ -130,6 +130,15 @@ def consume_challenge(db_path: Path, challenge_id: int) -> None:
         conn.commit()
 
 
+def update_challenge_payload(db_path: Path, challenge_id: int, payload: str) -> None:
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            "UPDATE auth_challenges SET payload = ? WHERE id = ? AND consumed_at IS NULL",
+            (payload, int(challenge_id)),
+        )
+        conn.commit()
+
+
 def get_or_create_user_by_email(db_path: Path, email: str) -> dict[str, Any]:
     email = email.strip().lower()
     now = utc_now_iso()
@@ -148,6 +157,50 @@ def get_or_create_user_by_email(db_path: Path, email: str) -> dict[str, Any]:
         )
         conn.commit()
         cur.execute("SELECT * FROM users WHERE id = ?", (int(cur.lastrowid),))
+        return dict(cur.fetchone())
+
+
+def get_or_create_user_by_external_account(
+    db_path: Path,
+    *,
+    provider: str,
+    provider_user_id: str,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT u.*
+            FROM external_accounts a
+            JOIN users u ON u.id = a.user_id
+            WHERE a.provider = ? AND a.provider_user_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_user_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+
+        cur.execute(
+            """
+            INSERT INTO users (name, created_at, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (display_name, now, now),
+        )
+        user_id = int(cur.lastrowid)
+        cur.execute(
+            """
+            INSERT INTO external_accounts (user_id, provider, provider_user_id, display_name, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, provider, provider_user_id, display_name, now),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         return dict(cur.fetchone())
 
 

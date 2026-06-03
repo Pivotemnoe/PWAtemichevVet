@@ -18,6 +18,7 @@ REQUIRED_FILES = (
     "web/manifest.webmanifest",
     "web/sw.js",
     "web/assets/icon.svg",
+    "scripts/max_poll.py",
 )
 
 
@@ -31,7 +32,12 @@ def main() -> None:
         raise SystemExit("manifest does not contain app name")
 
     js = (ROOT / "web/app.js").read_text(encoding="utf-8")
-    for endpoint in ("/api/auth/email/start", "/api/auth/email/verify", "/api/auth/${provider}/start"):
+    for endpoint in (
+        "/api/auth/email/start",
+        "/api/auth/email/verify",
+        "/api/auth/${provider}/start",
+        "/api/auth/max/status",
+    ):
         if endpoint not in js:
             raise SystemExit(f"frontend does not reference {endpoint}")
 

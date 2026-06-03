@@ -10,6 +10,7 @@
 ## Stage 2: Messenger login
 
 - Enable MAX login after bot moderation and token issue.
+- Use local MAX polling for development and HTTPS webhook for production.
 - Add Telegram login as an optional channel for users who can access it.
 - Link external messenger accounts to the same PWA user profile.
 

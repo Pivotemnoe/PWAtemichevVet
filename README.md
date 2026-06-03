@@ -9,7 +9,8 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - FastAPI backend.
 - Static installable PWA frontend.
 - Email one-time-code login.
-- Telegram and MAX login placeholders.
+- Telegram login placeholder.
+- MAX deep-link login with webhook and local polling support.
 - SQLite schema for web users, auth challenges, sessions, and external account links.
 - Deployment notes for VPS + nginx.
 
@@ -30,6 +31,23 @@ http://127.0.0.1:8080
 ```
 
 In development mode the email auth code is returned in the API response so the flow can be tested without SMTP.
+
+## MAX Login
+
+Set these values in `.env`:
+
+```text
+MAX_BOT_USERNAME=id230210303969_bot
+MAX_BOT_TOKEN=...
+```
+
+For local development without a public HTTPS webhook, run polling in a second terminal:
+
+```bash
+.venv/bin/python scripts/max_poll.py
+```
+
+Production should use `POST /api/webhooks/max` behind HTTPS and set `MAX_WEBHOOK_SECRET`.
 
 ## GitHub
 

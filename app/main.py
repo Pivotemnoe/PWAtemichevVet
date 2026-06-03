@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from app import db
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
+from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
 
 
@@ -50,7 +51,15 @@ class ProviderStartResponse(BaseModel):
     enabled: bool
     provider: str
     url: str | None = None
+    state: str | None = None
     message: str
+
+
+class ProviderStatusResponse(BaseModel):
+    status: str
+    message: str | None = None
+    token: str | None = None
+    user: dict | None = None
 
 
 class TriageRequest(BaseModel):
@@ -93,7 +102,7 @@ def health() -> dict:
 def public_config() -> dict:
     return {
         "telegram_enabled": bool(settings.telegram_bot_username),
-        "max_enabled": bool(settings.max_bot_username),
+        "max_enabled": bool(settings.max_bot_username and settings.max_bot_token),
         "email_enabled": True,
     }
 
@@ -159,19 +168,38 @@ def auth_telegram_start() -> ProviderStartResponse:
 
 @app.post("/api/auth/max/start", response_model=ProviderStartResponse)
 def auth_max_start() -> ProviderStartResponse:
-    if not settings.max_bot_username:
+    if not settings.max_bot_username or not settings.max_bot_token:
         return ProviderStartResponse(
             enabled=False,
             provider="max",
-            message="Вход через MAX будет доступен после модерации и токена бота.",
+            message="Вход через MAX будет доступен после настройки имени и токена бота.",
         )
-    token = make_token()[:24]
+    state, url = create_max_login_challenge(settings)
     return ProviderStartResponse(
         enabled=True,
         provider="max",
-        url=f"https://max.ru/{settings.max_bot_username}?start=web_auth_{token}",
-        message="Откройте MAX-бота и подтвердите вход.",
+        url=url,
+        state=state,
+        message="Откройте MAX-бота и нажмите старт, чтобы подтвердить вход.",
     )
+
+
+@app.get("/api/auth/max/status", response_model=ProviderStatusResponse)
+def auth_max_status(state: str) -> ProviderStatusResponse:
+    result = complete_max_login(settings, state)
+    return ProviderStatusResponse(**result)
+
+
+@app.post("/api/webhooks/max")
+async def max_webhook(
+    request: Request,
+    x_max_bot_api_secret: Annotated[str | None, Header()] = None,
+) -> dict:
+    if settings.max_webhook_secret and x_max_bot_api_secret != settings.max_webhook_secret:
+        raise HTTPException(status_code=403, detail="invalid_webhook_secret")
+    update = await request.json()
+    result = process_max_update(settings, update)
+    return {"ok": True, **result}
 
 
 @app.get("/api/me")

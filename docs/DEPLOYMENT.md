@@ -26,6 +26,8 @@ Copy `.env.example` to `.env` and set values:
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS`: email delivery settings.
 - `TELEGRAM_BOT_USERNAME`: optional Telegram login provider.
 - `MAX_BOT_USERNAME`, `MAX_BOT_TOKEN`: MAX login provider after moderation.
+- `MAX_API_BASE_URL`: MAX Bot API base URL. Default: `https://botapi.max.ru`.
+- `MAX_WEBHOOK_SECRET`: secret checked by `POST /api/webhooks/max` in production.
 
 ## Docker
 
@@ -41,5 +43,6 @@ The app listens on port `8080` by default.
 - Keep `.env` out of git.
 - Disable `DEV_AUTH_CODE_LOG`.
 - Configure real SMTP before public login.
+- Configure MAX webhook after the PWA is available over HTTPS.
 - Back up the SQLite database or switch to Postgres before active marketing traffic.
 - Add monitoring for 5xx errors and failed auth attempts.

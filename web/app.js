@@ -1,6 +1,7 @@
 const state = {
   token: localStorage.getItem("tvv_token") || "",
-  deferredInstall: null
+  deferredInstall: null,
+  maxPollTimer: null
 };
 
 const authView = document.querySelector("#authView");
@@ -93,6 +94,11 @@ async function startMessenger(provider) {
     const data = await api(`/api/auth/${provider}/start`, { method: "POST", body: "{}" });
     messengerHint.textContent = data.message;
     if (data.enabled && data.url) {
+      if (provider === "max" && data.state) {
+        window.open(data.url, "_blank", "noopener");
+        pollMaxLogin(data.state);
+        return;
+      }
       window.location.href = data.url;
     }
   } catch (error) {
@@ -100,10 +106,47 @@ async function startMessenger(provider) {
   }
 }
 
+function stopMaxPolling() {
+  if (state.maxPollTimer) {
+    clearTimeout(state.maxPollTimer);
+    state.maxPollTimer = null;
+  }
+}
+
+async function pollMaxLogin(loginState, attempt = 0) {
+  stopMaxPolling();
+  if (attempt > 60) {
+    messengerHint.textContent = "MAX-вход не подтвержден. Попробуйте нажать кнопку ещё раз.";
+    return;
+  }
+  try {
+    const data = await api(`/api/auth/max/status?state=${encodeURIComponent(loginState)}`, {
+      method: "GET"
+    });
+    if (data.status === "complete" && data.token) {
+      state.token = data.token;
+      localStorage.setItem("tvv_token", data.token);
+      messengerHint.textContent = "MAX-вход подтвержден.";
+      setAuthMode(true);
+      stopMaxPolling();
+      return;
+    }
+    if (data.status === "expired") {
+      messengerHint.textContent = data.message || "Код входа истек. Нажмите MAX ещё раз.";
+      return;
+    }
+    messengerHint.textContent = data.message || "Ожидаем подтверждение в MAX...";
+  } catch (error) {
+    messengerHint.textContent = `Ошибка: ${error.message}`;
+  }
+  state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
+}
+
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
 
 logoutBtn.addEventListener("click", () => {
+  stopMaxPolling();
   localStorage.removeItem("tvv_token");
   state.token = "";
   setAuthMode(false);
