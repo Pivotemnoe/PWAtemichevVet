@@ -44,11 +44,11 @@ textarea {
 }
 
 .topbar {
-  height: 72px;
+  height: 86px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
+  justify-content: center;
+  padding: 0 82px;
   background: #fff;
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -60,16 +60,25 @@ textarea {
   display: flex;
   align-items: center;
   gap: 12px;
+  justify-content: center;
+}
+
+.brand img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
 }
 
 .brand-name {
   font-weight: 800;
-  font-size: 18px;
+  font-size: 24px;
+  line-height: 1.05;
 }
 
 .brand-subtitle {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .icon-button {
@@ -80,6 +89,11 @@ textarea {
   background: var(--surface);
   color: var(--blue);
   font-size: 22px;
+}
+
+.topbar .icon-button {
+  position: absolute;
+  right: 20px;
 }
 
 main {
@@ -106,7 +120,7 @@ main {
 .intro-panel {
   min-height: 260px;
   display: grid;
-  padding: 30px;
+  padding: 34px;
 }
 
 .intro-logo {
@@ -151,9 +165,40 @@ p {
 }
 
 .product-hero {
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
-  gap: 28px;
+  grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
+  gap: 30px 34px;
   align-items: center;
+}
+
+.hero-brandmark {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  width: fit-content;
+  margin: 0 auto 2px;
+  padding: 0 18px 6px;
+}
+
+.hero-brand-logo {
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+}
+
+.hero-brand-name {
+  font-size: 36px;
+  line-height: 1;
+  font-weight: 900;
+  color: var(--text);
+}
+
+.hero-brand-subtitle {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 800;
 }
 
 .hero-copy {
@@ -167,16 +212,19 @@ p {
 .hero-media {
   display: grid;
   align-items: center;
+  justify-items: stretch;
 }
 
 .hero-media img {
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 4 / 3;
+  max-height: 390px;
   object-fit: contain;
   object-position: center;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: #fff;
+  padding: 10px;
 }
 
 .hero-actions {
@@ -873,7 +921,29 @@ textarea:focus {
 
 @media (max-width: 760px) {
   .topbar {
-    height: 64px;
+    height: 74px;
+    padding: 0 62px;
+  }
+
+  .brand {
+    gap: 9px;
+  }
+
+  .brand img {
+    width: 44px;
+    height: 44px;
+  }
+
+  .brand-name {
+    font-size: 20px;
+  }
+
+  .brand-subtitle {
+    font-size: 13px;
+  }
+
+  .topbar .icon-button {
+    right: 12px;
   }
 
   main {
@@ -883,6 +953,27 @@ textarea:focus {
   .intro-panel {
     min-height: auto;
     padding: 20px;
+  }
+
+  .hero-brandmark {
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding: 0 0 4px;
+    text-align: center;
+  }
+
+  .hero-brand-logo {
+    width: 92px;
+    height: 92px;
+  }
+
+  .hero-brand-name {
+    font-size: 30px;
+  }
+
+  .hero-brand-subtitle {
+    font-size: 15px;
   }
 
   h1 {
@@ -913,6 +1004,11 @@ textarea:focus {
 
   .content-section {
     padding: 20px;
+  }
+
+  .hero-media img {
+    max-height: 330px;
+    padding: 6px;
   }
 
   .feature-card,
