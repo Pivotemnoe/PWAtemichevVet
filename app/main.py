@@ -150,7 +150,14 @@ def _normalize_email(email: str) -> str:
 
 
 def _email_delivery_enabled() -> bool:
-    return bool(settings.smtp_host) or (settings.dev_auth_code_log and settings.app_env != "production")
+    if settings.dev_auth_code_log and settings.app_env != "production":
+        return True
+    return bool(
+        settings.smtp_host
+        and settings.smtp_username
+        and settings.smtp_password
+        and settings.smtp_from_email
+    )
 
 
 def _parse_iso_dt(value: str | None):
