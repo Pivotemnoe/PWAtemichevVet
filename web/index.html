@@ -7,7 +7,7 @@
     <title>TemichevVet</title>
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260604-auth-bridge-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260604-landing-service-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -29,23 +29,21 @@
           <div class="intro-panel product-hero">
             <div class="hero-copy">
               <img src="/static/assets/logo_temichevvet.jpg" alt="" class="intro-logo brand-logo-large" />
-              <p class="section-label">Личный кабинет и быстрые проверки</p>
+              <p class="section-label">Сервис для владельцев собак и кошек</p>
               <h1>TemichevVet — быстрый помощник, когда питомцу плохо</h1>
               <p class="lead">
-                Опишите симптомы питомца простыми словами — сервис оценит срочность ситуации,
-                сохранит разбор в истории и подскажет понятные следующие шаги.
+                Опишите симптомы питомца простыми словами — сервис поможет оценить срочность
+                ситуации, сохранить разбор в истории и понять, что делать дальше.
               </p>
               <div class="hero-actions">
                 <button class="primary-link" id="openAuthBtn" type="button">Войти в кабинет</button>
-                <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-бота</a>
+                <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-версию</a>
               </div>
-              <ul class="feature-list" aria-label="Возможности TemichevVet">
-                <li>вести карточки собак и кошек;</li>
-                <li>сохранять историю жалоб, наблюдения и вес;</li>
-                <li>создавать напоминания о вакцинации, обработках и осмотрах;</li>
-                <li>проверять продукты и готовые блюда по питанию;</li>
-                <li>пользоваться через сайт, PWA-приложение или Telegram-бота.</li>
-              </ul>
+              <div class="trust-row" aria-label="Ключевые преимущества сервиса">
+                <span>25 лет ветеринарного опыта в основе логики</span>
+                <span>Для собак и кошек</span>
+                <span>Сайт, PWA, Telegram и MAX-вход</span>
+              </div>
               <p class="care-note">
                 Важно: TemichevVet не ставит диагноз и не назначает лечение. Он помогает быстрее
                 сориентироваться и вовремя обратиться в клинику при тревожных признаках.
@@ -55,6 +53,103 @@
               <img src="/static/assets/triage_banner.jpg" alt="Проверка срочности состояния питомца" />
             </div>
           </div>
+
+          <section class="content-section service-summary" aria-labelledby="serviceSummaryTitle">
+            <div>
+              <p class="section-label">Что это за сервис</p>
+              <h2 id="serviceSummaryTitle">Личный кабинет здоровья питомца и быстрые проверки в одном месте</h2>
+            </div>
+            <p>
+              TemichevVet помогает владельцу не теряться, когда с собакой или кошкой что-то происходит:
+              фиксирует симптомы, показывает уровень срочности, сохраняет историю по каждому питомцу
+              и напоминает о важных процедурах. Логика сервиса собрана на базе практического
+              ветеринарного опыта и адаптирована под понятный язык владельца.
+            </p>
+          </section>
+
+          <section class="content-section" aria-labelledby="serviceCanTitle">
+            <div class="section-head">
+              <p class="section-label">Возможности</p>
+              <h2 id="serviceCanTitle">Что умеет TemichevVet</h2>
+            </div>
+            <div class="feature-card-grid">
+              <article class="feature-card">
+                <strong>Проверка жалобы</strong>
+                <p>Вы описываете, что происходит с питомцем, а сервис разделяет ситуацию на понятные уровни: можно наблюдать, нужна консультация или срочно в клинику.</p>
+              </article>
+              <article class="feature-card">
+                <strong>История здоровья</strong>
+                <p>Разборы, наблюдения, вес и заметки сохраняются по конкретному питомцу, чтобы не искать важные детали в переписках и памяти.</p>
+              </article>
+              <article class="feature-card">
+                <strong>Карточки питомцев</strong>
+                <p>Можно вести данные собак и кошек: возраст, вес, породу, особенности и основные события здоровья.</p>
+              </article>
+              <article class="feature-card">
+                <strong>Напоминания</strong>
+                <p>Сервис помогает не забывать вакцинацию, обработки от паразитов, плановые осмотры, груминг и другие процедуры.</p>
+              </article>
+              <article class="feature-card">
+                <strong>Питание</strong>
+                <p>Можно проверить отдельный продукт или готовое блюдо: сервис объяснит, можно ли давать его питомцу и на что обратить внимание.</p>
+              </article>
+              <article class="feature-card">
+                <strong>Подписка и лимиты</strong>
+                <p>Личный кабинет показывает текущий тариф, доступные разборы и возможности Plus без лишней путаницы.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="content-section service-flow" aria-labelledby="serviceFlowTitle">
+            <div class="flow-copy">
+              <p class="section-label">Как это работает</p>
+              <h2 id="serviceFlowTitle">От симптома до понятного следующего шага</h2>
+              <ol class="step-list">
+                <li><strong>Опишите проблему.</strong> Например: “кошка не ест второй день”, “собака хромает”, “была рвота после еды”.</li>
+                <li><strong>Получите оценку срочности.</strong> Сервис отдельно выделяет тревожные признаки, при которых нельзя ждать.</li>
+                <li><strong>Сохраните событие.</strong> Разбор остаётся в истории питомца, чтобы видеть динамику и показать детали врачу.</li>
+                <li><strong>Продолжайте наблюдение.</strong> Добавляйте вес, заметки и напоминания по процедурам.</li>
+              </ol>
+            </div>
+            <div class="flow-media">
+              <img src="/static/assets/onb_step1_add_pet.jpg" alt="Карточка питомца в TemichevVet" />
+            </div>
+          </section>
+
+          <section class="content-section channel-section" aria-labelledby="channelsTitle">
+            <div class="section-head">
+              <p class="section-label">Где пользоваться</p>
+              <h2 id="channelsTitle">Один сервис — несколько удобных входов</h2>
+              <p>Аккаунт должен быть общим: сайт, PWA и мессенджеры будут связываться между собой, чтобы не создавать две регистрации и две оплаты.</p>
+            </div>
+            <div class="channel-grid">
+              <article class="channel-card">
+                <strong>Сайт и PWA</strong>
+                <p>Подходит для телефона, ноутбука и компьютера. PWA можно установить как приложение и открыть по ссылке.</p>
+              </article>
+              <article class="channel-card">
+                <strong>Telegram-версия</strong>
+                <p>Уже доступна для тех, кому удобно работать в Telegram: разборы, питомцы, напоминания и подписка.</p>
+                <a href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-версию</a>
+              </article>
+              <article class="channel-card">
+                <strong>MAX</strong>
+                <p>MAX сейчас используется как способ подтверждения входа. Полноценная MAX-версия сервиса будет развиваться отдельно.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="content-section safety-section" aria-labelledby="safetyTitle">
+            <div>
+              <p class="section-label">Медицинская безопасность</p>
+              <h2 id="safetyTitle">Когда нельзя ждать ответа сервиса</h2>
+            </div>
+            <p>
+              Если у питомца тяжёлое дыхание, судороги, потеря сознания, признаки отравления,
+              сильное кровотечение, невозможность мочиться, резкое вздутие живота или быстрое
+              ухудшение состояния — нужно срочно обращаться в ветеринарную клинику.
+            </p>
+          </section>
 
           <div class="auth-dialog" id="authDialog" hidden role="dialog" aria-modal="true" aria-labelledby="authDialogTitle">
             <div class="auth-card">
@@ -159,6 +254,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260604-auth-bridge-2" type="module"></script>
+    <script src="/static/app.js?v=20260604-landing-service-1" type="module"></script>
   </body>
 </html>
