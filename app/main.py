@@ -24,7 +24,15 @@ from app.medical_safety import detect_red_flags, render_red_flag_response
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
 from app.subscriptions import get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
-from app.telegram_sync import sync_triage_to_telegram
+from app.telegram_sync import (
+    sync_pwa_measurement_to_telegram,
+    sync_pwa_observation_to_telegram,
+    sync_pwa_pet_to_telegram,
+    sync_pwa_reminder_deactivation,
+    sync_pwa_reminder_to_telegram,
+    sync_telegram_profile_to_pwa,
+    sync_triage_to_telegram,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -259,6 +267,54 @@ def _safe_sync_triage_to_telegram(**kwargs) -> dict:
         return sync_triage_to_telegram(settings, **kwargs)
     except Exception as exc:
         logger.warning("PWA triage Telegram sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_telegram_profile_to_pwa(user: dict) -> dict:
+    try:
+        return sync_telegram_profile_to_pwa(settings, user)
+    except Exception as exc:
+        logger.warning("Telegram to PWA profile sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_pet_to_telegram(user: dict, pet: dict) -> dict:
+    try:
+        return sync_pwa_pet_to_telegram(settings, pwa_user=user, pet=pet)
+    except Exception as exc:
+        logger.warning("PWA pet Telegram sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_reminder_to_telegram(user: dict, reminder: dict) -> dict:
+    try:
+        return sync_pwa_reminder_to_telegram(settings, pwa_user=user, reminder=reminder)
+    except Exception as exc:
+        logger.warning("PWA reminder Telegram sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_reminder_deactivation(user: dict, reminder_id: int) -> dict:
+    try:
+        return sync_pwa_reminder_deactivation(settings, pwa_user=user, reminder_id=reminder_id)
+    except Exception as exc:
+        logger.warning("PWA reminder Telegram deactivation failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_observation_to_telegram(user: dict, observation: dict) -> dict:
+    try:
+        return sync_pwa_observation_to_telegram(settings, pwa_user=user, observation=observation)
+    except Exception as exc:
+        logger.warning("PWA observation Telegram sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_measurement_to_telegram(user: dict, measurement: dict) -> dict:
+    try:
+        return sync_pwa_measurement_to_telegram(settings, pwa_user=user, measurement=measurement)
+    except Exception as exc:
+        logger.warning("PWA measurement Telegram sync failed: %s", exc)
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -518,15 +574,18 @@ async def max_webhook(
 
 @app.get("/api/me")
 def me(user: dict = Depends(current_user)) -> dict:
+    telegram_profile_sync = _safe_sync_telegram_profile_to_pwa(user)
     return {
         "user": user,
         "external_accounts": db.list_external_accounts(settings.database_path, user_id=int(user["id"])),
         "subscription": get_effective_subscription(settings, user).to_public(),
+        "telegram_profile_sync": telegram_profile_sync,
     }
 
 
 @app.get("/api/pets")
 def pets(user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     items = [_pet_public(pet) for pet in db.list_pets(settings.database_path, owner_id=int(user["id"]))]
     return {"items": items}
 
@@ -547,11 +606,14 @@ def create_pet(payload: PetPayload, user: dict = Depends(current_user)) -> dict:
         breed=_clean_optional_text(payload.breed),
         is_main=payload.is_main,
     )
+    _safe_sync_pwa_pet_to_telegram(user, pet)
+    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=int(pet["id"])) or pet
     return {"item": _pet_public(pet)}
 
 
 @app.get("/api/pets/{pet_id}")
 def get_pet(pet_id: int, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id)
     if not pet:
         raise HTTPException(status_code=404, detail="pet_not_found")
@@ -601,6 +663,8 @@ def update_pet(pet_id: int, payload: PetPatchPayload, user: dict = Depends(curre
     pet = db.update_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, values=values)
     if not pet:
         raise HTTPException(status_code=404, detail="pet_not_found")
+    _safe_sync_pwa_pet_to_telegram(user, pet)
+    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id) or pet
     return {"item": _pet_public(pet)}
 
 
@@ -609,6 +673,7 @@ def set_main_pet(pet_id: int, payload: MainPetPayload, user: dict = Depends(curr
     pet = db.set_main_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, is_main=payload.is_main)
     if not pet:
         raise HTTPException(status_code=404, detail="pet_not_found")
+    _safe_sync_pwa_pet_to_telegram(user, pet)
     return {"item": _pet_public(pet)}
 
 
@@ -621,6 +686,7 @@ def delete_pet(pet_id: int, user: dict = Depends(current_user)) -> dict:
 
 @app.get("/api/pets/{pet_id}/history")
 def pet_history(pet_id: int, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_history(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
         raise HTTPException(status_code=404, detail="pet_not_found")
@@ -629,6 +695,7 @@ def pet_history(pet_id: int, user: dict = Depends(current_user)) -> dict:
 
 @app.get("/api/pets/{pet_id}/weights")
 def pet_weights(pet_id: int, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_measurements(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
         raise HTTPException(status_code=404, detail="pet_not_found")
@@ -646,11 +713,13 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, user: dict = Depend
     )
     if not item:
         raise HTTPException(status_code=404, detail="pet_not_found")
+    _safe_sync_pwa_measurement_to_telegram(user, item)
     return {"item": item}
 
 
 @app.get("/api/pets/{pet_id}/observations")
 def pet_observations(pet_id: int, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_observations(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
         raise HTTPException(status_code=404, detail="pet_not_found")
@@ -669,11 +738,13 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, user: dict = D
     )
     if not item:
         raise HTTPException(status_code=404, detail="pet_not_found")
+    _safe_sync_pwa_observation_to_telegram(user, item)
     return {"item": _parse_json_payload(item)}
 
 
 @app.get("/api/reminders")
 def reminders(user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     return {"items": db.list_reminders(settings.database_path, owner_id=int(user["id"])) or []}
 
 
@@ -692,11 +763,13 @@ def add_reminder(payload: ReminderPayload, user: dict = Depends(current_user)) -
     )
     if item is None:
         raise HTTPException(status_code=404, detail="pet_not_found")
+    _safe_sync_pwa_reminder_to_telegram(user, item)
     return {"item": item}
 
 
 @app.delete("/api/reminders/{reminder_id}")
 def delete_reminder(reminder_id: int, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_pwa_reminder_deactivation(user, reminder_id)
     if not db.deactivate_reminder(settings.database_path, owner_id=int(user["id"]), reminder_id=reminder_id):
         raise HTTPException(status_code=404, detail="reminder_not_found")
     return {"ok": True}
@@ -754,6 +827,7 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, user: dict
 
 @app.post("/api/triage")
 def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
+    _safe_sync_telegram_profile_to_pwa(user)
     pet_id = payload.pet_id
     if pet_id is not None and not db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
         raise HTTPException(status_code=404, detail="pet_not_found")

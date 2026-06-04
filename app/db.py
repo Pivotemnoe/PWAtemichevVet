@@ -120,7 +120,16 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "pets", "weight_kg", "REAL")
         _ensure_column(cur, "pets", "breed", "TEXT")
         _ensure_column(cur, "pets", "is_main", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(cur, "pets", "external_source", "TEXT")
+        _ensure_column(cur, "pets", "external_id", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pets_owner ON pets(owner_id)")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pets_external
+            ON pets(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
@@ -139,6 +148,15 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_history_pet ON pet_history(pet_id, created_at)")
+        _ensure_column(cur, "pet_history", "external_source", "TEXT")
+        _ensure_column(cur, "pet_history", "external_id", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pet_history_external
+            ON pet_history(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
@@ -156,6 +174,15 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_observations_pet ON pet_observations(pet_id, created_at)")
+        _ensure_column(cur, "pet_observations", "external_source", "TEXT")
+        _ensure_column(cur, "pet_observations", "external_id", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pet_observations_external
+            ON pet_observations(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
@@ -171,6 +198,15 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_measurements_pet ON pet_measurements(pet_id, created_at)")
+        _ensure_column(cur, "pet_measurements", "external_source", "TEXT")
+        _ensure_column(cur, "pet_measurements", "external_id", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pet_measurements_external
+            ON pet_measurements(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
@@ -194,6 +230,15 @@ def init_db(db_path: Path) -> None:
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active, due_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reminders_pet ON reminders(pet_id, is_active, due_date)")
+        _ensure_column(cur, "reminders", "external_source", "TEXT")
+        _ensure_column(cur, "reminders", "external_id", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_external
+            ON reminders(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
@@ -237,7 +282,16 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "triage_logs", "total_tokens", "INTEGER DEFAULT 0")
         _ensure_column(cur, "triage_logs", "model", "TEXT")
         _ensure_column(cur, "triage_logs", "subscription_source", "TEXT")
+        _ensure_column(cur, "triage_logs", "external_source", "TEXT")
+        _ensure_column(cur, "triage_logs", "external_id", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_logs_user ON triage_logs(user_id, created_at)")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_triage_logs_external
+            ON triage_logs(external_source, external_id)
+            WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
 
         cur.execute(
             """
