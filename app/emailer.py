@@ -20,8 +20,9 @@ def send_login_code(settings: Settings, *, email: str, code: str) -> None:
         "Код действует 10 минут. Если вы не запрашивали вход, просто игнорируйте письмо."
     )
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.smtp_use_tls:
+    smtp_class = smtplib.SMTP_SSL if int(settings.smtp_port) == 465 else smtplib.SMTP
+    with smtp_class(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
+        if settings.smtp_use_tls and smtp_class is smtplib.SMTP:
             smtp.starttls()
         if settings.smtp_username:
             smtp.login(settings.smtp_username, settings.smtp_password)
