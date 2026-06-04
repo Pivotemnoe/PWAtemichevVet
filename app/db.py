@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -232,6 +233,30 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "triage_logs", "model", "TEXT")
         _ensure_column(cur, "triage_logs", "subscription_source", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_logs_user ON triage_logs(user_id, created_at)")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS triage_followups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                triage_id INTEGER NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL,
+                pet_id INTEGER,
+                urgency_level TEXT NOT NULL,
+                scenario TEXT NOT NULL DEFAULT 'basic',
+                scheduled_at TEXT NOT NULL,
+                answered_at TEXT,
+                status TEXT NOT NULL DEFAULT 'scheduled',
+                answer TEXT,
+                payload TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(triage_id) REFERENCES triage_logs(id) ON DELETE CASCADE,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(pet_id) REFERENCES pets(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_followups_user ON triage_followups(user_id, status, scheduled_at)")
 
         cur.execute(
             """
@@ -980,6 +1005,88 @@ def create_triage_log(
         conn.commit()
         cur.execute("SELECT * FROM triage_logs WHERE id = ?", (triage_id,))
         return dict(cur.fetchone())
+
+
+def add_triage_followup(
+    db_path: Path,
+    *,
+    owner_id: int,
+    triage_id: int,
+    pet_id: int | None,
+    urgency_level: str,
+    scenario: str,
+    scheduled_at: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if pet_id is not None and not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
+        return None
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO triage_followups (
+                    triage_id, user_id, pet_id, urgency_level, scenario,
+                    scheduled_at, status, payload, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)
+                """,
+                (
+                    int(triage_id),
+                    int(owner_id),
+                    pet_id,
+                    urgency_level,
+                    scenario,
+                    scheduled_at,
+                    json.dumps(payload or {}, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        followup_id = int(cur.lastrowid)
+        conn.commit()
+        cur.execute("SELECT * FROM triage_followups WHERE id = ?", (followup_id,))
+        return dict(cur.fetchone())
+
+
+def list_due_triage_followups(db_path: Path, *, owner_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT f.*, p.pet_name, p.pet_type
+            FROM triage_followups f
+            LEFT JOIN pets p ON p.id = f.pet_id
+            WHERE f.user_id = ?
+              AND f.status = 'scheduled'
+              AND f.scheduled_at <= ?
+            ORDER BY f.scheduled_at ASC, f.id ASC
+            LIMIT ?
+            """,
+            (int(owner_id), now, int(limit)),
+        )
+        return rows_to_dicts(cur.fetchall())
+
+
+def mark_triage_followup_answered(db_path: Path, *, owner_id: int, followup_id: int, answer: str) -> bool:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE triage_followups
+            SET status = 'answered', answer = ?, answered_at = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? AND status = 'scheduled'
+            """,
+            (answer, now, now, int(followup_id), int(owner_id)),
+        )
+        ok = cur.rowcount > 0
+        conn.commit()
+        return ok
 
 
 def create_feedback(db_path: Path, *, owner_id: int, text: str, category: str | None = None) -> dict[str, Any]:

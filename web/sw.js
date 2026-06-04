@@ -1,8 +1,8 @@
-const CACHE_NAME = "temichevvet-pwa-brand-hero-1";
+const CACHE_NAME = "temichevvet-pwa-triage-followup-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260604-brand-hero-1",
-  "/static/app.js?v=20260604-brand-hero-1",
+  "/static/styles.css?v=20260604-triage-followup-1",
+  "/static/app.js?v=20260604-triage-followup-1",
   "/static/manifest.webmanifest",
   "/static/assets/icon.svg",
   "/static/assets/logo_temichevvet.jpg",

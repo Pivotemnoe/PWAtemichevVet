@@ -537,6 +537,25 @@ textarea:focus {
   color: #b42318;
 }
 
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.followup-card {
+  align-items: start;
+}
+
+.due-followups {
+  margin-top: 16px;
+}
+
+.result-box + .care-note {
+  margin-top: 12px;
+}
+
 .code-row {
   display: grid;
   grid-template-columns: 1fr auto;

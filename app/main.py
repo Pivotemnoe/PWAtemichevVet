@@ -16,6 +16,7 @@ from pydantic import BaseModel, EmailStr, Field
 from app import db
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
+from app.followups import detect_followup_scenario, followup_due_at, followup_payload
 from app.knowledge import check_food, find_food, food_to_public
 from app.llm_triage import call_triage_llm, extract_urgency, short_summary
 from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
@@ -23,6 +24,7 @@ from app.medical_safety import detect_red_flags, render_red_flag_response
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
 from app.subscriptions import get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
+from app.telegram_sync import sync_triage_to_telegram
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -145,6 +147,10 @@ class FeedbackPayload(BaseModel):
     category: str | None = Field(default=None, max_length=80)
 
 
+class FollowupAnswerPayload(BaseModel):
+    answer: str = Field(min_length=2, max_length=20)
+
+
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
@@ -220,6 +226,40 @@ def _pet_age_text(pet: dict) -> str | None:
     if rest_months:
         return f"{years} г. {rest_months} мес."
     return f"{years} г."
+
+
+def _schedule_pwa_followup(
+    *,
+    user_id: int,
+    pet_id: int | None,
+    triage_id: int | None,
+    urgency: str,
+    complaint_text: str,
+    summary: str | None,
+) -> dict | None:
+    if not triage_id:
+        return None
+    scheduled_at = followup_due_at(urgency)
+    if not scheduled_at:
+        return None
+    return db.add_triage_followup(
+        settings.database_path,
+        owner_id=int(user_id),
+        pet_id=pet_id,
+        triage_id=int(triage_id),
+        urgency_level=urgency,
+        scenario=detect_followup_scenario(complaint_text),
+        scheduled_at=scheduled_at,
+        payload=followup_payload(complaint_text=complaint_text, summary=summary),
+    )
+
+
+def _safe_sync_triage_to_telegram(**kwargs) -> dict:
+    try:
+        return sync_triage_to_telegram(settings, **kwargs)
+    except Exception as exc:
+        logger.warning("PWA triage Telegram sync failed: %s", exc)
+        return {"synced": False, "reason": "sync_error"}
 
 
 def _pet_public(pet: dict) -> dict:
@@ -686,6 +726,32 @@ def create_feedback(payload: FeedbackPayload, user: dict = Depends(current_user)
     }
 
 
+@app.get("/api/followups/due")
+def due_followups(user: dict = Depends(current_user)) -> dict:
+    return {"items": db.list_due_triage_followups(settings.database_path, owner_id=int(user["id"]))}
+
+
+@app.post("/api/followups/{followup_id}/answer")
+def answer_followup(followup_id: int, payload: FollowupAnswerPayload, user: dict = Depends(current_user)) -> dict:
+    answer = payload.answer.strip().lower()
+    if answer not in {"better", "same", "worse", "retry"}:
+        raise HTTPException(status_code=400, detail="invalid_followup_answer")
+    if not db.mark_triage_followup_answered(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        followup_id=followup_id,
+        answer=answer,
+    ):
+        raise HTTPException(status_code=404, detail="followup_not_found")
+    messages = {
+        "better": "Хорошо. Продолжайте наблюдение и следуйте рекомендациям врача, если они были даны.",
+        "same": "Продолжайте внимательно наблюдать. Если состояние не улучшается или есть сомнения — лучше показать питомца врачу.",
+        "worse": "Ухудшение состояния — повод для очного осмотра. Рекомендуется обратиться в клинику как можно скорее.",
+        "retry": "Откройте новый разбор и добавьте свежие симптомы. Это будет отдельная проверка состояния.",
+    }
+    return {"ok": True, "message": messages[answer]}
+
+
 @app.post("/api/triage")
 def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
     pet_id = payload.pet_id
@@ -702,6 +768,7 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
     if red_flags.has_red_flags:
         sub = get_effective_subscription(settings, user)
         answer = render_red_flag_response(red_flags)
+        summary = "Красные симптомы: " + ", ".join(red_flags.matched)
         log = db.create_triage_log(
             settings.database_path,
             owner_id=int(user["id"]),
@@ -713,6 +780,25 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             quota_after=sub.quota_used,
             subscription_source=sub.source,
         )
+        followup = _schedule_pwa_followup(
+            user_id=int(user["id"]),
+            pet_id=pet_id,
+            triage_id=log["id"] if log else None,
+            urgency="red",
+            complaint_text=_clean_text(payload.text),
+            summary=summary,
+        )
+        telegram_sync = _safe_sync_triage_to_telegram(
+            pwa_user=user,
+            selected_pet=selected_pet,
+            pwa_triage_id=log["id"] if log else None,
+            complaint_text=_clean_text(payload.text),
+            response_text=answer,
+            urgency_level="red",
+            summary=summary,
+            quota_before=sub.quota_used,
+            quota_after=sub.quota_used,
+        )
         return {
             "status": "red",
             "urgency": "red",
@@ -720,6 +806,8 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             "triage_id": log["id"] if log else None,
             "answer": answer,
             "subscription": sub.to_public(),
+            "followup": followup,
+            "telegram_sync": telegram_sync,
         }
 
     ok, sub = try_consume_quota(settings, user, amount=1)
@@ -767,6 +855,28 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
         model=llm_result.model,
         subscription_source=sub.source,
     )
+    followup = _schedule_pwa_followup(
+        user_id=int(user["id"]),
+        pet_id=pet_id,
+        triage_id=log["id"] if log else None,
+        urgency=urgency,
+        complaint_text=_clean_text(payload.text),
+        summary=summary,
+    )
+    telegram_sync = _safe_sync_triage_to_telegram(
+        pwa_user=user,
+        selected_pet=selected_pet,
+        pwa_triage_id=log["id"] if log else None,
+        complaint_text=_clean_text(payload.text),
+        response_text=llm_result.text,
+        urgency_level=urgency,
+        summary=summary,
+        quota_before=quota_before,
+        quota_after=quota_after,
+        prompt_tokens=llm_result.prompt_tokens,
+        completion_tokens=llm_result.completion_tokens,
+        total_tokens=llm_result.total_tokens,
+    )
     return {
         "status": "saved",
         "urgency": urgency,
@@ -777,6 +887,8 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
         "triage_id": log["id"] if log else None,
         "answer": llm_result.text,
         "subscription": sub.to_public(),
+        "followup": followup,
+        "telegram_sync": telegram_sync,
     }
 
 

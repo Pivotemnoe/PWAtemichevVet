@@ -36,7 +36,8 @@ SYSTEM_PROMPT = """
 - у щенков/котят и пожилых животных при сомнениях выбирай более высокий уровень срочности;
 - если проблема длится больше суток, повторяется или состояние ухудшается — тоже склоняйся к более высокой срочности.
 
-Если информации мало — задай 1–3 уточняющих вопроса строго по делу.
+Не задавай пользователю прямые уточняющие вопросы.
+Если информации мало — кратко укажи до 3 фактов, которые стоит подготовить для врача или нового разбора.
 
 Уровни срочности (выбери строго один):
 - 🟢 Можно наблюдать: состояние не похоже на экстренное, можно наблюдать дома и следить за динамикой.
@@ -194,6 +195,31 @@ def ensure_trust_phrase(response_text: str) -> str:
     return f"{text}\n\n{TRUST_PHRASE}." if text else f"{TRUST_PHRASE}."
 
 
+def normalize_triage_answer(response_text: str) -> str:
+    text = ensure_trust_phrase(response_text)
+    replacements = (
+        (
+            r"(?i)Короткие\s+вопросы\s*\(\s*пожалуйста,\s*ответьте\s*\)\s*:",
+            "Что подготовить для врача или нового разбора:",
+        ),
+        (
+            r"(?i)Короткие\s+вопросы\s*:",
+            "Что подготовить для врача или нового разбора:",
+        ),
+        (
+            r"(?i)уточняющие\s+вопросы\s*:",
+            "Что подготовить для врача или нового разбора:",
+        ),
+        (
+            r"(?i)пожалуйста,\s*ответьте",
+            "подготовьте ответы",
+        ),
+    )
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
 def extract_urgency(response_text: str) -> tuple[str | None, str | None, str | None]:
     if not response_text:
         return None, None, None
@@ -269,7 +295,7 @@ def call_triage_llm(
     response = client.chat.completions.create(**request)
     message = response.choices[0].message.content if response.choices else ""
     usage = getattr(response, "usage", None)
-    text = ensure_trust_phrase(message or "Не удалось сформировать ответ.")
+    text = normalize_triage_answer(message or "Не удалось сформировать ответ.")
     return LlmTriageResult(
         text=text,
         model=model,

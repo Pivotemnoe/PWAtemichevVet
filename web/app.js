@@ -211,8 +211,43 @@ function renderPetBadges(pet) {
   return parts.length ? `<div class="meta-row">${parts.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
 }
 
+async function loadDueFollowups() {
+  try {
+    const data = await api("/api/followups/due");
+    return data.items || [];
+  } catch {
+    return [];
+  }
+}
+
+function renderDueFollowups(items) {
+  if (!items.length) return "";
+  const cards = items
+    .map((item) => {
+      const pet = item.pet_name ? `${item.pet_type || "питомец"} — ${item.pet_name}` : "питомец";
+      return `
+        <article class="item-card followup-card">
+          <div>
+            <h3>Контроль состояния</h3>
+            <p>Вы разбирали состояние: ${escapeHtml(pet)}. Как питомец чувствует себя сейчас?</p>
+            <small>Если стало хуже — лучше не ждать и обратиться в клинику.</small>
+          </div>
+          <div class="inline-actions">
+            <button class="secondary-button compact" data-followup-answer="better" data-followup-id="${item.id}" type="button">Стало лучше</button>
+            <button class="secondary-button compact" data-followup-answer="same" data-followup-id="${item.id}" type="button">Без изменений</button>
+            <button class="secondary-button compact danger-text" data-followup-answer="worse" data-followup-id="${item.id}" type="button">Стало хуже</button>
+            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новый разбор</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+  return `<section class="profile-card due-followups"><h3>Нужно проверить динамику</h3><div class="list-stack">${cards}</div></section>`;
+}
+
 async function renderHome() {
   await refreshPets();
+  const dueFollowups = await loadDueFollowups();
   const petCount = state.pets.length;
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
   setWorkspace(`
@@ -250,6 +285,7 @@ async function renderHome() {
       <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
       <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
     </div>
+    ${renderDueFollowups(dueFollowups)}
   `, { scroll: false });
 }
 
@@ -708,6 +744,11 @@ async function renderTriage(prefillPetId = null) {
         <div class="result-box ${data.urgency === "red" ? "danger" : ""}">
           <pre>${escapeHtml(data.answer)}</pre>
         </div>
+        <div class="care-note">
+          Если в ответе есть пункты, которые нужно уточнить, подготовьте их для врача.
+          Можно также добавить эти данные в новый разбор — это будет отдельная проверка состояния и спишет ещё один запрос.
+          ${data.followup ? "Контроль состояния будет показан в кабинете позже; если Telegram подключён, напоминание также уйдёт туда." : ""}
+        </div>
         <div class="next-actions">
           ${petId ? `<button class="secondary-button" data-open-pet="${petId}" type="button">🐾 Открыть карточку</button>` : ""}
           <button class="secondary-button" data-action="reminders" type="button">➕ Добавить напоминание</button>
@@ -1109,8 +1150,29 @@ document.addEventListener("click", async (event) => {
   const deletePetButton = event.target.closest("[data-delete-pet]");
   const deleteReminderButton = event.target.closest("[data-delete-reminder]");
   const linkProviderButton = event.target.closest("[data-link-provider]");
+  const followupAnswerButton = event.target.closest("[data-followup-answer]");
 
   try {
+    if (followupAnswerButton) {
+      const followupId = Number(followupAnswerButton.dataset.followupId);
+      const answer = followupAnswerButton.dataset.followupAnswer;
+      const data = await api(`/api/followups/${followupId}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ answer })
+      });
+      if (answer === "retry") {
+        await renderTriage();
+        return;
+      }
+      setWorkspace(`
+        <div class="workspace-head">
+          <h2>Контроль состояния</h2>
+          <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+        </div>
+        <div class="notice">${escapeHtml(data.message || "Ответ сохранён.")}</div>
+      `);
+      return;
+    }
     if (linkProviderButton) {
       await startProviderLink(linkProviderButton.dataset.linkProvider);
       return;
