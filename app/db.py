@@ -27,6 +27,11 @@ def _ensure_column(cur: sqlite3.Cursor, table_name: str, column_name: str, ddl: 
         cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}")
 
 
+def _table_exists(cur: sqlite3.Cursor, table_name: str) -> bool:
+    cur.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1", (table_name,))
+    return cur.fetchone() is not None
+
+
 def init_db(db_path: Path) -> None:
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
@@ -534,6 +539,164 @@ def link_external_account(
         conn.commit()
         cur.execute("SELECT * FROM users WHERE id = ?", (int(user_id),))
         return dict(cur.fetchone())
+
+
+def _subscription_rank(row: sqlite3.Row | None) -> tuple[int, str, int]:
+    if not row:
+        return (-1, "", 0)
+    plan = str(row["plan"] or "free").lower()
+    rank = {"free": 0, "plus": 1, "pro": 2, "vip": 3}.get(plan, 0)
+    period_end = str(row["period_end"] or "")
+    quota_left = int(row["quota_total"] or 0) - int(row["quota_used"] or 0)
+    return (rank, period_end, quota_left)
+
+
+def merge_users(db_path: Path, *, source_user_id: int, target_user_id: int) -> dict[str, Any] | None:
+    source_id = int(source_user_id)
+    target_id = int(target_user_id)
+    if source_id == target_id:
+        with closing(connect(db_path)) as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (target_id,)).fetchone()
+            return row_to_dict(row)
+
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE id = ?", (source_id,))
+        source = cur.fetchone()
+        cur.execute("SELECT * FROM users WHERE id = ?", (target_id,))
+        target = cur.fetchone()
+        if not source or not target:
+            return None
+
+        source_email = str(source["email"] or "").strip() or None
+        source_name = str(source["name"] or "").strip() or None
+        source_phone = str(source["phone"] or "").strip() or None
+
+        updates: dict[str, Any] = {"updated_at": now}
+        if source_email and not target["email"]:
+            cur.execute("UPDATE users SET email = NULL, updated_at = ? WHERE id = ?", (now, source_id))
+            updates["email"] = source_email
+        if source_name and not target["name"]:
+            updates["name"] = source_name
+        if source_phone and not target["phone"]:
+            updates["phone"] = source_phone
+
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            cur.execute(
+                f"UPDATE users SET {assignments} WHERE id = ?",
+                (*updates.values(), target_id),
+            )
+
+        for table, column in (
+            ("sessions", "user_id"),
+            ("pets", "owner_id"),
+            ("pet_observations", "user_id"),
+            ("reminders", "user_id"),
+            ("triage_logs", "user_id"),
+            ("triage_followups", "user_id"),
+            ("feedback", "user_id"),
+        ):
+            if _table_exists(cur, table):
+                cur.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (target_id, source_id))
+
+        if _table_exists(cur, "subscriptions"):
+            cur.execute("SELECT * FROM subscriptions WHERE user_id = ? LIMIT 1", (source_id,))
+            source_sub = cur.fetchone()
+            cur.execute("SELECT * FROM subscriptions WHERE user_id = ? LIMIT 1", (target_id,))
+            target_sub = cur.fetchone()
+            if source_sub and not target_sub:
+                cur.execute("UPDATE subscriptions SET user_id = ?, updated_at = ? WHERE user_id = ?", (target_id, now, source_id))
+            elif source_sub and target_sub:
+                if _subscription_rank(source_sub) > _subscription_rank(target_sub):
+                    cur.execute(
+                        """
+                        UPDATE subscriptions
+                        SET plan = ?, quota_total = ?, quota_used = ?, period_start = ?,
+                            period_end = ?, source = ?, updated_at = ?
+                        WHERE user_id = ?
+                        """,
+                        (
+                            source_sub["plan"],
+                            int(source_sub["quota_total"] or 0),
+                            int(source_sub["quota_used"] or 0),
+                            source_sub["period_start"],
+                            source_sub["period_end"],
+                            source_sub["source"],
+                            now,
+                            target_id,
+                        ),
+                    )
+                cur.execute("DELETE FROM subscriptions WHERE user_id = ?", (source_id,))
+
+        cur.execute(
+            "SELECT id, provider, provider_user_id FROM external_accounts WHERE user_id = ?",
+            (source_id,),
+        )
+        source_accounts = cur.fetchall()
+        for account in source_accounts:
+            cur.execute(
+                """
+                SELECT id
+                FROM external_accounts
+                WHERE user_id = ? AND provider = ? AND provider_user_id = ?
+                LIMIT 1
+                """,
+                (target_id, account["provider"], account["provider_user_id"]),
+            )
+            if cur.fetchone():
+                cur.execute("DELETE FROM external_accounts WHERE id = ?", (int(account["id"]),))
+            else:
+                cur.execute("UPDATE external_accounts SET user_id = ? WHERE id = ?", (target_id, int(account["id"])))
+
+        cur.execute("DELETE FROM users WHERE id = ?", (source_id,))
+        conn.commit()
+        cur.execute("SELECT * FROM users WHERE id = ?", (target_id,))
+        return dict(cur.fetchone())
+
+
+def link_or_merge_external_account(
+    db_path: Path,
+    *,
+    user_id: int,
+    provider: str,
+    provider_user_id: str,
+    display_name: str | None = None,
+) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT user_id
+            FROM external_accounts
+            WHERE provider = ? AND provider_user_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_user_id),
+        )
+        existing = cur.fetchone()
+
+    if existing and int(existing["user_id"]) != int(user_id):
+        target_user_id = int(existing["user_id"])
+        merged = merge_users(db_path, source_user_id=int(user_id), target_user_id=target_user_id)
+        if merged:
+            link_external_account(
+                db_path,
+                user_id=target_user_id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                display_name=display_name,
+            )
+        return merged
+
+    return link_external_account(
+        db_path,
+        user_id=int(user_id),
+        provider=provider,
+        provider_user_id=provider_user_id,
+        display_name=display_name,
+    )
 
 
 def create_session(db_path: Path, *, user_id: int, token_hash: str, expires_at: str) -> None:

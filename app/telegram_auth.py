@@ -104,7 +104,7 @@ def complete_telegram_login(settings: Settings, state: str) -> dict[str, Any]:
     display_name = payload.get("display_name") or payload.get("username")
     link_user_id = payload.get("link_user_id")
     if link_user_id:
-        user = db.link_external_account(
+        user = db.link_or_merge_external_account(
             settings.database_path,
             user_id=int(link_user_id),
             provider="telegram",
@@ -112,7 +112,7 @@ def complete_telegram_login(settings: Settings, state: str) -> dict[str, Any]:
             display_name=display_name,
         )
         if not user:
-            return {"status": "expired", "message": "Этот Telegram уже связан с другим кабинетом."}
+            return {"status": "expired", "message": "Не удалось подключить Telegram к кабинету."}
     else:
         user = db.get_or_create_user_by_external_account(
             settings.database_path,
