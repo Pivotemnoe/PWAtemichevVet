@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 TRUST_PHRASE = "Этот ответ не заменяет очный осмотр ветеринарного врача"
 URGENCY_EMOJI_TO_LEVEL = {"🟢": "green", "🟡": "yellow", "🟥": "red", "🔴": "red"}
