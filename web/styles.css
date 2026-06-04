@@ -196,6 +196,8 @@ p {
   padding: 0 16px;
   font-weight: 800;
   text-decoration: none;
+  border: 0;
+  cursor: pointer;
 }
 
 .primary-link {
@@ -233,6 +235,43 @@ p {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
+}
+
+.auth-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(11, 23, 38, 0.42);
+}
+
+.auth-card {
+  width: min(980px, 100%);
+  max-height: min(840px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgba(11, 23, 38, 0.26);
+  padding: 24px;
+}
+
+.auth-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.auth-card-head h2 {
+  margin-bottom: 8px;
+}
+
+.auth-card-head p {
+  margin-bottom: 0;
 }
 
 .panel {
@@ -730,6 +769,20 @@ textarea:focus {
   .form-grid,
   .inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .auth-dialog {
+    align-items: start;
+    padding: 12px;
+  }
+
+  .auth-card {
+    max-height: calc(100vh - 24px);
+    padding: 18px;
+  }
+
+  .auth-card-head {
+    gap: 12px;
   }
 
   .code-row {

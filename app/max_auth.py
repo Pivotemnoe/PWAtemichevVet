@@ -31,9 +31,12 @@ def max_deep_link(settings: Settings, state: str) -> str:
     return f"https://max.ru/{username}?start={urllib.parse.quote(state)}"
 
 
-def create_max_login_challenge(settings: Settings) -> tuple[str, str]:
+def create_max_login_challenge(settings: Settings, *, link_user_id: int | None = None) -> tuple[str, str]:
     state = make_max_state()
-    payload = json.dumps({"status": "pending"}, ensure_ascii=False)
+    payload_data: dict[str, Any] = {"status": "pending"}
+    if link_user_id:
+        payload_data["link_user_id"] = int(link_user_id)
+    payload = json.dumps(payload_data, ensure_ascii=False)
     db.create_auth_challenge(
         settings.database_path,
         channel="max",
@@ -140,7 +143,9 @@ def process_max_update(settings: Settings, update: dict[str, Any]) -> dict[str, 
     if not provider_user_id:
         return {"handled": False, "reason": "user_not_found"}
 
+    existing_payload = parse_challenge_payload(challenge.get("payload"))
     payload = {
+        **existing_payload,
         "status": "confirmed",
         "provider_user_id": provider_user_id,
         "display_name": display_name,
@@ -154,7 +159,10 @@ def process_max_update(settings: Settings, update: dict[str, Any]) -> dict[str, 
     send_max_text(
         settings,
         user_id=provider_user_id,
-        text="Вход в TemichevVet подтвержден. Вернитесь в PWA, она завершит вход автоматически.",
+        text=(
+            "Вход в TemichevVet подтвержден. MAX использован только для подтверждения личности. "
+            "Вернитесь на сайт или в PWA, кабинет откроется автоматически."
+        ),
     )
     return {"handled": True, "state": state}
 
@@ -173,12 +181,24 @@ def complete_max_login(settings: Settings, state: str) -> dict[str, Any]:
     if not provider_user_id:
         return {"status": "expired", "message": "MAX не передал пользователя."}
 
-    user = db.get_or_create_user_by_external_account(
-        settings.database_path,
-        provider="max",
-        provider_user_id=provider_user_id,
-        display_name=payload.get("display_name"),
-    )
+    link_user_id = payload.get("link_user_id")
+    if link_user_id:
+        user = db.link_external_account(
+            settings.database_path,
+            user_id=int(link_user_id),
+            provider="max",
+            provider_user_id=provider_user_id,
+            display_name=payload.get("display_name"),
+        )
+        if not user:
+            return {"status": "expired", "message": "Этот MAX уже связан с другим кабинетом."}
+    else:
+        user = db.get_or_create_user_by_external_account(
+            settings.database_path,
+            provider="max",
+            provider_user_id=provider_user_id,
+            display_name=payload.get("display_name"),
+        )
     db.consume_challenge(settings.database_path, int(challenge["id"]))
     token = make_token()
     db.create_session(

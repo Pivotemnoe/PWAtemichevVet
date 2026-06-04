@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, timedelta
 from pathlib import Path
@@ -19,6 +20,7 @@ from app.knowledge import check_food, find_food, food_to_public
 from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
 from app.medical_safety import detect_red_flags, render_red_flag_response
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
+from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ app = FastAPI(title="TemichevVet PWA API", version="0.1.0")
 settings = get_settings()
 db.init_db(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
+logger = logging.getLogger(__name__)
 
 
 class EmailStartRequest(BaseModel):
@@ -63,6 +66,13 @@ class ProviderStatusResponse(BaseModel):
     message: str | None = None
     token: str | None = None
     user: dict | None = None
+
+
+class TelegramCompleteRequest(BaseModel):
+    state: str = Field(min_length=8, max_length=100)
+    telegram_id: str = Field(min_length=1, max_length=64)
+    display_name: str | None = Field(default=None, max_length=120)
+    username: str | None = Field(default=None, max_length=80)
 
 
 class TriageRequest(BaseModel):
@@ -131,6 +141,10 @@ class FeedbackPayload(BaseModel):
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _email_delivery_enabled() -> bool:
+    return bool(settings.smtp_host) or (settings.dev_auth_code_log and settings.app_env != "production")
 
 
 def _clean_text(value: str | None, default: str = "") -> str:
@@ -236,12 +250,15 @@ def public_config() -> dict:
     return {
         "telegram_enabled": bool(settings.telegram_bot_username),
         "max_enabled": bool(settings.max_bot_username and settings.max_bot_token),
-        "email_enabled": True,
+        "email_enabled": _email_delivery_enabled(),
     }
 
 
 @app.post("/api/auth/email/start", response_model=EmailStartResponse)
 def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
+    if not _email_delivery_enabled():
+        raise HTTPException(status_code=503, detail="email_not_configured")
+
     email = _normalize_email(str(payload.email))
     code = make_code()
     db.create_auth_challenge(
@@ -251,7 +268,12 @@ def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
         code_hash=hash_value(code, settings.session_secret),
         expires_at=expires_in(10),
     )
-    send_login_code(settings, email=email, code=code)
+    if settings.smtp_host:
+        try:
+            send_login_code(settings, email=email, code=code)
+        except Exception:
+            logger.exception("Failed to send email login code")
+            raise HTTPException(status_code=503, detail="email_delivery_failed") from None
     return EmailStartResponse(
         ok=True,
         message="Код отправлен на email.",
@@ -290,13 +312,74 @@ def auth_telegram_start() -> ProviderStartResponse:
             provider="telegram",
             message="Вход через Telegram будет доступен после настройки бота.",
         )
-    token = make_token()[:24]
+    if not settings.telegram_auth_secret:
+        return ProviderStartResponse(
+            enabled=False,
+            provider="telegram",
+            message="Вход через Telegram настраивается. Пока используйте email.",
+        )
+    state, url = create_telegram_login_challenge(settings)
     return ProviderStartResponse(
         enabled=True,
         provider="telegram",
-        url=f"https://t.me/{settings.telegram_bot_username}?start=web_auth_{token}",
-        message="Откройте Telegram-бота и подтвердите вход.",
+        url=url,
+        state=state,
+        message="Откройте Telegram только для подтверждения входа, затем вернитесь на сайт.",
     )
+
+
+@app.get("/api/auth/telegram/status", response_model=ProviderStatusResponse)
+def auth_telegram_status(state: str) -> ProviderStatusResponse:
+    result = complete_telegram_login(settings, state)
+    return ProviderStatusResponse(**result)
+
+
+@app.post("/api/account/telegram/start", response_model=ProviderStartResponse)
+def account_telegram_start(user: dict = Depends(current_user)) -> ProviderStartResponse:
+    if not settings.telegram_bot_username:
+        return ProviderStartResponse(
+            enabled=False,
+            provider="telegram",
+            message="Подключение Telegram будет доступно после настройки бота.",
+        )
+    if not settings.telegram_auth_secret:
+        return ProviderStartResponse(
+            enabled=False,
+            provider="telegram",
+            message="Подключение Telegram настраивается.",
+        )
+    state, url = create_telegram_login_challenge(settings, link_user_id=int(user["id"]))
+    return ProviderStartResponse(
+        enabled=True,
+        provider="telegram",
+        url=url,
+        state=state,
+        message="Откройте Telegram только для подтверждения привязки, затем вернитесь на сайт.",
+    )
+
+
+@app.post("/api/auth/telegram/complete")
+def auth_telegram_complete(
+    payload: TelegramCompleteRequest,
+    x_temichevvet_telegram_secret: Annotated[str | None, Header()] = None,
+) -> dict:
+    if not settings.telegram_auth_secret:
+        raise HTTPException(status_code=503, detail="telegram_auth_not_configured")
+    if not x_temichevvet_telegram_secret or not constant_time_equal(
+        x_temichevvet_telegram_secret,
+        settings.telegram_auth_secret,
+    ):
+        raise HTTPException(status_code=403, detail="invalid_telegram_auth_secret")
+    result = confirm_telegram_login(
+        settings,
+        state=payload.state.strip(),
+        telegram_id=payload.telegram_id.strip(),
+        display_name=_clean_optional_text(payload.display_name),
+        username=_clean_optional_text(payload.username),
+    )
+    if not result.get("handled"):
+        raise HTTPException(status_code=404, detail=result.get("reason") or "telegram_challenge_not_found")
+    return {"ok": True, "state": result.get("state")}
 
 
 @app.post("/api/auth/max/start", response_model=ProviderStartResponse)
@@ -313,7 +396,7 @@ def auth_max_start() -> ProviderStartResponse:
         provider="max",
         url=url,
         state=state,
-        message="Откройте MAX-бота и нажмите старт, чтобы подтвердить вход.",
+        message="Откройте MAX только для подтверждения входа, затем вернитесь на сайт.",
     )
 
 
@@ -321,6 +404,24 @@ def auth_max_start() -> ProviderStartResponse:
 def auth_max_status(state: str) -> ProviderStatusResponse:
     result = complete_max_login(settings, state)
     return ProviderStatusResponse(**result)
+
+
+@app.post("/api/account/max/start", response_model=ProviderStartResponse)
+def account_max_start(user: dict = Depends(current_user)) -> ProviderStartResponse:
+    if not settings.max_bot_username or not settings.max_bot_token:
+        return ProviderStartResponse(
+            enabled=False,
+            provider="max",
+            message="Подключение MAX будет доступно после настройки имени и токена бота.",
+        )
+    state, url = create_max_login_challenge(settings, link_user_id=int(user["id"]))
+    return ProviderStartResponse(
+        enabled=True,
+        provider="max",
+        url=url,
+        state=state,
+        message="Откройте MAX только для подтверждения привязки, затем вернитесь на сайт.",
+    )
 
 
 @app.post("/api/webhooks/max")
@@ -337,7 +438,10 @@ async def max_webhook(
 
 @app.get("/api/me")
 def me(user: dict = Depends(current_user)) -> dict:
-    return {"user": user}
+    return {
+        "user": user,
+        "external_accounts": db.list_external_accounts(settings.database_path, user_id=int(user["id"])),
+    }
 
 
 @app.get("/api/pets")

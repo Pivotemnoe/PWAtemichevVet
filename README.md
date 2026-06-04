@@ -9,7 +9,7 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - FastAPI backend.
 - Static installable PWA frontend.
 - Email one-time-code login.
-- Telegram login placeholder.
+- Telegram deep-link login bridge to the working bot.
 - MAX deep-link login with webhook and local polling support.
 - Personal cabinet: pets, pet cards, history, observations, weight, reminders, food checks, feedback.
 - SQLite schema for web users, auth challenges, sessions, external account links, pets, reminders, history, and observations.
@@ -33,6 +33,43 @@ http://127.0.0.1:8080
 
 In development mode the email auth code is returned in the API response so the flow can be tested without SMTP.
 
+## Telegram Login Bridge
+
+Set these values in PWA `.env`:
+
+```text
+TELEGRAM_BOT_USERNAME=TemichevVet23_bot
+TELEGRAM_AUTH_SECRET=...
+```
+
+Set matching values in the Telegram bot `.env`:
+
+```text
+PWA_BASE_URL=https://temichevvet.ru
+PWA_TELEGRAM_AUTH_SECRET=...
+```
+
+The PWA creates a short-lived login state, opens the Telegram bot with `/start web_auth_<state>`, and the Telegram bot confirms that state through a server-to-server request. This links the PWA account to the Telegram user ID without exposing the shared secret to the browser.
+
+This bridge creates a shared identity link. A logged-in PWA user can also connect Telegram to the current account in `Способы входа`, so future pet/payment/subscription synchronization has a single owner.
+
+Full synchronization of Telegram bot pets, payments, and subscription entitlements is a separate migration step.
+
+## Email Login
+
+Email login uses a one-time code for 10 minutes. In production it requires SMTP:
+
+```text
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_USE_TLS=1
+```
+
+If SMTP is not configured in production, the API returns `email_not_configured` instead of pretending that an email was sent.
+
 ## MAX Login
 
 Set these values in `.env`:
@@ -41,6 +78,8 @@ Set these values in `.env`:
 MAX_BOT_USERNAME=id230210303969_bot
 MAX_BOT_TOKEN=...
 ```
+
+MAX login is used only to confirm identity and open or connect the same PWA account. The full MAX bot with service menus and scenarios is a separate product step.
 
 For local development without a public HTTPS webhook, run polling in a second terminal:
 

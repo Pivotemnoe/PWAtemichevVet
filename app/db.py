@@ -353,6 +353,71 @@ def get_or_create_user_by_external_account(
         return dict(cur.fetchone())
 
 
+def list_external_accounts(db_path: Path, *, user_id: int) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT provider, provider_user_id, display_name, created_at
+            FROM external_accounts
+            WHERE user_id = ?
+            ORDER BY provider
+            """,
+            (int(user_id),),
+        )
+        return rows_to_dicts(cur.fetchall())
+
+
+def link_external_account(
+    db_path: Path,
+    *,
+    user_id: int,
+    provider: str,
+    provider_user_id: str,
+    display_name: str | None = None,
+) -> dict[str, Any] | None:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE id = ?", (int(user_id),))
+        user = cur.fetchone()
+        if not user:
+            return None
+
+        cur.execute(
+            """
+            SELECT user_id
+            FROM external_accounts
+            WHERE provider = ? AND provider_user_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_user_id),
+        )
+        existing = cur.fetchone()
+        if existing and int(existing["user_id"]) != int(user_id):
+            return None
+        if existing:
+            cur.execute(
+                """
+                UPDATE external_accounts
+                SET display_name = ?
+                WHERE provider = ? AND provider_user_id = ? AND user_id = ?
+                """,
+                (display_name, provider, provider_user_id, int(user_id)),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO external_accounts (user_id, provider, provider_user_id, display_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(user_id), provider, provider_user_id, display_name, now),
+            )
+        conn.commit()
+        cur.execute("SELECT * FROM users WHERE id = ?", (int(user_id),))
+        return dict(cur.fetchone())
+
+
 def create_session(db_path: Path, *, user_id: int, token_hash: str, expires_at: str) -> None:
     with closing(connect(db_path)) as conn:
         conn.execute(

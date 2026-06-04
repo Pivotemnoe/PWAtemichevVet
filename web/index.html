@@ -7,7 +7,7 @@
     <title>TemichevVet</title>
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260604-auth-ux-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260604-auth-bridge-2" />
   </head>
   <body>
     <div class="app-shell">
@@ -36,7 +36,7 @@
                 сохранит разбор в истории и подскажет понятные следующие шаги.
               </p>
               <div class="hero-actions">
-                <a class="primary-link" href="#emailForm">Войти в кабинет</a>
+                <button class="primary-link" id="openAuthBtn" type="button">Войти в кабинет</button>
                 <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-бота</a>
               </div>
               <ul class="feature-list" aria-label="Возможности TemichevVet">
@@ -56,36 +56,49 @@
             </div>
           </div>
 
-          <div class="auth-grid">
-            <form class="panel" id="emailForm">
-              <h2>Войти по email</h2>
-              <p>Получите одноразовый код и откройте личный кабинет. Телефон и SMS на первом этапе не используем.</p>
-              <label>
-                <span>Email</span>
-                <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
-              </label>
-              <button class="primary-button" type="submit">Получить код</button>
-              <div class="code-row" id="codeRow" hidden>
-                <label>
-                  <span>Код</span>
-                  <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
-                </label>
-                <button class="secondary-button" id="verifyCodeBtn" type="button">Войти</button>
+          <div class="auth-dialog" id="authDialog" hidden role="dialog" aria-modal="true" aria-labelledby="authDialogTitle">
+            <div class="auth-card">
+              <div class="auth-card-head">
+                <div>
+                  <p class="section-label">Вход в личный кабинет</p>
+                  <h2 id="authDialogTitle">Выберите удобный способ входа</h2>
+                  <p>Один аккаунт нужен для сайта, PWA и подключённых мессенджеров. Мессенджер только подтверждает вход, а работать можно продолжать здесь.</p>
+                </div>
+                <button class="icon-button" id="authCloseBtn" type="button" title="Закрыть">×</button>
               </div>
-              <p class="hint" id="emailHint">Код действует 10 минут.</p>
-            </form>
 
-            <div class="panel auth-options">
-              <h2>Другие каналы</h2>
-              <a class="messenger-button" id="telegramBtn" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">
-                <span>Telegram</span>
-                <small>Открыть рабочего бота</small>
-              </a>
-              <button class="messenger-button" id="maxBtn" type="button">
-                <span>MAX</span>
-                <small>Бот в разработке</small>
-              </button>
-              <p class="hint" id="messengerHint">Telegram-бот уже доступен. MAX-бот готовится и будет подключён позже.</p>
+              <div class="auth-grid">
+                <form class="panel" id="emailForm">
+                  <h2>Войти по email</h2>
+                  <p>Получите одноразовый код и откройте личный кабинет. Телефон и SMS на первом этапе не используем.</p>
+                  <label>
+                    <span>Email</span>
+                    <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
+                  </label>
+                  <button class="primary-button" type="submit">Получить код</button>
+                  <div class="code-row" id="codeRow" hidden>
+                    <label>
+                      <span>Код</span>
+                      <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
+                    </label>
+                    <button class="secondary-button" id="verifyCodeBtn" type="button">Войти</button>
+                  </div>
+                  <p class="hint" id="emailHint">Код действует 10 минут.</p>
+                </form>
+
+                <div class="panel auth-options">
+                  <h2>Войти через мессенджер</h2>
+                  <button class="messenger-button" id="telegramBtn" type="button">
+                    <span>Telegram</span>
+                    <small>Подтвердить вход</small>
+                  </button>
+                  <button class="messenger-button" id="maxBtn" type="button">
+                    <span>MAX</span>
+                    <small>Подтвердить вход</small>
+                  </button>
+                  <p class="hint" id="messengerHint">Telegram и MAX используются только для подтверждения личности. После подтверждения вернитесь сюда — кабинет откроется автоматически.</p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -128,6 +141,10 @@
               <span class="tile-icon">💳</span>
               <span>Подписка</span>
             </button>
+            <button class="action-tile" data-action="account" type="button">
+              <span class="tile-icon">🔐</span>
+              <span>Способы входа</span>
+            </button>
             <button class="action-tile" data-action="feedback" type="button">
               <span class="tile-icon">✉️</span>
               <span>Обратная связь</span>
@@ -142,6 +159,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260604-auth-ux-1" type="module"></script>
+    <script src="/static/app.js?v=20260604-auth-bridge-2" type="module"></script>
   </body>
 </html>

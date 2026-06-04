@@ -1,16 +1,23 @@
 const state = {
   token: localStorage.getItem("tvv_token") || "",
+  telegramLoginState: localStorage.getItem("tvv_telegram_login_state") || "",
+  telegramLoginUrl: localStorage.getItem("tvv_telegram_login_url") || "",
   maxLoginState: localStorage.getItem("tvv_max_login_state") || "",
   maxLoginUrl: localStorage.getItem("tvv_max_login_url") || "",
   deferredInstall: null,
+  telegramPollTimer: null,
   maxPollTimer: null,
   user: null,
+  externalAccounts: [],
   pets: [],
   currentPetId: null
 };
 
 const authView = document.querySelector("#authView");
 const dashboardView = document.querySelector("#dashboardView");
+const openAuthBtn = document.querySelector("#openAuthBtn");
+const authDialog = document.querySelector("#authDialog");
+const authCloseBtn = document.querySelector("#authCloseBtn");
 const emailForm = document.querySelector("#emailForm");
 const emailInput = document.querySelector("#emailInput");
 const codeInput = document.querySelector("#codeInput");
@@ -46,6 +53,27 @@ const periodicityOptions = [
 function setAuthMode(isAuthed) {
   authView.hidden = isAuthed;
   dashboardView.hidden = !isAuthed;
+  if (isAuthed) closeAuthDialog();
+}
+
+function openAuthDialog() {
+  authDialog.hidden = false;
+  setTimeout(() => emailInput?.focus(), 0);
+}
+
+function closeAuthDialog() {
+  if (authDialog) authDialog.hidden = true;
+}
+
+function readableError(message) {
+  const text = String(message || "");
+  const messages = {
+    email_not_configured: "Вход по email подключается. Пока используйте Telegram или MAX для подтверждения входа.",
+    email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
+    invalid_code: "Код не подошёл. Проверьте цифры и попробуйте ещё раз.",
+    code_expired_or_not_found: "Код истёк. Запросите новый код."
+  };
+  return messages[text] || text || "Не удалось выполнить действие.";
 }
 
 function escapeHtml(value) {
@@ -114,6 +142,11 @@ async function api(path, options = {}) {
 async function bootstrap() {
   if (!state.token) {
     setAuthMode(false);
+    if (state.telegramLoginState) {
+      openAuthDialog();
+      renderTelegramWaiting(state.telegramLoginUrl, state.telegramLoginState);
+      pollTelegramLogin(state.telegramLoginState);
+    }
     if (state.maxLoginState) {
       clearMaxLogin();
     }
@@ -122,13 +155,20 @@ async function bootstrap() {
   try {
     const data = await api("/api/me");
     state.user = data.user;
+    state.externalAccounts = data.external_accounts || [];
     setAuthMode(true);
     await renderHome();
   } catch {
     localStorage.removeItem("tvv_token");
     state.token = "";
     state.user = null;
+    state.externalAccounts = [];
     setAuthMode(false);
+    if (state.telegramLoginState) {
+      openAuthDialog();
+      renderTelegramWaiting(state.telegramLoginUrl, state.telegramLoginState);
+      pollTelegramLogin(state.telegramLoginState);
+    }
     if (state.maxLoginState) {
       clearMaxLogin();
     }
@@ -139,6 +179,13 @@ async function refreshPets() {
   const data = await api("/api/pets");
   state.pets = data.items || [];
   return state.pets;
+}
+
+async function refreshAccountState() {
+  const data = await api("/api/me");
+  state.user = data.user;
+  state.externalAccounts = data.external_accounts || [];
+  return data;
 }
 
 function petOptions(selectedId = "") {
@@ -186,7 +233,7 @@ async function renderHome() {
         <span>основной питомец</span>
       </div>
       <div class="summary-card">
-        <strong>MAX / Email</strong>
+        <strong>Email / Telegram / MAX</strong>
         <span>доступ к кабинету</span>
       </div>
     </div>
@@ -194,8 +241,130 @@ async function renderHome() {
       <button class="primary-button" data-action="triage" type="button">🩺 Разобрать жалобу</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
       <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
+      <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
     </div>
   `, { scroll: false });
+}
+
+function isProviderConnected(provider) {
+  return state.externalAccounts.some((account) => account.provider === provider);
+}
+
+async function renderAccountLinks() {
+  await refreshAccountState();
+  const email = state.user?.email || "";
+  const telegramConnected = isProviderConnected("telegram");
+  const maxConnected = isProviderConnected("max");
+  setWorkspace(`
+    <div class="workspace-head">
+      <div>
+        <h2>Способы входа</h2>
+        <p>Подключите мессенджеры к текущему кабинету, чтобы не создавать второй аккаунт и не разделять питомцев, историю и подписку.</p>
+      </div>
+      <button class="secondary-button compact" data-action="home" type="button">На главную</button>
+    </div>
+    <div class="profile-card">
+      <h3>Email</h3>
+      <p>${email ? `Подключён: ${escapeHtml(email)}` : "Email пока не подключён. Вход по email можно использовать отдельно через окно входа."}</p>
+    </div>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <strong>Telegram</strong>
+        <span>${telegramConnected ? "подключён" : "можно подключить"}</span>
+        <button class="secondary-button compact" data-link-provider="telegram" type="button" ${telegramConnected ? "disabled" : ""}>
+          ${telegramConnected ? "Подключён" : "Подключить Telegram"}
+        </button>
+      </div>
+      <div class="summary-card">
+        <strong>MAX</strong>
+        <span>${maxConnected ? "подключён" : "можно подключить"}</span>
+        <button class="secondary-button compact" data-link-provider="max" type="button" ${maxConnected ? "disabled" : ""}>
+          ${maxConnected ? "Подключён" : "Подключить MAX"}
+        </button>
+      </div>
+    </div>
+    <div class="care-note">
+      Мессенджер нужен только для подтверждения личности. После подтверждения вернитесь сюда: сайт сам завершит привязку.
+    </div>
+    <p class="hint" id="accountLinkHint"></p>
+  `);
+}
+
+function setAccountLinkHint(content) {
+  const hint = document.querySelector("#accountLinkHint");
+  if (!hint) return;
+  if (typeof content === "string") {
+    hint.textContent = content;
+    return;
+  }
+  hint.innerHTML = "";
+  hint.append(content);
+}
+
+function renderAccountLinkWaiting(provider, url, loginState) {
+  const wrap = document.createElement("span");
+  const providerTitle = provider === "telegram" ? "Telegram" : "MAX";
+  wrap.append(`${providerTitle} открыт только для подтверждения входа. После подтверждения вернитесь сюда — сайт привяжет способ входа автоматически.`);
+
+  const actions = document.createElement("span");
+  actions.className = "hint-actions";
+  if (url) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = `Открыть ${providerTitle}`;
+    actions.append(link);
+  }
+  const checkButton = document.createElement("button");
+  checkButton.type = "button";
+  checkButton.textContent = "Проверить привязку";
+  checkButton.addEventListener("click", () => pollAccountLink(provider, loginState));
+  actions.append(checkButton);
+  wrap.append(actions);
+  setAccountLinkHint(wrap);
+}
+
+async function startProviderLink(provider) {
+  setAccountLinkHint("Готовлю безопасную привязку...");
+  try {
+    const data = await api(`/api/account/${provider}/start`, { method: "POST", body: "{}" });
+    if (!data.enabled || !data.url || !data.state) {
+      setAccountLinkHint(data.message || "Этот способ входа пока не настроен.");
+      return;
+    }
+    renderAccountLinkWaiting(provider, data.url, data.state);
+    window.open(data.url, "_blank", "noopener");
+    pollAccountLink(provider, data.state);
+  } catch (error) {
+    setAccountLinkHint(readableError(error.message));
+  }
+}
+
+async function pollAccountLink(provider, loginState, attempt = 0) {
+  if (attempt > 60) {
+    setAccountLinkHint("Подтверждение не найдено. Попробуйте подключить способ входа ещё раз.");
+    return;
+  }
+  try {
+    const data = await api(`/api/auth/${provider}/status?state=${encodeURIComponent(loginState)}`, { method: "GET" });
+    if (data.status === "complete" && data.token) {
+      state.token = data.token;
+      localStorage.setItem("tvv_token", data.token);
+      await refreshAccountState();
+      setAccountLinkHint("Способ входа подключён к этому кабинету.");
+      setTimeout(renderAccountLinks, 700);
+      return;
+    }
+    if (data.status === "expired") {
+      setAccountLinkHint(data.message || "Код истёк. Попробуйте подключить способ входа ещё раз.");
+      return;
+    }
+    setAccountLinkHint(data.message || "Ожидаем подтверждение...");
+  } catch (error) {
+    setAccountLinkHint(readableError(error.message));
+  }
+  setTimeout(() => pollAccountLink(provider, loginState, attempt + 1), 3000);
 }
 
 async function renderPets() {
@@ -670,7 +839,7 @@ emailForm.addEventListener("submit", async (event) => {
     codeRow.hidden = false;
     emailHint.textContent = data.debug_code ? `Тестовый код: ${data.debug_code}` : data.message;
   } catch (error) {
-    emailHint.textContent = `Ошибка: ${error.message}`;
+    emailHint.textContent = readableError(error.message);
   }
 });
 
@@ -683,12 +852,13 @@ verifyCodeBtn.addEventListener("click", async () => {
     });
     state.token = data.token;
     state.user = data.user;
+    state.externalAccounts = [];
     localStorage.setItem("tvv_token", data.token);
     setAuthMode(true);
     emailHint.textContent = "";
     await renderHome();
   } catch (error) {
-    emailHint.textContent = `Ошибка: ${error.message}`;
+    emailHint.textContent = readableError(error.message);
   }
 });
 
@@ -698,6 +868,13 @@ async function startMessenger(provider) {
     const data = await api(`/api/auth/${provider}/start`, { method: "POST", body: "{}" });
     messengerHint.textContent = data.message;
     if (data.enabled && data.url) {
+      if (provider === "telegram" && data.state) {
+        saveTelegramLogin(data.state, data.url);
+        renderTelegramWaiting(data.url, data.state);
+        window.open(data.url, "_blank", "noopener");
+        pollTelegramLogin(data.state);
+        return;
+      }
       if (provider === "max" && data.state) {
         saveMaxLogin(data.state, data.url);
         renderMaxWaiting(data.url, data.state);
@@ -710,6 +887,88 @@ async function startMessenger(provider) {
   } catch (error) {
     messengerHint.textContent = `Ошибка: ${error.message}`;
   }
+}
+
+function saveTelegramLogin(loginState, url) {
+  state.telegramLoginState = loginState;
+  state.telegramLoginUrl = url;
+  localStorage.setItem("tvv_telegram_login_state", loginState);
+  localStorage.setItem("tvv_telegram_login_url", url);
+}
+
+function clearTelegramLogin() {
+  state.telegramLoginState = "";
+  state.telegramLoginUrl = "";
+  localStorage.removeItem("tvv_telegram_login_state");
+  localStorage.removeItem("tvv_telegram_login_url");
+}
+
+function renderTelegramWaiting(url, loginState) {
+  messengerHint.innerHTML = "";
+  const text = document.createElement("span");
+  text.textContent = "Откройте Telegram только для подтверждения входа. После подтверждения вернитесь сюда — сайт завершит вход автоматически.";
+  messengerHint.append(text);
+
+  const actions = document.createElement("span");
+  actions.className = "hint-actions";
+
+  if (url) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "Открыть Telegram";
+    actions.append(link);
+  }
+
+  const checkButton = document.createElement("button");
+  checkButton.type = "button";
+  checkButton.textContent = "Проверить вход";
+  checkButton.addEventListener("click", () => pollTelegramLogin(loginState));
+  actions.append(checkButton);
+  messengerHint.append(actions);
+}
+
+function stopTelegramPolling() {
+  if (state.telegramPollTimer) {
+    clearTimeout(state.telegramPollTimer);
+    state.telegramPollTimer = null;
+  }
+}
+
+async function pollTelegramLogin(loginState, attempt = 0) {
+  stopTelegramPolling();
+  if (attempt > 60) {
+    messengerHint.textContent = "Telegram-вход не подтвержден. Попробуйте нажать кнопку ещё раз.";
+    clearTelegramLogin();
+    return;
+  }
+  try {
+    const data = await api(`/api/auth/telegram/status?state=${encodeURIComponent(loginState)}`, { method: "GET" });
+    if (data.status === "complete" && data.token) {
+      state.token = data.token;
+      state.user = data.user;
+      await refreshAccountState();
+      localStorage.setItem("tvv_token", data.token);
+      clearTelegramLogin();
+      messengerHint.textContent = "Telegram-вход подтвержден.";
+      setAuthMode(true);
+      stopTelegramPolling();
+      await renderHome();
+      return;
+    }
+    if (data.status === "expired") {
+      clearTelegramLogin();
+      messengerHint.textContent = data.message || "Код входа истек. Нажмите Telegram ещё раз.";
+      return;
+    }
+    renderTelegramWaiting(state.telegramLoginUrl, loginState);
+    messengerHint.firstChild.textContent = data.message || "Ожидаем подтверждение в Telegram...";
+  } catch (error) {
+    renderTelegramWaiting(state.telegramLoginUrl, loginState);
+    messengerHint.firstChild.textContent = `Ошибка проверки: ${error.message}`;
+  }
+  state.telegramPollTimer = setTimeout(() => pollTelegramLogin(loginState, attempt + 1), 3000);
 }
 
 function saveMaxLogin(loginState, url) {
@@ -729,7 +988,7 @@ function clearMaxLogin() {
 function renderMaxWaiting(url, loginState) {
   messengerHint.innerHTML = "";
   const text = document.createElement("span");
-  text.textContent = "Откройте MAX, запустите бота там, затем вернитесь сюда. PWA проверит вход автоматически.";
+  text.textContent = "Откройте MAX только для подтверждения входа. После подтверждения вернитесь сюда — сайт завершит вход автоматически.";
   messengerHint.append(text);
 
   const actions = document.createElement("span");
@@ -771,6 +1030,7 @@ async function pollMaxLogin(loginState, attempt = 0) {
     if (data.status === "complete" && data.token) {
       state.token = data.token;
       state.user = data.user;
+      await refreshAccountState();
       localStorage.setItem("tvv_token", data.token);
       clearMaxLogin();
       messengerHint.textContent = "MAX-вход подтвержден.";
@@ -793,24 +1053,33 @@ async function pollMaxLogin(loginState, attempt = 0) {
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
-maxBtn.addEventListener("click", () => {
-  messengerHint.textContent = "MAX-бот TemichevVet в разработке. Пока используйте вход по email или рабочий Telegram-бот.";
+openAuthBtn.addEventListener("click", openAuthDialog);
+authCloseBtn.addEventListener("click", closeAuthDialog);
+authDialog.addEventListener("click", (event) => {
+  if (event.target === authDialog) closeAuthDialog();
 });
+telegramBtn.addEventListener("click", () => startMessenger("telegram"));
+maxBtn.addEventListener("click", () => startMessenger("max"));
 
 logoutBtn.addEventListener("click", () => {
+  stopTelegramPolling();
+  clearTelegramLogin();
   stopMaxPolling();
   clearMaxLogin();
   localStorage.removeItem("tvv_token");
   state.token = "";
   state.user = null;
+  state.externalAccounts = [];
   setAuthMode(false);
 });
 
 window.addEventListener("focus", () => {
+  if (!state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);
   if (!state.token && state.maxLoginState) pollMaxLogin(state.maxLoginState);
 });
 
 document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);
   if (!document.hidden && !state.token && state.maxLoginState) pollMaxLogin(state.maxLoginState);
 });
 
@@ -821,8 +1090,13 @@ document.addEventListener("click", async (event) => {
   const setMainButton = event.target.closest("[data-set-main]");
   const deletePetButton = event.target.closest("[data-delete-pet]");
   const deleteReminderButton = event.target.closest("[data-delete-reminder]");
+  const linkProviderButton = event.target.closest("[data-link-provider]");
 
   try {
+    if (linkProviderButton) {
+      await startProviderLink(linkProviderButton.dataset.linkProvider);
+      return;
+    }
     if (openPetButton) {
       await renderPetCard(Number(openPetButton.dataset.openPet));
       return;
@@ -867,6 +1141,7 @@ document.addEventListener("click", async (event) => {
     if (action === "food") await renderFood();
     if (action === "reminders") await renderReminders();
     if (action === "subscription") renderSubscription();
+    if (action === "account") await renderAccountLinks();
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();
     if (action === "observations") await renderGlobalObservations();

@@ -10,12 +10,12 @@
 
 ## Stage 2: Messenger login
 
-- Enable MAX login after bot moderation and token issue.
-- Use local MAX polling for development and HTTPS webhook for production.
+- Add a separate login choice dialog instead of sending users straight to email.
 - Add Telegram login as an optional channel for users who can access it.
-- Link external messenger accounts to the same PWA user profile.
-- MAX login is connected in production through HTTPS webhook.
-- Telegram login remains optional/backlog because the product should not depend on Telegram availability.
+- Link Telegram account IDs to the same PWA user profile.
+- Keep MAX as a login provider for identity confirmation.
+- Build the full MAX bot menus and service scenarios separately from login.
+- Next: synchronize Telegram bot pets, payments, and subscription entitlements through the linked identity.
 
 ## Stage 3: Personal Cabinet
 

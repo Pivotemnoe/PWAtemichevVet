@@ -24,6 +24,7 @@ class Settings:
     session_secret: str
     database_path: Path
     telegram_bot_username: str
+    telegram_auth_secret: str
     max_bot_username: str
     max_bot_token: str
     max_api_base_url: str
@@ -46,6 +47,7 @@ def get_settings() -> Settings:
         session_secret=os.getenv("SESSION_SECRET", "change-me-long-random-secret"),
         database_path=database_path,
         telegram_bot_username=os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
+        telegram_auth_secret=os.getenv("TELEGRAM_AUTH_SECRET", "").strip(),
         max_bot_username=os.getenv("MAX_BOT_USERNAME", "").strip().lstrip("@"),
         max_bot_token=os.getenv("MAX_BOT_TOKEN", "").strip(),
         max_api_base_url=os.getenv("MAX_API_BASE_URL", "https://platform-api.max.ru").strip().rstrip("/"),
