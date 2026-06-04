@@ -1,8 +1,8 @@
-const CACHE_NAME = "temichevvet-pwa-cabinet-ux-4";
+const CACHE_NAME = "temichevvet-pwa-auth-ux-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260603-cabinet-ux-4",
-  "/static/app.js?v=20260603-cabinet-ux-4",
+  "/static/styles.css?v=20260604-auth-ux-1",
+  "/static/app.js?v=20260604-auth-ux-1",
   "/static/manifest.webmanifest",
   "/static/assets/icon.svg",
   "/static/assets/logo_temichevvet.jpg",

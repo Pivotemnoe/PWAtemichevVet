@@ -115,8 +115,7 @@ async function bootstrap() {
   if (!state.token) {
     setAuthMode(false);
     if (state.maxLoginState) {
-      renderMaxWaiting(state.maxLoginUrl, state.maxLoginState);
-      pollMaxLogin(state.maxLoginState);
+      clearMaxLogin();
     }
     return;
   }
@@ -131,8 +130,7 @@ async function bootstrap() {
     state.user = null;
     setAuthMode(false);
     if (state.maxLoginState) {
-      renderMaxWaiting(state.maxLoginUrl, state.maxLoginState);
-      pollMaxLogin(state.maxLoginState);
+      clearMaxLogin();
     }
   }
 }
@@ -795,8 +793,9 @@ async function pollMaxLogin(loginState, attempt = 0) {
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
-telegramBtn.addEventListener("click", () => startMessenger("telegram"));
-maxBtn.addEventListener("click", () => startMessenger("max"));
+maxBtn.addEventListener("click", () => {
+  messengerHint.textContent = "MAX-бот TemichevVet в разработке. Пока используйте вход по email или рабочий Telegram-бот.";
+});
 
 logoutBtn.addEventListener("click", () => {
   stopMaxPolling();

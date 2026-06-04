@@ -7,7 +7,7 @@
     <title>TemichevVet</title>
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260603-cabinet-ux-4" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260604-auth-ux-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -26,15 +26,40 @@
 
       <main>
         <section class="auth-view" id="authView">
-          <div class="intro-panel">
-            <img src="/static/assets/logo_temichevvet.jpg" alt="" class="intro-logo brand-logo-large" />
-            <h1>Личный кабинет TemichevVet</h1>
-            <p>Ведите карточки питомцев, историю здоровья, напоминания и быстрые проверки. Вход доступен по email или через MAX; телефон и SMS пока не используем.</p>
+          <div class="intro-panel product-hero">
+            <div class="hero-copy">
+              <img src="/static/assets/logo_temichevvet.jpg" alt="" class="intro-logo brand-logo-large" />
+              <p class="section-label">Личный кабинет и быстрые проверки</p>
+              <h1>TemichevVet — быстрый помощник, когда питомцу плохо</h1>
+              <p class="lead">
+                Опишите симптомы питомца простыми словами — сервис оценит срочность ситуации,
+                сохранит разбор в истории и подскажет понятные следующие шаги.
+              </p>
+              <div class="hero-actions">
+                <a class="primary-link" href="#emailForm">Войти в кабинет</a>
+                <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-бота</a>
+              </div>
+              <ul class="feature-list" aria-label="Возможности TemichevVet">
+                <li>вести карточки собак и кошек;</li>
+                <li>сохранять историю жалоб, наблюдения и вес;</li>
+                <li>создавать напоминания о вакцинации, обработках и осмотрах;</li>
+                <li>проверять продукты и готовые блюда по питанию;</li>
+                <li>пользоваться через сайт, PWA-приложение или Telegram-бота.</li>
+              </ul>
+              <p class="care-note">
+                Важно: TemichevVet не ставит диагноз и не назначает лечение. Он помогает быстрее
+                сориентироваться и вовремя обратиться в клинику при тревожных признаках.
+              </p>
+            </div>
+            <div class="hero-media">
+              <img src="/static/assets/triage_banner.jpg" alt="Проверка срочности состояния питомца" />
+            </div>
           </div>
 
           <div class="auth-grid">
             <form class="panel" id="emailForm">
-              <h2>Email</h2>
+              <h2>Войти по email</h2>
+              <p>Получите одноразовый код и откройте личный кабинет. Телефон и SMS на первом этапе не используем.</p>
               <label>
                 <span>Email</span>
                 <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
@@ -51,16 +76,16 @@
             </form>
 
             <div class="panel auth-options">
-              <h2>Мессенджеры</h2>
-              <button class="messenger-button" id="telegramBtn" type="button">
+              <h2>Другие каналы</h2>
+              <a class="messenger-button" id="telegramBtn" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">
                 <span>Telegram</span>
-                <small>Будет подключён отдельно</small>
-              </button>
+                <small>Открыть рабочего бота</small>
+              </a>
               <button class="messenger-button" id="maxBtn" type="button">
                 <span>MAX</span>
-                <small>Войти через MAX</small>
+                <small>Бот в разработке</small>
               </button>
-              <p class="hint" id="messengerHint">MAX откроется отдельно, а вход завершится здесь автоматически.</p>
+              <p class="hint" id="messengerHint">Telegram-бот уже доступен. MAX-бот готовится и будет подключён позже.</p>
             </div>
           </div>
         </section>
@@ -117,6 +142,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260603-cabinet-ux-4" type="module"></script>
+    <script src="/static/app.js?v=20260604-auth-ux-1" type="module"></script>
   </body>
 </html>
