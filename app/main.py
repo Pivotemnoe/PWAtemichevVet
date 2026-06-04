@@ -17,9 +17,11 @@ from app import db
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
 from app.knowledge import check_food, find_food, food_to_public
+from app.llm_triage import call_triage_llm, extract_urgency, short_summary
 from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
 from app.medical_safety import detect_red_flags, render_red_flag_response
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
+from app.subscriptions import get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 
 
@@ -441,6 +443,7 @@ def me(user: dict = Depends(current_user)) -> dict:
     return {
         "user": user,
         "external_accounts": db.list_external_accounts(settings.database_path, user_id=int(user["id"])),
+        "subscription": get_effective_subscription(settings, user).to_public(),
     }
 
 
@@ -650,9 +653,16 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
     pet_id = payload.pet_id
     if pet_id is not None and not db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
         raise HTTPException(status_code=404, detail="pet_not_found")
+    pets = db.list_pets(settings.database_path, owner_id=int(user["id"]))
+    selected_pet = (
+        db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=int(pet_id))
+        if pet_id is not None
+        else None
+    )
 
     red_flags = detect_red_flags(payload.text)
     if red_flags.has_red_flags:
+        sub = get_effective_subscription(settings, user)
         answer = render_red_flag_response(red_flags)
         log = db.create_triage_log(
             settings.database_path,
@@ -661,6 +671,9 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             complaint_text=_clean_text(payload.text),
             response_text=answer,
             urgency_level="red",
+            quota_before=sub.quota_used,
+            quota_after=sub.quota_used,
+            subscription_source=sub.source,
         )
         return {
             "status": "red",
@@ -668,28 +681,64 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             "matched": list(red_flags.matched),
             "triage_id": log["id"] if log else None,
             "answer": answer,
+            "subscription": sub.to_public(),
         }
 
-    answer = (
-        "🟡 Нужна консультация\n\n"
-        "В веб-версии уже работает проверка красных симптомов и сохранение обращения в историю питомца. "
-        "Полный LLM-разбор с лимитами и оплатой будет подключён следующим переносом из Telegram-бота.\n\n"
-        "Пока используйте этот раздел для фиксации жалобы. Если состояние ухудшается, не ждите онлайн-ответа и обратитесь в клинику."
-    )
+    ok, sub = try_consume_quota(settings, user, amount=1)
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                "Лимит разборов по текущему тарифу закончился. "
+                "Если Plus уже оплачен в Telegram, войдите на сайте через Telegram или подключите Telegram в разделе «Способы входа»."
+            ),
+        )
+    quota_before = sub.quota_used - 1
+    quota_after = sub.quota_used
+    try:
+        llm_result = call_triage_llm(
+            user=user,
+            pets=pets,
+            selected_pet=selected_pet,
+            complaint_text=_clean_text(payload.text),
+            plan_code=sub.plan,
+        )
+    except Exception as exc:
+        refund_quota(sub, amount=1)
+        logger.exception("PWA triage LLM failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось получить разбор. Запрос не списан, попробуйте позже.",
+        ) from exc
+
+    urgency_emoji, urgency_label, urgency_level = extract_urgency(llm_result.text)
+    urgency = urgency_level or "yellow"
+    summary = short_summary(llm_result.text) or _clean_text(payload.text)
     log = db.create_triage_log(
         settings.database_path,
         owner_id=int(user["id"]),
         pet_id=pet_id,
         complaint_text=_clean_text(payload.text),
-        response_text=answer,
-        urgency_level="yellow",
+        response_text=llm_result.text,
+        urgency_level=urgency,
+        quota_before=quota_before,
+        quota_after=quota_after,
+        prompt_tokens=llm_result.prompt_tokens,
+        completion_tokens=llm_result.completion_tokens,
+        total_tokens=llm_result.total_tokens,
+        model=llm_result.model,
+        subscription_source=sub.source,
     )
     return {
         "status": "saved",
-        "urgency": "yellow",
+        "urgency": urgency,
+        "urgency_emoji": urgency_emoji,
+        "urgency_label": urgency_label,
+        "summary": summary,
         "user_id": user["id"],
         "triage_id": log["id"] if log else None,
-        "answer": answer,
+        "answer": llm_result.text,
+        "subscription": sub.to_public(),
     }
 
 

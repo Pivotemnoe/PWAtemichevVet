@@ -15,7 +15,8 @@
 - Link Telegram account IDs to the same PWA user profile.
 - Keep MAX as a login provider for identity confirmation.
 - Build the full MAX bot menus and service scenarios separately from login.
-- Next: synchronize Telegram bot pets, payments, and subscription entitlements through the linked identity.
+- Telegram-linked users can reuse Telegram subscription entitlement in PWA.
+- Next: synchronize Telegram bot pets and future PWA payment activations through the linked identity.
 
 ## Stage 3: Personal Cabinet
 
@@ -32,8 +33,12 @@
 
 ## Stage 4: Full Triage And Payments
 
-- Move full LLM triage prompts and subscription limits from Telegram bot.
+- LLM triage is connected server-side.
+- Red symptoms run before LLM and do not consume quota.
+- PWA can read and consume the linked Telegram subscription quota when Telegram login is connected.
+- Paid PWA subscription rows can be mirrored to the linked Telegram `bot.db` so Telegram sees the same entitlement.
 - Add YooKassa payment flow for Plus inside PWA.
+- Mirror successful PWA Plus activation to the linked Telegram account.
 - Server-side payment validation only: amount, currency, paid status, metadata and user ownership.
 - Add web subscription screen with clear Free/Plus limits.
 - Add admin payment reports and reconciliation.

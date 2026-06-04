@@ -9,6 +9,7 @@ const state = {
   maxPollTimer: null,
   user: null,
   externalAccounts: [],
+  subscription: null,
   pets: [],
   currentPetId: null
 };
@@ -156,6 +157,7 @@ async function bootstrap() {
     const data = await api("/api/me");
     state.user = data.user;
     state.externalAccounts = data.external_accounts || [];
+    state.subscription = data.subscription || null;
     setAuthMode(true);
     await renderHome();
   } catch {
@@ -163,6 +165,7 @@ async function bootstrap() {
     state.token = "";
     state.user = null;
     state.externalAccounts = [];
+    state.subscription = null;
     setAuthMode(false);
     if (state.telegramLoginState) {
       openAuthDialog();
@@ -185,6 +188,7 @@ async function refreshAccountState() {
   const data = await api("/api/me");
   state.user = data.user;
   state.externalAccounts = data.external_accounts || [];
+  state.subscription = data.subscription || null;
   return data;
 }
 
@@ -696,6 +700,7 @@ async function renderTriage(prefillPetId = null) {
           text: String(form.get("text") || "")
         })
       });
+      state.subscription = data.subscription || state.subscription;
       resultEl.innerHTML = `
         <div class="result-box ${data.urgency === "red" ? "danger" : ""}">
           <pre>${escapeHtml(data.answer)}</pre>
@@ -753,6 +758,13 @@ async function renderFood() {
 }
 
 function renderSubscription() {
+  const sub = state.subscription || {};
+  const sourceLabel = sub.source === "telegram" ? "Telegram" : "PWA";
+  const plan = sub.title || sub.plan || "Free";
+  const quotaTotal = Number.isFinite(Number(sub.quota_total)) ? Number(sub.quota_total) : 0;
+  const quotaUsed = Number.isFinite(Number(sub.quota_used)) ? Number(sub.quota_used) : 0;
+  const quotaLeft = Number.isFinite(Number(sub.quota_left)) ? Number(sub.quota_left) : Math.max(0, quotaTotal - quotaUsed);
+  const periodEnd = sub.period_end ? formatDateTime(sub.period_end) : "—";
   setWorkspace(`
     <div class="workspace-head">
       <h2>Подписка</h2>
@@ -766,9 +778,12 @@ function renderSubscription() {
       </div>
     </div>
     <div class="profile-card">
-      <h3>Оплата через сайт</h3>
-      <p>Оплату Plus подключим отдельным защищённым потоком: создание платежа на сервере, проверка суммы, статуса оплаты и принадлежности платежа пользователю.</p>
-      <div class="notice">До включения web-оплаты кабинет не выдаёт Plus сам. Это защита от обхода тарифов.</div>
+      <h3>Ваш текущий доступ</h3>
+      <p><strong>Тариф:</strong> ${escapeHtml(plan)}</p>
+      <p><strong>Использовано разборов:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
+      <p><strong>Источник подписки:</strong> ${escapeHtml(sourceLabel)}.</p>
+      ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
+      <div class="notice">Если Plus оплачен в Telegram, войдите через Telegram или подключите Telegram в разделе «Способы входа» — кабинет подтянет тот же доступ.</div>
     </div>
   `);
 }
@@ -1140,7 +1155,10 @@ document.addEventListener("click", async (event) => {
     if (action === "triage") await renderTriage();
     if (action === "food") await renderFood();
     if (action === "reminders") await renderReminders();
-    if (action === "subscription") renderSubscription();
+    if (action === "subscription") {
+      await refreshAccountState();
+      renderSubscription();
+    }
     if (action === "account") await renderAccountLinks();
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();

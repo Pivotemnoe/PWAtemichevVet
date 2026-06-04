@@ -51,9 +51,9 @@ PWA_TELEGRAM_AUTH_SECRET=...
 
 The PWA creates a short-lived login state, opens the Telegram bot with `/start web_auth_<state>`, and the Telegram bot confirms that state through a server-to-server request. This links the PWA account to the Telegram user ID without exposing the shared secret to the browser.
 
-This bridge creates a shared identity link. A logged-in PWA user can also connect Telegram to the current account in `Способы входа`, so future pet/payment/subscription synchronization has a single owner.
+This bridge creates a shared identity link. A logged-in PWA user can also connect Telegram to the current account in `Способы входа`, so pet/payment/subscription synchronization has a single owner.
 
-Full synchronization of Telegram bot pets, payments, and subscription entitlements is a separate migration step.
+The PWA can reuse Telegram subscription entitlement through the linked Telegram ID. If a paid PWA subscription is later issued to a user with linked Telegram, the PWA mirrors that entitlement to the Telegram `bot.db`. Full pet synchronization is a separate migration step.
 
 ## Email Login
 
@@ -115,6 +115,6 @@ git push -u origin main
 
 1. Add SMTP provider for production email login.
 2. Move Plus/YooKassa payment flow from Telegram bot into PWA with server-side validation.
-3. Connect full LLM triage prompts and subscription limits.
+3. Finish web payment activation so a Plus purchase inside PWA also mirrors to the linked Telegram account.
 4. Add backups and monitoring for the PWA SQLite database.
 5. Prepare PostgreSQL migration before active growth.

@@ -190,6 +190,26 @@ def init_db(db_path: Path) -> None:
 
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                plan TEXT NOT NULL,
+                quota_total INTEGER NOT NULL,
+                quota_used INTEGER NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT,
+                source TEXT NOT NULL DEFAULT 'pwa',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        _ensure_column(cur, "subscriptions", "source", "TEXT NOT NULL DEFAULT 'pwa'")
+        _ensure_column(cur, "subscriptions", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)")
+
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS triage_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -203,6 +223,13 @@ def init_db(db_path: Path) -> None:
             )
             """
         )
+        _ensure_column(cur, "triage_logs", "quota_before", "INTEGER")
+        _ensure_column(cur, "triage_logs", "quota_after", "INTEGER")
+        _ensure_column(cur, "triage_logs", "prompt_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "completion_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "total_tokens", "INTEGER DEFAULT 0")
+        _ensure_column(cur, "triage_logs", "model", "TEXT")
+        _ensure_column(cur, "triage_logs", "subscription_source", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_logs_user ON triage_logs(user_id, created_at)")
 
         cur.execute(
@@ -366,6 +393,21 @@ def list_external_accounts(db_path: Path, *, user_id: int) -> list[dict[str, Any
             (int(user_id),),
         )
         return rows_to_dicts(cur.fetchall())
+
+
+def get_external_account(db_path: Path, *, user_id: int, provider: str) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT provider, provider_user_id, display_name, created_at
+            FROM external_accounts
+            WHERE user_id = ? AND provider = ?
+            LIMIT 1
+            """,
+            (int(user_id), provider),
+        )
+        return row_to_dict(cur.fetchone())
 
 
 def link_external_account(
@@ -831,6 +873,13 @@ def create_triage_log(
     complaint_text: str,
     response_text: str,
     urgency_level: str,
+    quota_before: int | None = None,
+    quota_after: int | None = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    model: str | None = None,
+    subscription_source: str | None = None,
 ) -> dict[str, Any] | None:
     if pet_id is not None and not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
         return None
@@ -839,10 +888,28 @@ def create_triage_log(
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO triage_logs (user_id, pet_id, complaint_text, response_text, urgency_level, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO triage_logs (
+                user_id, pet_id, complaint_text, response_text, urgency_level, created_at,
+                quota_before, quota_after, prompt_tokens, completion_tokens, total_tokens,
+                model, subscription_source
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (int(owner_id), pet_id, complaint_text, response_text, urgency_level, now),
+            (
+                int(owner_id),
+                pet_id,
+                complaint_text,
+                response_text,
+                urgency_level,
+                now,
+                quota_before,
+                quota_after,
+                int(prompt_tokens or 0),
+                int(completion_tokens or 0),
+                int(total_tokens or 0),
+                model,
+                subscription_source,
+            ),
         )
         triage_id = int(cur.lastrowid)
         if pet_id is not None:
