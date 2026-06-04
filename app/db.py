@@ -69,6 +69,7 @@ def init_db(db_path: Path) -> None:
             )
             """
         )
+        _ensure_column(cur, "auth_challenges", "failed_attempts", "INTEGER NOT NULL DEFAULT 0")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -295,6 +296,56 @@ def find_active_challenge(db_path: Path, *, channel: str, target: str) -> dict[s
             (channel, target, utc_now_iso()),
         )
         return row_to_dict(cur.fetchone())
+
+
+def count_auth_challenges_since(db_path: Path, *, channel: str, target: str, since: str) -> int:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM auth_challenges
+            WHERE channel = ?
+              AND target = ?
+              AND created_at >= ?
+            """,
+            (channel, target, since),
+        )
+        return int((cur.fetchone() or (0,))[0] or 0)
+
+
+def get_last_auth_challenge(db_path: Path, *, channel: str, target: str) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT *
+            FROM auth_challenges
+            WHERE channel = ?
+              AND target = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (channel, target),
+        )
+        return row_to_dict(cur.fetchone())
+
+
+def increment_challenge_failed_attempts(db_path: Path, challenge_id: int) -> int:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE auth_challenges
+            SET failed_attempts = COALESCE(failed_attempts, 0) + 1
+            WHERE id = ? AND consumed_at IS NULL
+            """,
+            (int(challenge_id),),
+        )
+        cur.execute("SELECT COALESCE(failed_attempts, 0) FROM auth_challenges WHERE id = ?", (int(challenge_id),))
+        row = cur.fetchone()
+        conn.commit()
+        return int((row or (0,))[0] or 0)
 
 
 def consume_challenge(db_path: Path, challenge_id: int) -> None:

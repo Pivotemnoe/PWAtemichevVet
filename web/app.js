@@ -71,7 +71,10 @@ function readableError(message) {
   const messages = {
     email_not_configured: "Вход по email подключается. Пока используйте Telegram или MAX для подтверждения входа.",
     email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
+    email_code_too_many_requests: "Код уже отправлен. Подождите около минуты перед повторной отправкой.",
+    email_code_hour_limit: "Слишком много кодов на этот email. Попробуйте позже.",
     invalid_code: "Код не подошёл. Проверьте цифры и попробуйте ещё раз.",
+    code_attempts_exceeded: "Слишком много неверных попыток. Запросите новый код.",
     code_expired_or_not_found: "Код истёк. Запросите новый код."
   };
   return messages[text] || text || "Не удалось выполнить действие.";

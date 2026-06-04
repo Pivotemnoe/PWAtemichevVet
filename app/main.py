@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -33,6 +33,10 @@ settings = get_settings()
 db.init_db(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 logger = logging.getLogger(__name__)
+
+EMAIL_CODE_COOLDOWN_SECONDS = 60
+EMAIL_CODE_MAX_PER_HOUR = 5
+EMAIL_CODE_MAX_VERIFY_ATTEMPTS = 5
 
 
 class EmailStartRequest(BaseModel):
@@ -149,6 +153,15 @@ def _email_delivery_enabled() -> bool:
     return bool(settings.smtp_host) or (settings.dev_auth_code_log and settings.app_env != "production")
 
 
+def _parse_iso_dt(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 def _clean_text(value: str | None, default: str = "") -> str:
     text = " ".join(str(value or "").split())
     return text or default
@@ -262,6 +275,20 @@ def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
         raise HTTPException(status_code=503, detail="email_not_configured")
 
     email = _normalize_email(str(payload.email))
+    last_challenge = db.get_last_auth_challenge(settings.database_path, channel="email", target=email)
+    last_created_at = _parse_iso_dt(last_challenge.get("created_at") if last_challenge else None)
+    if last_created_at and utc_now() - last_created_at < timedelta(seconds=EMAIL_CODE_COOLDOWN_SECONDS):
+        raise HTTPException(status_code=429, detail="email_code_too_many_requests")
+
+    recent_count = db.count_auth_challenges_since(
+        settings.database_path,
+        channel="email",
+        target=email,
+        since=(utc_now() - timedelta(hours=1)).isoformat(),
+    )
+    if recent_count >= EMAIL_CODE_MAX_PER_HOUR:
+        raise HTTPException(status_code=429, detail="email_code_hour_limit")
+
     code = make_code()
     db.create_auth_challenge(
         settings.database_path,
@@ -292,6 +319,10 @@ def auth_email_verify(payload: EmailVerifyRequest) -> SessionResponse:
 
     code_hash = hash_value(payload.code.strip(), settings.session_secret)
     if not constant_time_equal(code_hash, str(challenge["code_hash"])):
+        failed_attempts = db.increment_challenge_failed_attempts(settings.database_path, int(challenge["id"]))
+        if failed_attempts >= EMAIL_CODE_MAX_VERIFY_ATTEMPTS:
+            db.consume_challenge(settings.database_path, int(challenge["id"]))
+            raise HTTPException(status_code=400, detail="code_attempts_exceeded")
         raise HTTPException(status_code=400, detail="invalid_code")
 
     db.consume_challenge(settings.database_path, int(challenge["id"]))
