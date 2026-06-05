@@ -7,7 +7,8 @@
 - Действующий TemichevVet сейчас остается на сервере `5.129.239.104`.
 - Российский стенд подготовлен на сервере `193.188.23.65`.
 - DNS `temichevvet.ru` пока не менялся.
-- Конфиг nginx для `temichevvet.ru` на российском сервере подготовлен только как draft и не включен.
+- HTTP-конфиг nginx для `temichevvet.ru` на российском сервере включен заранее и проксирует PWA на `127.0.0.1:8081`.
+- HTTPS для `temichevvet.ru` пока не включен: сертификат нужно выпустить после смены DNS.
 - Telegram-бот на российском сервере установлен, но выключен, чтобы не было двух процессов с одним `BOT_TOKEN`.
 - PWA на российском сервере работает локально на `127.0.0.1:8081`.
 - SQLite-базы вынесены в отдельный каталог данных и не лежат внутри кода.
@@ -72,29 +73,73 @@ backup ok: <timestamp>; local_files=2; s3_uploaded=2
 temichevvet/backups/
 ```
 
-## Nginx
+## Синхронизация баз перед переключением
 
-Подготовленный draft:
+На российском сервере подготовлен скрипт:
 
 ```text
-/etc/nginx/sites-available/temichevvet.ru.draft
+/opt/temichevvet/scripts/sync_from_nl.sh
 ```
 
-До смены DNS и получения SSL он не должен быть включен в `sites-enabled`.
+Проверочный запуск без изменения российских баз:
+
+```bash
+/opt/temichevvet/scripts/sync_from_nl.sh dry-run
+```
+
+Что делает `dry-run`:
+
+- создает SQLite backup snapshots на старом NL-сервере;
+- скачивает `pwa.db` и `bot.db` во временный release-каталог на RU-сервере;
+- проверяет `PRAGMA integrity_check`;
+- не заменяет базы в `/opt/temichevvet/data`.
+
+Применение свежих баз на RU-сервере:
+
+```bash
+/opt/temichevvet/scripts/sync_from_nl.sh apply
+```
+
+Что делает `apply`:
+
+- отказывается работать, если RU Telegram bot уже активен;
+- временно останавливает RU PWA;
+- сохраняет текущие RU-базы в release-каталог;
+- ставит свежие базы из NL backup snapshots в `/opt/temichevvet/data`;
+- проверяет integrity;
+- запускает RU PWA обратно;
+- оставляет RU Telegram bot выключенным до явного финального запуска.
+
+## Nginx
+
+Включенный HTTP-конфиг:
+
+```text
+/etc/nginx/sites-available/temichevvet.ru
+/etc/nginx/sites-enabled/temichevvet.ru
+```
 
 Проверка:
 
 ```bash
-test -f /etc/nginx/sites-available/temichevvet.ru.draft
-test ! -e /etc/nginx/sites-enabled/temichevvet.ru
+test -f /etc/nginx/sites-available/temichevvet.ru
+test -e /etc/nginx/sites-enabled/temichevvet.ru
 nginx -t
+curl -sS -H "Host: temichevvet.ru" http://127.0.0.1/api/config
 ```
+
+После смены DNS на RU-сервер нужно выпустить SSL-сертификат и включить HTTPS.
 
 ## Порядок переключения
 
 1. Остановить действующий TemichevVet bot на старом сервере.
-2. Снять свежий backup баз на старом сервере.
-3. Перенести актуальные базы PWA и Telegram bot на российский сервер в `/opt/temichevvet/data`.
+2. Остановить или закрыть доступ к старой PWA на время финального переноса, чтобы новые действия пользователей не записались в старую базу после sync.
+3. Синхронизировать свежие базы через подготовленный скрипт:
+
+```bash
+/opt/temichevvet/scripts/sync_from_nl.sh apply
+```
+
 4. Проверить права на базы:
 
 ```bash
@@ -115,8 +160,8 @@ systemctl enable --now temichevvet_bot.service
 ```
 
 7. Проверить Telegram `/start`, PWA login, email login, Telegram login, MAX login, LLM triage, питание, питомцев, напоминания, подписку и платеж.
-8. После проверки сменить DNS `temichevvet.ru` и `www.temichevvet.ru` на российский сервер.
-9. После DNS выпустить SSL и включить nginx-конфиг для домена.
+8. Сменить DNS `temichevvet.ru` и `www.temichevvet.ru` на российский сервер `193.188.23.65`.
+9. После DNS выпустить SSL и включить HTTPS для домена.
 
 ## Откат
 
