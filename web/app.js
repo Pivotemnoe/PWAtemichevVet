@@ -15,7 +15,7 @@ const state = {
 };
 
 const LEGAL_UPDATED_AT = "5 июня 2026";
-const OPERATOR_EMAIL = "noreply@temichevvet.ru";
+const OPERATOR_EMAIL = "support@temichevvet.ru";
 
 const authView = document.querySelector("#authView");
 const dashboardView = document.querySelector("#dashboardView");
@@ -310,7 +310,7 @@ function setCookieConsent(value) {
   localStorage.setItem("tvv_cookie_consent", JSON.stringify({
     value,
     accepted_at: new Date().toISOString(),
-    version: "20260605-legal-1"
+    version: "20260605-legal-support-1"
   }));
   cookieBanner.hidden = true;
 }
