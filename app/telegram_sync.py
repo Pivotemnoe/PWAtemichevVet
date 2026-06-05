@@ -844,7 +844,7 @@ def sync_pwa_reminder_to_telegram(
         )
         bot_conn.commit()
         pwa_conn.commit()
-    return {"synced": True, "telegram_reminder_id": bot_reminder_id}
+    return {"synced": True, "telegram_pet_id": bot_pet_id, "telegram_reminder_id": bot_reminder_id}
 
 
 def sync_pwa_reminder_deactivation(settings: Settings, *, pwa_user: dict[str, Any], reminder_id: int) -> dict[str, Any]:
@@ -866,7 +866,10 @@ def sync_pwa_reminder_deactivation(settings: Settings, *, pwa_user: dict[str, An
             (utc_now_iso(), int(row["external_id"]), int(bot_user_id)),
         )
         bot_conn.commit()
-        return {"synced": cur.rowcount > 0}
+        return {
+            "synced": cur.rowcount > 0,
+            "telegram_reminder_id": int(row["external_id"]),
+        }
 
 
 def sync_pwa_observation_to_telegram(
@@ -919,7 +922,11 @@ def sync_pwa_observation_to_telegram(
         )
         bot_conn.commit()
         pwa_conn.commit()
-    return {"synced": True, "telegram_observation_id": bot_observation_id}
+    return {
+        "synced": True,
+        "telegram_pet_id": bot_pet_id,
+        "telegram_observation_id": bot_observation_id,
+    }
 
 
 def sync_pwa_measurement_to_telegram(
@@ -973,7 +980,11 @@ def sync_pwa_measurement_to_telegram(
         )
         bot_conn.commit()
         pwa_conn.commit()
-    return {"synced": True, "telegram_measurement_id": bot_measurement_id}
+    return {
+        "synced": True,
+        "telegram_pet_id": bot_pet_id,
+        "telegram_measurement_id": bot_measurement_id,
+    }
 
 
 def _recent_telegram_followup_exists(cur: sqlite3.Cursor, *, user_id: int) -> bool:
@@ -1070,6 +1081,8 @@ def sync_triage_to_telegram(
             "urgency_label": urgency_label,
             "urgency_level": urgency,
         }
+        bot_history_id = None
+        bot_observation_id = None
         if bot_pet_id is not None:
             cur.execute(
                 """
@@ -1085,6 +1098,7 @@ def sync_triage_to_telegram(
                     json.dumps(metadata, ensure_ascii=False),
                 ),
             )
+            bot_history_id = int(cur.lastrowid)
             cur.execute(
                 """
                 INSERT INTO pet_observations (user_id, pet_id, obs_type, payload, source, created_at)
@@ -1092,6 +1106,7 @@ def sync_triage_to_telegram(
                 """,
                 (bot_user_id, bot_pet_id, json.dumps(metadata, ensure_ascii=False), now),
             )
+            bot_observation_id = int(cur.lastrowid)
 
         scheduled_at = followup_due_at(urgency)
         followup_id = None
@@ -1125,5 +1140,7 @@ def sync_triage_to_telegram(
             "telegram_user_id": bot_user_id,
             "telegram_pet_id": bot_pet_id,
             "telegram_triage_id": bot_triage_id,
+            "telegram_history_id": bot_history_id,
+            "telegram_observation_id": bot_observation_id,
             "telegram_followup_id": followup_id,
         }

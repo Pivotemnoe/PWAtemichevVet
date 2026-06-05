@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -173,6 +173,10 @@ class TelegramCoreSyncEvent(BaseModel):
 class TelegramCoreSyncBatch(BaseModel):
     source: str = Field(default="telegram-nl", max_length=80)
     events: list[TelegramCoreSyncEvent] = Field(default_factory=list, max_length=500)
+
+
+class TelegramCoreOutboundAck(BaseModel):
+    event_ids: list[int] = Field(default_factory=list, max_length=500)
 
 
 def _normalize_email(email: str) -> str:
@@ -398,6 +402,28 @@ def _ensure_core_sync_log(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_core_outbound_log(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core_outbound_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            row_id INTEGER,
+            operation TEXT NOT NULL,
+            payload TEXT,
+            created_at TEXT NOT NULL,
+            delivered_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_core_outbound_events_pending
+        ON core_outbound_events(delivered_at, id)
+        """
+    )
+
+
 def _mirror_table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {str(row[1]) for row in rows}
@@ -463,6 +489,116 @@ def _save_core_sync_log(
         ),
     )
     return cur.rowcount > 0
+
+
+def _mirror_row_payload(
+    mirror_conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    row_id: int,
+    operation: str = "upsert",
+) -> dict[str, Any] | None:
+    if table_name not in TELEGRAM_CORE_SYNC_TABLES:
+        return None
+    if operation == "delete":
+        return {
+            "table_name": table_name,
+            "row_id": int(row_id),
+            "operation": "delete",
+            "row": None,
+            "created_at": utc_now().isoformat(),
+        }
+
+    mirror_conn.row_factory = sqlite3.Row
+    allowed_columns = _mirror_table_columns(mirror_conn, table_name)
+    if not allowed_columns:
+        return None
+    row = mirror_conn.execute(f"SELECT * FROM {table_name} WHERE id = ? LIMIT 1", (int(row_id),)).fetchone()
+    if row is None:
+        return None
+    return {
+        "table_name": table_name,
+        "row_id": int(row_id),
+        "operation": "upsert",
+        "row": {key: row[key] for key in row.keys()},
+        "created_at": utc_now().isoformat(),
+    }
+
+
+def _enqueue_core_outbound_event(table_name: str, row_id: int | None, operation: str = "upsert") -> bool:
+    if row_id is None:
+        return False
+    mirror_path = _core_mirror_db_path()
+    with closing(sqlite3.connect(mirror_path)) as mirror_conn:
+        payload = _mirror_row_payload(
+            mirror_conn,
+            table_name=table_name,
+            row_id=int(row_id),
+            operation=operation,
+        )
+    if payload is None:
+        return False
+
+    with closing(db.connect(settings.database_path)) as conn:
+        _ensure_core_outbound_log(conn)
+        conn.execute(
+            """
+            INSERT INTO core_outbound_events (table_name, row_id, operation, payload, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                table_name,
+                int(row_id),
+                operation,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                utc_now().isoformat(),
+            ),
+        )
+        conn.commit()
+    return True
+
+
+def _enqueue_core_outbound_subscription_for_bot_user(bot_user_id: int | None) -> bool:
+    if bot_user_id is None:
+        return False
+    mirror_path = _core_mirror_db_path()
+    with closing(sqlite3.connect(mirror_path)) as mirror_conn:
+        row = mirror_conn.execute(
+            "SELECT id FROM subscriptions WHERE user_id = ? LIMIT 1",
+            (int(bot_user_id),),
+        ).fetchone()
+    if not row:
+        return False
+    return _enqueue_core_outbound_event("subscriptions", int(row[0]))
+
+
+def _enqueue_core_outbound_from_sync(sync_result: dict, rows: tuple[tuple[str, str], ...]) -> dict[str, int]:
+    result = {"queued": 0, "skipped": 0}
+    if not sync_result.get("synced"):
+        result["skipped"] = len(rows)
+        return result
+
+    seen: set[tuple[str, int]] = set()
+    for key, table_name in rows:
+        row_id = sync_result.get(key)
+        if row_id is None:
+            result["skipped"] += 1
+            continue
+        try:
+            row_id_int = int(row_id)
+        except (TypeError, ValueError):
+            result["skipped"] += 1
+            continue
+        marker = (table_name, row_id_int)
+        if marker in seen:
+            result["skipped"] += 1
+            continue
+        seen.add(marker)
+        if _enqueue_core_outbound_event(table_name, row_id_int):
+            result["queued"] += 1
+        else:
+            result["skipped"] += 1
+    return result
 
 
 def _core_event_bot_user_id(
@@ -664,6 +800,68 @@ def telegram_core_sync_batch(
         "duplicates": duplicates,
         "profile_sync": profile_sync,
     }
+
+
+@app.get("/api/internal/telegram-sync/outbound")
+def telegram_core_sync_outbound(
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    _: None = Depends(_require_core_api_secret),
+) -> dict:
+    with closing(db.connect(settings.database_path)) as conn:
+        _ensure_core_outbound_log(conn)
+        rows = conn.execute(
+            """
+            SELECT id, table_name, row_id, operation, payload, created_at
+            FROM core_outbound_events
+            WHERE delivered_at IS NULL
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+
+    events = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        events.append(
+            {
+                "outbox_id": int(row["id"]),
+                "event_id": str(row["id"]),
+                "table_name": payload.get("table_name") or row["table_name"],
+                "row_id": payload.get("row_id") if payload.get("row_id") is not None else row["row_id"],
+                "operation": payload.get("operation") or row["operation"],
+                "row": payload.get("row"),
+                "created_at": payload.get("created_at") or row["created_at"],
+            }
+        )
+    return {"ok": True, "source": "ru-core", "events": events}
+
+
+@app.post("/api/internal/telegram-sync/outbound/ack")
+def telegram_core_sync_outbound_ack(
+    payload: TelegramCoreOutboundAck,
+    _: None = Depends(_require_core_api_secret),
+) -> dict:
+    event_ids = sorted({int(event_id) for event_id in payload.event_ids if int(event_id) > 0})
+    if not event_ids:
+        return {"ok": True, "acked": 0}
+
+    placeholders = ", ".join("?" for _ in event_ids)
+    with closing(db.connect(settings.database_path)) as conn:
+        _ensure_core_outbound_log(conn)
+        cur = conn.execute(
+            f"""
+            UPDATE core_outbound_events
+            SET delivered_at = COALESCE(delivered_at, ?)
+            WHERE id IN ({placeholders})
+            """,
+            (utc_now().isoformat(), *event_ids),
+        )
+        conn.commit()
+    return {"ok": True, "acked": int(cur.rowcount or 0)}
 
 
 @app.get("/api/config")
@@ -909,7 +1107,8 @@ def create_pet(payload: PetPayload, user: dict = Depends(current_user)) -> dict:
         breed=_clean_optional_text(payload.breed),
         is_main=payload.is_main,
     )
-    _safe_sync_pwa_pet_to_telegram(user, pet)
+    sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
+    _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
     pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=int(pet["id"])) or pet
     return {"item": _pet_public(pet)}
 
@@ -966,7 +1165,8 @@ def update_pet(pet_id: int, payload: PetPatchPayload, user: dict = Depends(curre
     pet = db.update_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, values=values)
     if not pet:
         raise HTTPException(status_code=404, detail="pet_not_found")
-    _safe_sync_pwa_pet_to_telegram(user, pet)
+    sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
+    _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
     pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id) or pet
     return {"item": _pet_public(pet)}
 
@@ -976,7 +1176,8 @@ def set_main_pet(pet_id: int, payload: MainPetPayload, user: dict = Depends(curr
     pet = db.set_main_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, is_main=payload.is_main)
     if not pet:
         raise HTTPException(status_code=404, detail="pet_not_found")
-    _safe_sync_pwa_pet_to_telegram(user, pet)
+    sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
+    _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
     return {"item": _pet_public(pet)}
 
 
@@ -1016,7 +1217,11 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, user: dict = Depend
     )
     if not item:
         raise HTTPException(status_code=404, detail="pet_not_found")
-    _safe_sync_pwa_measurement_to_telegram(user, item)
+    sync_result = _safe_sync_pwa_measurement_to_telegram(user, item)
+    _enqueue_core_outbound_from_sync(
+        sync_result,
+        (("telegram_pet_id", "pets"), ("telegram_measurement_id", "pet_measurements")),
+    )
     return {"item": item}
 
 
@@ -1041,7 +1246,11 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, user: dict = D
     )
     if not item:
         raise HTTPException(status_code=404, detail="pet_not_found")
-    _safe_sync_pwa_observation_to_telegram(user, item)
+    sync_result = _safe_sync_pwa_observation_to_telegram(user, item)
+    _enqueue_core_outbound_from_sync(
+        sync_result,
+        (("telegram_pet_id", "pets"), ("telegram_observation_id", "pet_observations")),
+    )
     return {"item": _parse_json_payload(item)}
 
 
@@ -1066,13 +1275,18 @@ def add_reminder(payload: ReminderPayload, user: dict = Depends(current_user)) -
     )
     if item is None:
         raise HTTPException(status_code=404, detail="pet_not_found")
-    _safe_sync_pwa_reminder_to_telegram(user, item)
+    sync_result = _safe_sync_pwa_reminder_to_telegram(user, item)
+    _enqueue_core_outbound_from_sync(
+        sync_result,
+        (("telegram_pet_id", "pets"), ("telegram_reminder_id", "reminders")),
+    )
     return {"item": item}
 
 
 @app.delete("/api/reminders/{reminder_id}")
 def delete_reminder(reminder_id: int, user: dict = Depends(current_user)) -> dict:
-    _safe_sync_pwa_reminder_deactivation(user, reminder_id)
+    sync_result = _safe_sync_pwa_reminder_deactivation(user, reminder_id)
+    _enqueue_core_outbound_from_sync(sync_result, (("telegram_reminder_id", "reminders"),))
     if not db.deactivate_reminder(settings.database_path, owner_id=int(user["id"]), reminder_id=reminder_id):
         raise HTTPException(status_code=404, detail="reminder_not_found")
     return {"ok": True}
@@ -1176,6 +1390,16 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             quota_before=sub.quota_used,
             quota_after=sub.quota_used,
         )
+        _enqueue_core_outbound_from_sync(
+            telegram_sync,
+            (
+                ("telegram_pet_id", "pets"),
+                ("telegram_triage_id", "triage_logs"),
+                ("telegram_history_id", "pet_history"),
+                ("telegram_observation_id", "pet_observations"),
+                ("telegram_followup_id", "triage_followups"),
+            ),
+        )
         return {
             "status": "red",
             "urgency": "red",
@@ -1253,6 +1477,18 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
         prompt_tokens=llm_result.prompt_tokens,
         completion_tokens=llm_result.completion_tokens,
         total_tokens=llm_result.total_tokens,
+    )
+    if sub.source == "telegram":
+        _enqueue_core_outbound_subscription_for_bot_user(sub.user_id)
+    _enqueue_core_outbound_from_sync(
+        telegram_sync,
+        (
+            ("telegram_pet_id", "pets"),
+            ("telegram_triage_id", "triage_logs"),
+            ("telegram_history_id", "pet_history"),
+            ("telegram_observation_id", "pet_observations"),
+            ("telegram_followup_id", "triage_followups"),
+        ),
     )
     return {
         "status": "saved",
