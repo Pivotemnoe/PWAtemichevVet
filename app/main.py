@@ -465,6 +465,109 @@ def _save_core_sync_log(
     return cur.rowcount > 0
 
 
+def _core_event_bot_user_id(
+    mirror_conn: sqlite3.Connection,
+    event: TelegramCoreSyncEvent,
+) -> int | None:
+    row = event.row or {}
+    table_name = event.table_name
+
+    if table_name == "users":
+        value = row.get("id") if row else event.row_id
+    elif table_name == "pets":
+        value = row.get("owner_id")
+    elif table_name in {
+        "subscriptions",
+        "payments",
+        "triage_logs",
+        "reminders",
+        "feedback",
+        "user_events",
+        "subscription_offer_logs",
+        "triage_followups",
+        "pet_observations",
+    }:
+        value = row.get("user_id")
+    else:
+        value = None
+
+    if value is not None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    if table_name in {"pet_history", "pet_measurements", "pet_vaccinations"}:
+        pet_id = row.get("pet_id")
+        if pet_id is None:
+            return None
+        try:
+            pet_id_int = int(pet_id)
+        except (TypeError, ValueError):
+            return None
+        found = mirror_conn.execute(
+            "SELECT owner_id FROM pets WHERE id = ? LIMIT 1",
+            (pet_id_int,),
+        ).fetchone()
+        if found and found[0] is not None:
+            return int(found[0])
+
+    return None
+
+
+def _pwa_users_linked_to_bot_users(bot_user_ids: set[int]) -> list[dict[str, Any]]:
+    if not bot_user_ids:
+        return []
+
+    mirror_path = _core_mirror_db_path()
+    with closing(sqlite3.connect(mirror_path)) as mirror_conn:
+        mirror_conn.row_factory = sqlite3.Row
+        placeholders = ", ".join("?" for _ in bot_user_ids)
+        rows = mirror_conn.execute(
+            f"SELECT telegram_id FROM users WHERE id IN ({placeholders})",
+            tuple(int(user_id) for user_id in bot_user_ids),
+        ).fetchall()
+
+    telegram_ids = [str(row["telegram_id"]) for row in rows if row["telegram_id"] is not None]
+    if not telegram_ids:
+        return []
+
+    with closing(db.connect(settings.database_path)) as pwa_conn:
+        placeholders = ", ".join("?" for _ in telegram_ids)
+        linked = pwa_conn.execute(
+            f"""
+            SELECT DISTINCT u.*
+            FROM external_accounts a
+            JOIN users u ON u.id = a.user_id
+            WHERE a.provider = 'telegram'
+              AND a.provider_user_id IN ({placeholders})
+            """,
+            tuple(telegram_ids),
+        ).fetchall()
+        return [dict(row) for row in linked]
+
+
+def _sync_linked_pwa_profiles_from_telegram(bot_user_ids: set[int]) -> dict[str, int]:
+    users = _pwa_users_linked_to_bot_users(bot_user_ids)
+    result = {"users": len(users), "synced": 0, "failed": 0}
+    for user in users:
+        try:
+            sync_result = sync_telegram_profile_to_pwa(settings, user)
+            if sync_result.get("synced"):
+                result["synced"] += 1
+            else:
+                result["failed"] += 1
+                logger.warning(
+                    "Telegram profile sync skipped for PWA user %s: %s",
+                    user.get("id"),
+                    sync_result,
+                )
+        except Exception as exc:
+            result["failed"] += 1
+            logger.warning("Telegram profile sync failed for PWA user %s: %s", user.get("id"), exc)
+    return result
+
+
 def _pet_public(pet: dict) -> dict:
     result = dict(pet)
     result["is_main"] = bool(result.get("is_main"))
@@ -528,6 +631,7 @@ def telegram_core_sync_batch(
     mirror_path = _core_mirror_db_path()
     applied = 0
     duplicates = 0
+    affected_bot_user_ids: set[int] = set()
     with closing(db.connect(settings.database_path)) as pwa_conn, closing(sqlite3.connect(mirror_path)) as mirror_conn:
         try:
             _ensure_core_sync_log(pwa_conn)
@@ -537,6 +641,9 @@ def telegram_core_sync_batch(
                     duplicates += 1
                     continue
                 _apply_core_sync_event(mirror_conn, event)
+                bot_user_id = _core_event_bot_user_id(mirror_conn, event)
+                if bot_user_id is not None:
+                    affected_bot_user_ids.add(bot_user_id)
                 applied += 1
             pwa_conn.commit()
             mirror_conn.commit()
@@ -549,11 +656,13 @@ def telegram_core_sync_batch(
             mirror_conn.rollback()
             logger.exception("Telegram core sync batch failed: %s", exc)
             raise HTTPException(status_code=500, detail="telegram_core_sync_failed") from exc
+    profile_sync = _sync_linked_pwa_profiles_from_telegram(affected_bot_user_ids)
     return {
         "ok": True,
         "received": len(payload.events),
         "applied": applied,
         "duplicates": duplicates,
+        "profile_sync": profile_sync,
     }
 
 
