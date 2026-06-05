@@ -37,6 +37,7 @@ class Settings:
     smtp_from_email: str
     smtp_use_tls: bool
     bot_database_path: str
+    core_api_secret: str
 
 
 def get_settings() -> Settings:
@@ -60,4 +61,5 @@ def get_settings() -> Settings:
         smtp_from_email=os.getenv("SMTP_FROM_EMAIL", "").strip(),
         smtp_use_tls=_bool_env("SMTP_USE_TLS", default=True),
         bot_database_path=os.getenv("BOT_DATABASE_PATH", "").strip(),
+        core_api_secret=os.getenv("CORE_API_SECRET", "").strip(),
     )

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
+from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -157,6 +159,20 @@ class FeedbackPayload(BaseModel):
 
 class FollowupAnswerPayload(BaseModel):
     answer: str = Field(min_length=2, max_length=20)
+
+
+class TelegramCoreSyncEvent(BaseModel):
+    event_id: str = Field(min_length=1, max_length=80)
+    table_name: str = Field(min_length=1, max_length=80)
+    row_id: int | None = None
+    operation: str = Field(pattern="^(upsert|delete)$")
+    row: dict[str, Any] | None = None
+    created_at: str | None = Field(default=None, max_length=80)
+
+
+class TelegramCoreSyncBatch(BaseModel):
+    source: str = Field(default="telegram-nl", max_length=80)
+    events: list[TelegramCoreSyncEvent] = Field(default_factory=list, max_length=500)
 
 
 def _normalize_email(email: str) -> str:
@@ -318,6 +334,137 @@ def _safe_sync_pwa_measurement_to_telegram(user: dict, measurement: dict) -> dic
         return {"synced": False, "reason": "sync_error"}
 
 
+TELEGRAM_CORE_SYNC_TABLES = {
+    "users",
+    "pets",
+    "subscriptions",
+    "payments",
+    "triage_logs",
+    "reminders",
+    "feedback",
+    "admin_audit_log",
+    "pet_history",
+    "pet_measurements",
+    "pet_vaccinations",
+    "pet_observations",
+    "user_events",
+    "subscription_offer_logs",
+    "triage_followups",
+}
+
+
+def _require_core_api_secret(authorization: Annotated[str | None, Header()] = None) -> None:
+    if not settings.core_api_secret:
+        raise HTTPException(status_code=503, detail="core_api_not_configured")
+    if not authorization:
+        raise HTTPException(status_code=401, detail="authorization_required")
+    match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
+    if not match:
+        raise HTTPException(status_code=401, detail="invalid_authorization_header")
+    if not constant_time_equal(match.group(1).strip(), settings.core_api_secret):
+        raise HTTPException(status_code=403, detail="invalid_core_api_secret")
+
+
+def _core_mirror_db_path() -> Path:
+    if not settings.bot_database_path:
+        raise HTTPException(status_code=503, detail="bot_mirror_db_not_configured")
+    path = Path(settings.bot_database_path).expanduser()
+    if not path.exists():
+        raise HTTPException(status_code=503, detail="bot_mirror_db_not_found")
+    return path
+
+
+def _ensure_core_sync_log(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core_sync_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            row_id INTEGER,
+            operation TEXT NOT NULL,
+            payload TEXT,
+            received_at TEXT NOT NULL,
+            UNIQUE(source, event_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_core_sync_events_received
+        ON core_sync_events(received_at)
+        """
+    )
+
+
+def _mirror_table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _apply_core_sync_event(conn: sqlite3.Connection, event: TelegramCoreSyncEvent) -> None:
+    table_name = event.table_name
+    if table_name not in TELEGRAM_CORE_SYNC_TABLES:
+        raise HTTPException(status_code=400, detail=f"sync_table_not_allowed:{table_name}")
+
+    if event.operation == "delete":
+        if event.row_id is None:
+            raise HTTPException(status_code=400, detail="delete_requires_row_id")
+        conn.execute(f"DELETE FROM {table_name} WHERE id = ?", (int(event.row_id),))
+        return
+
+    row = event.row or {}
+    if "id" not in row:
+        raise HTTPException(status_code=400, detail="upsert_requires_row_id")
+
+    allowed_columns = _mirror_table_columns(conn, table_name)
+    if not allowed_columns:
+        raise HTTPException(status_code=500, detail=f"sync_table_missing:{table_name}")
+    columns = [key for key in row.keys() if key in allowed_columns]
+    if "id" not in columns:
+        columns.insert(0, "id")
+    values = [row.get(column) for column in columns]
+    placeholders = ", ".join("?" for _ in columns)
+    column_sql = ", ".join(columns)
+    update_columns = [column for column in columns if column != "id"]
+    if update_columns:
+        update_sql = ", ".join(f"{column}=excluded.{column}" for column in update_columns)
+        sql = (
+            f"INSERT INTO {table_name} ({column_sql}) VALUES ({placeholders}) "
+            f"ON CONFLICT(id) DO UPDATE SET {update_sql}"
+        )
+    else:
+        sql = f"INSERT OR IGNORE INTO {table_name} ({column_sql}) VALUES ({placeholders})"
+    conn.execute(sql, values)
+
+
+def _save_core_sync_log(
+    conn: sqlite3.Connection,
+    *,
+    source: str,
+    event: TelegramCoreSyncEvent,
+) -> bool:
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO core_sync_events (
+            source, event_id, table_name, row_id, operation, payload, received_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source,
+            event.event_id,
+            event.table_name,
+            event.row_id,
+            event.operation,
+            json.dumps(event.model_dump(), ensure_ascii=False, sort_keys=True),
+            utc_now().isoformat(),
+        ),
+    )
+    return cur.rowcount > 0
+
+
 def _pet_public(pet: dict) -> dict:
     result = dict(pet)
     result["is_main"] = bool(result.get("is_main"))
@@ -361,6 +508,53 @@ def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True, "service": "temichevvet-pwa", "env": settings.app_env}
+
+
+@app.get("/api/internal/telegram-sync/ping")
+def telegram_core_sync_ping(_: None = Depends(_require_core_api_secret)) -> dict:
+    mirror_path = _core_mirror_db_path()
+    return {
+        "ok": True,
+        "service": "temichevvet-core-api",
+        "mirror_db": str(mirror_path),
+    }
+
+
+@app.post("/api/internal/telegram-sync/batch")
+def telegram_core_sync_batch(
+    payload: TelegramCoreSyncBatch,
+    _: None = Depends(_require_core_api_secret),
+) -> dict:
+    mirror_path = _core_mirror_db_path()
+    applied = 0
+    duplicates = 0
+    with closing(db.connect(settings.database_path)) as pwa_conn, closing(sqlite3.connect(mirror_path)) as mirror_conn:
+        try:
+            _ensure_core_sync_log(pwa_conn)
+            for event in payload.events:
+                inserted = _save_core_sync_log(pwa_conn, source=payload.source, event=event)
+                if not inserted:
+                    duplicates += 1
+                    continue
+                _apply_core_sync_event(mirror_conn, event)
+                applied += 1
+            pwa_conn.commit()
+            mirror_conn.commit()
+        except HTTPException:
+            pwa_conn.rollback()
+            mirror_conn.rollback()
+            raise
+        except Exception as exc:
+            pwa_conn.rollback()
+            mirror_conn.rollback()
+            logger.exception("Telegram core sync batch failed: %s", exc)
+            raise HTTPException(status_code=500, detail="telegram_core_sync_failed") from exc
+    return {
+        "ok": True,
+        "received": len(payload.events),
+        "applied": applied,
+        "duplicates": duplicates,
+    }
 
 
 @app.get("/api/config")
