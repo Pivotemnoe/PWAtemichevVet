@@ -7,7 +7,7 @@
     <title>TemichevVet</title>
     <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="icon" href="/static/assets/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260604-triage-followup-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260605-legal-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -176,6 +176,14 @@
                     <span>Email</span>
                     <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
                   </label>
+                  <label class="checkbox-row legal-consent">
+                    <input id="privacyConsent" type="checkbox" />
+                    <span>
+                      Я принимаю <button type="button" class="inline-legal-link" data-open-legal="terms">пользовательское соглашение</button>,
+                      даю <button type="button" class="inline-legal-link" data-open-legal="consent">согласие на обработку персональных данных</button>
+                      и ознакомлен с <button type="button" class="inline-legal-link" data-open-legal="privacy">политикой конфиденциальности</button>.
+                    </span>
+                  </label>
                   <button class="primary-button" type="submit">Получить код</button>
                   <div class="code-row" id="codeRow" hidden>
                     <label>
@@ -258,8 +266,48 @@
           </div>
         </section>
       </main>
+
+      <footer class="legal-footer">
+        <div>
+          <strong>TemichevVet</strong>
+          <span>Сервис не ставит диагноз и не назначает лечение. При тревожных симптомах обращайтесь в ветеринарную клинику.</span>
+        </div>
+        <nav aria-label="Юридические документы">
+          <button type="button" data-open-legal="privacy">Политика конфиденциальности</button>
+          <button type="button" data-open-legal="consent">Согласие на ПДн</button>
+          <button type="button" data-open-legal="terms">Пользовательское соглашение</button>
+          <button type="button" data-open-legal="medical">Медицинский дисклеймер</button>
+          <button type="button" data-open-legal="cookies">Cookie</button>
+          <button type="button" data-open-legal="contacts">Контакты</button>
+        </nav>
+      </footer>
     </div>
 
-    <script src="/static/app.js?v=20260604-triage-followup-1" type="module"></script>
+    <div class="legal-modal" id="legalModal" hidden role="dialog" aria-modal="true" aria-labelledby="legalModalTitle">
+      <article class="legal-card">
+        <div class="legal-card-head">
+          <h2 id="legalModalTitle">Документ</h2>
+          <button class="icon-button" id="legalCloseBtn" type="button" title="Закрыть">×</button>
+        </div>
+        <div class="legal-content" id="legalContent"></div>
+      </article>
+    </div>
+
+    <div class="cookie-banner" id="cookieBanner" hidden>
+      <div>
+        <strong>Cookie и локальное хранение</strong>
+        <p>
+          Мы используем необходимые cookie/localStorage для входа, безопасности, PWA-кеша и сохранения состояния интерфейса.
+          Аналитика будет включаться только после отдельного согласия.
+        </p>
+      </div>
+      <div class="cookie-actions">
+        <button class="secondary-button compact" id="cookieNecessaryBtn" type="button">Только необходимые</button>
+        <button class="primary-button compact" id="cookieAcceptBtn" type="button">Принять все</button>
+        <button class="secondary-button compact" data-open-legal="cookies" type="button">Подробнее</button>
+      </div>
+    </div>
+
+    <script src="/static/app.js?v=20260605-legal-1" type="module"></script>
   </body>
 </html>

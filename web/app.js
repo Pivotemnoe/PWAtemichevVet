@@ -14,6 +14,9 @@ const state = {
   currentPetId: null
 };
 
+const LEGAL_UPDATED_AT = "5 июня 2026";
+const OPERATOR_EMAIL = "noreply@temichevvet.ru";
+
 const authView = document.querySelector("#authView");
 const dashboardView = document.querySelector("#dashboardView");
 const openAuthBtn = document.querySelector("#openAuthBtn");
@@ -31,6 +34,14 @@ const maxBtn = document.querySelector("#maxBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
 const installBtn = document.querySelector("#installBtn");
 const workspace = document.querySelector("#workspace");
+const privacyConsent = document.querySelector("#privacyConsent");
+const legalModal = document.querySelector("#legalModal");
+const legalModalTitle = document.querySelector("#legalModalTitle");
+const legalContent = document.querySelector("#legalContent");
+const legalCloseBtn = document.querySelector("#legalCloseBtn");
+const cookieBanner = document.querySelector("#cookieBanner");
+const cookieAcceptBtn = document.querySelector("#cookieAcceptBtn");
+const cookieNecessaryBtn = document.querySelector("#cookieNecessaryBtn");
 
 const reminderTypes = [
   ["vaccine", "Вакцинация"],
@@ -91,6 +102,217 @@ function escapeHtml(value) {
 
 function nl2br(value) {
   return escapeHtml(value).replace(/\n/g, "<br>");
+}
+
+function legalEmailLink() {
+  return `<a href="mailto:${OPERATOR_EMAIL}">${OPERATOR_EMAIL}</a>`;
+}
+
+const legalDocuments = {
+  privacy: {
+    title: "Политика конфиденциальности",
+    html: `
+      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Контакт оператора: ${legalEmailLink()}.</div>
+      <section>
+        <h3>1. Для чего нужна политика</h3>
+        <p>Эта политика объясняет, какие данные обрабатывает сервис TemichevVet, зачем они нужны, где хранятся и как пользователь может запросить доступ, исправление или удаление данных.</p>
+      </section>
+      <section>
+        <h3>2. Оператор и контакт</h3>
+        <p>Оператор сервиса TemichevVet обрабатывает данные пользователей сайта, PWA и подключённых мессенджеров. По вопросам персональных данных и работы сервиса можно написать на ${legalEmailLink()}.</p>
+      </section>
+      <section>
+        <h3>3. Какие данные обрабатываются</h3>
+        <ul>
+          <li>email, внешние идентификаторы Telegram и MAX, сведения о способе входа;</li>
+          <li>данные о питомцах: кличка, вид, возраст, вес, порода, пол, наблюдения, напоминания, история обращений;</li>
+          <li>тексты жалоб и вопросов, которые пользователь вводит для разбора состояния или питания;</li>
+          <li>данные подписки, лимитов и платежных событий без хранения полных реквизитов банковской карты;</li>
+          <li>технические данные: IP-адрес, время запроса, ошибки, данные сессии, cookie/localStorage, записи безопасности.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>4. Цели обработки</h3>
+        <ul>
+          <li>создание и защита личного кабинета;</li>
+          <li>ведение карточек питомцев, истории, наблюдений, веса и напоминаний;</li>
+          <li>оценка срочности ситуации и подготовка понятных рекомендаций владельцу;</li>
+          <li>синхронизация одного аккаунта между сайтом, PWA, Telegram и MAX;</li>
+          <li>поддержка пользователей, обработка обратной связи, улучшение безопасности и качества сервиса;</li>
+          <li>учет подписки, лимитов и платежей.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>5. Правовые основания</h3>
+        <p>Обработка выполняется на основании согласия пользователя, пользовательского соглашения, необходимости предоставления функций сервиса и требований законодательства Российской Федерации.</p>
+      </section>
+      <section>
+        <h3>6. Хранение и передача</h3>
+        <p>Основные базы личного кабинета размещаются на сервере в Российской Федерации. Для работы сервиса могут использоваться серверные интеграции с Telegram, MAX, email-провайдером, платежным провайдером и LLM-провайдером. Передаются только данные, необходимые для конкретной функции: входа, уведомления, оплаты, ответа на запрос или синхронизации.</p>
+      </section>
+      <section>
+        <h3>7. Срок хранения</h3>
+        <p>Данные хранятся, пока пользователь использует сервис, пока требуется история питомца или пока это необходимо для исполнения закона, безопасности, платежного учета и разрешения спорных ситуаций. Пользователь может запросить удаление данных.</p>
+      </section>
+      <section>
+        <h3>8. Права пользователя</h3>
+        <p>Пользователь может запросить сведения об обработке, уточнение, блокирование или удаление данных, а также отозвать согласие. Запрос можно отправить на ${legalEmailLink()}.</p>
+      </section>
+      <section>
+        <h3>9. Безопасность</h3>
+        <p>Сервис использует серверную проверку доступа, защищенные токены, раздельные секреты для интеграций, резервное копирование и ограничение доступа к внутренним API. Пользователь отвечает за сохранность доступа к своей почте и мессенджерам.</p>
+      </section>
+    `
+  },
+  consent: {
+    title: "Согласие на обработку персональных данных",
+    html: `
+      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Согласие даётся при регистрации, входе, отправке формы или использовании сервиса.</div>
+      <section>
+        <h3>1. Что подтверждает пользователь</h3>
+        <p>Пользователь свободно, своей волей и в своём интересе даёт согласие оператору TemichevVet на обработку персональных данных для работы личного кабинета и функций сервиса.</p>
+      </section>
+      <section>
+        <h3>2. Данные</h3>
+        <p>Согласие распространяется на email, идентификаторы Telegram/MAX, сведения о питомцах, тексты обращений, историю, напоминания, подписку, платежные события и технические данные, необходимые для безопасности и работы сервиса.</p>
+      </section>
+      <section>
+        <h3>3. Действия с данными</h3>
+        <p>Разрешаются сбор, запись, систематизация, хранение, уточнение, использование, передача партнерам для выполнения функций сервиса, обезличивание, блокирование, удаление и уничтожение данных.</p>
+      </section>
+      <section>
+        <h3>4. Передача и интеграции</h3>
+        <p>Для входа, уведомлений, оплаты, синхронизации и подготовки ответа данные могут передаваться Telegram, MAX, email-сервису, платежному провайдеру, инфраструктурным провайдерам и LLM-провайдеру в объеме, необходимом для выбранной функции.</p>
+      </section>
+      <section>
+        <h3>5. Срок действия и отзыв</h3>
+        <p>Согласие действует до его отзыва или до достижения целей обработки. Отозвать согласие можно письмом на ${legalEmailLink()}. После отзыва часть функций сервиса может стать недоступной.</p>
+      </section>
+    `
+  },
+  terms: {
+    title: "Пользовательское соглашение",
+    html: `
+      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Используя сайт, PWA или подключённые мессенджеры, пользователь принимает это соглашение.</div>
+      <section>
+        <h3>1. Предмет</h3>
+        <p>TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, проверку жалоб, проверку питания, подписку и синхронизацию входов.</p>
+      </section>
+      <section>
+        <h3>2. Один аккаунт</h3>
+        <p>Email, Telegram и MAX могут быть связаны с одним личным кабинетом. Это нужно, чтобы не создавать две регистрации, не разделять историю питомцев и не оплачивать подписку повторно.</p>
+      </section>
+      <section>
+        <h3>3. Обязанности пользователя</h3>
+        <ul>
+          <li>указывать достоверные данные о питомце и ситуации;</li>
+          <li>не использовать сервис вместо очного осмотра ветеринарного врача;</li>
+          <li>не передавать доступ к личному кабинету третьим лицам;</li>
+          <li>не загружать незаконные, вредоносные или чужие персональные данные без оснований.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>4. Ограничения сервиса</h3>
+        <p>Ответы сервиса являются информационной поддержкой. Сервис не ставит диагноз, не назначает лечение, не гарантирует исход ситуации и не заменяет ветеринарного врача.</p>
+      </section>
+      <section>
+        <h3>5. Подписка и оплата</h3>
+        <p>Платные функции предоставляются по условиям выбранного тарифа. Plus оплачивается разово на указанный срок без автосписаний, если явно не указано иное. Платежные данные обрабатываются платежным провайдером.</p>
+      </section>
+      <section>
+        <h3>6. Изменения</h3>
+        <p>Сервис может обновлять функции, интерфейс, тарифы и документы. Актуальная редакция документов публикуется на сайте.</p>
+      </section>
+    `
+  },
+  medical: {
+    title: "Медицинский дисклеймер",
+    html: `
+      <div class="legal-meta">TemichevVet — информационный помощник, а не ветеринарная клиника.</div>
+      <section>
+        <h3>Что важно понимать</h3>
+        <p>Сервис помогает быстрее сориентироваться по срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.</p>
+      </section>
+      <section>
+        <h3>Когда срочно в клинику</h3>
+        <p>При тяжелом дыхании, судорогах, потере сознания, признаках отравления, крови, сильной боли, невозможности мочиться, резком вздутии живота, тяжелой травме или быстром ухудшении состояния нужно срочно обращаться в ветеринарную клинику и не ждать ответа сервиса.</p>
+      </section>
+      <section>
+        <h3>Как использовать ответы</h3>
+        <p>Ответы удобно использовать как чек-лист: что наблюдать, что подготовить для врача, какие признаки считать тревожными. Окончательное решение по диагностике и лечению принимает ветеринарный врач.</p>
+      </section>
+    `
+  },
+  cookies: {
+    title: "Cookie и локальное хранение",
+    html: `
+      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Вы можете принять все cookie или оставить только необходимые.</div>
+      <section>
+        <h3>Что используется сейчас</h3>
+        <ul>
+          <li>необходимые данные входа: токен сессии, состояние входа через Telegram/MAX, одноразовые состояния формы;</li>
+          <li>PWA-кеш: файлы интерфейса, чтобы приложение быстрее открывалось и могло устанавливаться на устройство;</li>
+          <li>настройка cookie-согласия, чтобы не показывать баннер повторно;</li>
+          <li>технические серверные журналы безопасности и ошибок.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Аналитика</h3>
+        <p>На текущем этапе сторонняя рекламная аналитика не используется. Если она будет подключена, сервис должен обновить этот раздел и запрашивать согласие на необязательные cookie.</p>
+      </section>
+      <section>
+        <h3>Как отказаться</h3>
+        <p>Необходимые cookie/localStorage нужны для входа и безопасности. Их можно удалить в настройках браузера, но после этого потребуется войти снова.</p>
+      </section>
+    `
+  },
+  contacts: {
+    title: "Контакты оператора",
+    html: `
+      <div class="legal-meta">Основной контакт для обращений: ${legalEmailLink()}.</div>
+      <section>
+        <h3>По каким вопросам писать</h3>
+        <ul>
+          <li>вопросы по личному кабинету и входу;</li>
+          <li>запрос доступа, исправления или удаления персональных данных;</li>
+          <li>отзыв согласия на обработку персональных данных;</li>
+          <li>вопросы по подписке, оплате и синхронизации Telegram/MAX;</li>
+          <li>технические ошибки сайта или PWA.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Важно</h3>
+        <p>Этот контакт не является экстренной ветеринарной консультацией. При тяжелом состоянии питомца обращайтесь в ближайшую ветеринарную клинику.</p>
+      </section>
+    `
+  }
+};
+
+function openLegalModal(type = "privacy") {
+  const doc = legalDocuments[type] || legalDocuments.privacy;
+  legalModalTitle.textContent = doc.title;
+  legalContent.innerHTML = doc.html;
+  legalModal.hidden = false;
+}
+
+function closeLegalModal() {
+  legalModal.hidden = true;
+}
+
+function showCookieBannerIfNeeded() {
+  if (!cookieBanner) return;
+  if (!localStorage.getItem("tvv_cookie_consent")) {
+    cookieBanner.hidden = false;
+  }
+}
+
+function setCookieConsent(value) {
+  localStorage.setItem("tvv_cookie_consent", JSON.stringify({
+    value,
+    accepted_at: new Date().toISOString(),
+    version: "20260605-legal-1"
+  }));
+  cookieBanner.hidden = true;
 }
 
 function formatDateTime(value) {
@@ -889,6 +1111,11 @@ async function renderGlobalObservations() {
 
 emailForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!privacyConsent?.checked) {
+    emailHint.textContent = "Перед входом нужно принять соглашение и согласие на обработку персональных данных.";
+    privacyConsent?.focus();
+    return;
+  }
   emailHint.textContent = "Отправляю код...";
   try {
     const data = await api("/api/auth/email/start", {
@@ -1117,6 +1344,12 @@ authCloseBtn.addEventListener("click", closeAuthDialog);
 authDialog.addEventListener("click", (event) => {
   if (event.target === authDialog) closeAuthDialog();
 });
+legalCloseBtn.addEventListener("click", closeLegalModal);
+legalModal.addEventListener("click", (event) => {
+  if (event.target === legalModal) closeLegalModal();
+});
+cookieAcceptBtn.addEventListener("click", () => setCookieConsent("all"));
+cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary"));
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
 
@@ -1143,6 +1376,13 @@ document.addEventListener("visibilitychange", () => {
 });
 
 document.addEventListener("click", async (event) => {
+  const legalButton = event.target.closest("[data-open-legal]");
+  if (legalButton) {
+    event.preventDefault();
+    openLegalModal(legalButton.dataset.openLegal);
+    return;
+  }
+
   const actionButton = event.target.closest("[data-action]");
   const openPetButton = event.target.closest("[data-open-pet]");
   const petViewButton = event.target.closest("[data-pet-view]");
@@ -1251,4 +1491,5 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/static/sw.js").catch(() => {});
 }
 
+showCookieBannerIfNeeded();
 bootstrap();

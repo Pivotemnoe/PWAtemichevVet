@@ -864,6 +864,36 @@ textarea:focus {
   min-height: 20px;
 }
 
+.legal-consent {
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: #34425a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.legal-consent input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.inline-legal-link {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--blue);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
@@ -936,6 +966,157 @@ textarea:focus {
   background: #fff2f1;
   border-color: #f2b8b5;
   color: #7a271a;
+}
+
+.legal-footer {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 0 16px 34px;
+  color: var(--muted);
+}
+
+.legal-footer > div {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.legal-footer strong {
+  color: var(--text);
+}
+
+.legal-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.legal-footer button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--blue);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.legal-footer button:hover,
+.inline-legal-link:hover {
+  color: var(--blue-dark);
+}
+
+.legal-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(11, 23, 38, 0.48);
+}
+
+.legal-card {
+  width: min(920px, 100%);
+  max-height: min(840px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgba(11, 23, 38, 0.28);
+}
+
+.legal-card-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 18px 22px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.legal-card-head h2 {
+  margin: 0;
+}
+
+.legal-content {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.legal-content section {
+  display: grid;
+  gap: 8px;
+}
+
+.legal-content h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.legal-content p,
+.legal-content li {
+  color: #34425a;
+  line-height: 1.55;
+}
+
+.legal-content p {
+  margin-bottom: 0;
+}
+
+.legal-content ul,
+.legal-content ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.legal-meta {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.cookie-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 20px 65px rgba(11, 23, 38, 0.22);
+}
+
+.cookie-banner p {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.cookie-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cookie-actions .primary-button,
+.cookie-actions .secondary-button {
+  width: auto;
 }
 
 @media (max-width: 760px) {
@@ -1043,6 +1224,34 @@ textarea:focus {
   .auth-card {
     max-height: calc(100vh - 24px);
     padding: 18px;
+  }
+
+  .legal-modal {
+    align-items: start;
+    padding: 12px;
+  }
+
+  .legal-card {
+    max-height: calc(100vh - 24px);
+  }
+
+  .legal-card-head,
+  .legal-content {
+    padding: 16px;
+  }
+
+  .cookie-banner {
+    grid-template-columns: 1fr;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: calc(100% - 24px);
+  }
+
+  .cookie-actions,
+  .cookie-actions .primary-button,
+  .cookie-actions .secondary-button {
+    width: 100%;
   }
 
   .auth-card-head {
