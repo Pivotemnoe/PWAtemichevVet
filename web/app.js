@@ -7,6 +7,7 @@ const state = {
   deferredInstall: null,
   telegramPollTimer: null,
   maxPollTimer: null,
+  lastPlusPaymentId: localStorage.getItem("tvv_last_plus_payment_id") || "",
   user: null,
   externalAccounts: [],
   subscription: null,
@@ -86,7 +87,12 @@ function readableError(message) {
     email_code_hour_limit: "Слишком много кодов на этот email. Попробуйте позже.",
     invalid_code: "Код не подошёл. Проверьте цифры и попробуйте ещё раз.",
     code_attempts_exceeded: "Слишком много неверных попыток. Запросите новый код.",
-    code_expired_or_not_found: "Код истёк. Запросите новый код."
+    code_expired_or_not_found: "Код истёк. Запросите новый код.",
+    payment_provider_not_configured: "Оплата в веб-кабинете ещё настраивается. Пока используйте оплату в Telegram-версии.",
+    payment_provider_error: "Платёжный сервис временно не ответил. Попробуйте позже.",
+    payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
+    payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
+    payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку."
   };
   return messages[text] || text || "Не удалось выполнить действие.";
 }
@@ -222,6 +228,46 @@ const legalDocuments = {
       <section>
         <h3>6. Изменения</h3>
         <p>Сервис может обновлять функции, интерфейс, тарифы и документы. Актуальная редакция документов публикуется на сайте.</p>
+      </section>
+    `
+  },
+  offer: {
+    title: "Публичная оферта",
+    html: `
+      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Оферта определяет условия покупки доступа Plus в сервисе TemichevVet.</div>
+      <section>
+        <h3>1. Услуга</h3>
+        <p>Платная услуга TemichevVet — предоставление доступа Plus к расширенным функциям личного кабинета здоровья питомца на 30 календарных дней.</p>
+      </section>
+      <section>
+        <h3>2. Что входит в Plus</h3>
+        <ul>
+          <li>до 10 разборов по здоровью питомца в месяц;</li>
+          <li>расширенная история обращений по питомцам;</li>
+          <li>до 20 активных напоминаний;</li>
+          <li>ведение до 3 питомцев в личном кабинете;</li>
+          <li>синхронизация доступа между сайтом, PWA и подключёнными мессенджерами.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>3. Стоимость и срок</h3>
+        <p>Стоимость Plus составляет 200 рублей за 30 дней. Оплата разовая, автоматических списаний нет. После окончания оплаченного срока сервис возвращает доступ на Free, если Plus не продлён повторной оплатой.</p>
+      </section>
+      <section>
+        <h3>4. Порядок оказания услуги</h3>
+        <p>Доступ Plus активируется после успешного подтверждения платежа платёжным провайдером. Полные данные банковской карты TemichevVet не хранит.</p>
+      </section>
+      <section>
+        <h3>5. Ограничения</h3>
+        <p>TemichevVet является информационным сервисом. Платный доступ не является медицинской услугой, ветеринарной консультацией, постановкой диагноза или назначением лечения.</p>
+      </section>
+      <section>
+        <h3>6. Возвраты и обращения</h3>
+        <p>По вопросам оплаты, технических ошибок и доступа Plus пользователь может написать на ${legalEmailLink()}. Запрос рассматривается по существу обращения и данным платежа.</p>
+      </section>
+      <section>
+        <h3>7. Принятие оферты</h3>
+        <p>Нажатие кнопки оплаты и успешная оплата означают принятие этой оферты, пользовательского соглашения, политики конфиденциальности и медицинского дисклеймера.</p>
       </section>
     `
   },
@@ -366,6 +412,7 @@ async function api(path, options = {}) {
 }
 
 async function bootstrap() {
+  const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus";
   if (!state.token) {
     setAuthMode(false);
     if (state.telegramLoginState) {
@@ -384,6 +431,11 @@ async function bootstrap() {
     state.externalAccounts = data.external_accounts || [];
     state.subscription = data.subscription || null;
     setAuthMode(true);
+    if (shouldCheckPayment) {
+      renderSubscription(`<div class="notice">Вернулись с оплаты. Проверяю статус платежа...</div>`);
+      await checkPlusPaymentStatus({ replaceHistory: true });
+      return;
+    }
     await renderHome();
   } catch {
     localStorage.removeItem("tvv_token");
@@ -1023,7 +1075,62 @@ async function renderFood() {
   });
 }
 
-function renderSubscription() {
+function paymentStatusNotice(message, type = "") {
+  const className = type ? `notice ${type}` : "notice";
+  return `<div class="${className}">${escapeHtml(message)}</div>`;
+}
+
+async function startPlusPayment() {
+  const resultEl = document.querySelector("#paymentResult");
+  if (resultEl) resultEl.innerHTML = paymentStatusNotice("Создаю защищённую ссылку оплаты...");
+  try {
+    const data = await api("/api/payments/plus/create", { method: "POST" });
+    state.subscription = data.subscription || state.subscription;
+    if (data.status === "already_active") {
+      renderSubscription(paymentStatusNotice(data.message || "Plus уже активен."));
+      return;
+    }
+    if (!data.confirmation_url || !data.payment_id) {
+      throw new Error("payment_confirmation_missing");
+    }
+    state.lastPlusPaymentId = data.payment_id;
+    localStorage.setItem("tvv_last_plus_payment_id", data.payment_id);
+    window.location.href = data.confirmation_url;
+  } catch (error) {
+    if (resultEl) resultEl.innerHTML = paymentStatusNotice(`Ошибка: ${readableError(error.message)}`, "danger");
+  }
+}
+
+async function checkPlusPaymentStatus(options = {}) {
+  const resultEl = document.querySelector("#paymentResult");
+  if (resultEl) resultEl.innerHTML = paymentStatusNotice("Проверяю оплату...");
+  try {
+    const paymentId = state.lastPlusPaymentId || localStorage.getItem("tvv_last_plus_payment_id") || "";
+    const path = paymentId
+      ? `/api/payments/${encodeURIComponent(paymentId)}/status`
+      : "/api/payments/plus/status";
+    const data = await api(path);
+    state.subscription = data.subscription || state.subscription;
+    if (data.status === "succeeded") {
+      state.lastPlusPaymentId = "";
+      localStorage.removeItem("tvv_last_plus_payment_id");
+    }
+    if (options.replaceHistory) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    const type = data.status === "canceled" || data.status === "invalid" || data.status === "not_found" ? "danger" : "";
+    renderSubscription(paymentStatusNotice(data.message || "Статус платежа обновлён.", type));
+  } catch (error) {
+    if (options.replaceHistory) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    const message = paymentStatusNotice(`Ошибка: ${readableError(error.message)}`, "danger");
+    if (resultEl) resultEl.innerHTML = message;
+    else renderSubscription(message);
+  }
+}
+
+function renderSubscription(statusHtml = "") {
   const sub = state.subscription || {};
   const sourceLabel = sub.source === "telegram" ? "Telegram" : "PWA";
   const plan = sub.title || sub.plan || "Free";
@@ -1031,6 +1138,7 @@ function renderSubscription() {
   const quotaUsed = Number.isFinite(Number(sub.quota_used)) ? Number(sub.quota_used) : 0;
   const quotaLeft = Number.isFinite(Number(sub.quota_left)) ? Number(sub.quota_left) : Math.max(0, quotaTotal - quotaUsed);
   const periodEnd = sub.period_end ? formatDateTime(sub.period_end) : "—";
+  const canPay = !sub.plan || sub.plan === "free";
   setWorkspace(`
     <div class="workspace-head">
       <h2>Подписка</h2>
@@ -1043,6 +1151,37 @@ function renderSubscription() {
         <p>Расширенные лимиты, история по питомцам и больше активных напоминаний. Автосписаний не будет.</p>
       </div>
     </div>
+    <div class="pricing-grid subscription-pricing" aria-label="Тарифы TemichevVet">
+      <article class="pricing-card">
+        <div>
+          <strong>Free</strong>
+          <span>Бесплатный старт</span>
+        </div>
+        <p>Базовый личный кабинет для первых проверок и ведения питомца.</p>
+        <ul>
+          <li>до 5 разборов по здоровью в первый месяц;</li>
+          <li>карточка питомца, история, наблюдения и вес;</li>
+          <li>базовый доступ к материалам и проверке питания.</li>
+        </ul>
+      </article>
+      <article class="pricing-card featured">
+        <div>
+          <strong>Plus</strong>
+          <span>200 ₽ за 30 дней</span>
+        </div>
+        <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
+        <ul>
+          <li>до 10 разборов по здоровью в месяц;</li>
+          <li>расширенная история по питомцам;</li>
+          <li>до 20 активных напоминаний;</li>
+          <li>до 3 питомцев в личном кабинете.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="legal-price-note">
+      Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет
+      возвращается на Free, если Plus не продлить.
+    </p>
     <div class="profile-card">
       <h3>Ваш текущий доступ</h3>
       <p><strong>Тариф:</strong> ${escapeHtml(plan)}</p>
@@ -1050,6 +1189,16 @@ function renderSubscription() {
       <p><strong>Источник подписки:</strong> ${escapeHtml(sourceLabel)}.</p>
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
       <div class="notice">Если Plus оплачен в Telegram, войдите через Telegram или подключите Telegram в разделе «Способы входа» — кабинет подтянет тот же доступ.</div>
+      ${canPay ? `
+        <div class="next-actions payment-actions">
+          <button class="primary-button" data-action="pay-plus" type="button">💳 Оплатить Plus — 200 ₽</button>
+          <button class="secondary-button" data-action="check-plus-payment" type="button">Проверить оплату</button>
+        </div>
+        <p class="hint">Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет вернётся на Free.</p>
+      ` : `
+        <div class="notice">Plus активен. Повторная оплата сейчас не нужна.</div>
+      `}
+      <div id="paymentResult">${statusHtml}</div>
     </div>
   `);
 }
@@ -1464,6 +1613,8 @@ document.addEventListener("click", async (event) => {
       await refreshAccountState();
       renderSubscription();
     }
+    if (action === "pay-plus") await startPlusPayment();
+    if (action === "check-plus-payment") await checkPlusPaymentStatus();
     if (action === "account") await renderAccountLinks();
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();

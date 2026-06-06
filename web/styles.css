@@ -377,6 +377,66 @@ p {
   color: var(--blue-dark);
 }
 
+.pricing-section {
+  gap: 22px;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.pricing-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 270px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.pricing-card.featured {
+  border-color: #9fc5ee;
+  background: #f1f8ff;
+}
+
+.pricing-card div {
+  display: grid;
+  gap: 5px;
+}
+
+.pricing-card strong {
+  font-size: 22px;
+}
+
+.pricing-card span {
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.pricing-card p {
+  margin-bottom: 0;
+}
+
+.pricing-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: #34425a;
+  line-height: 1.45;
+}
+
+.legal-price-note {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
 .service-flow {
   grid-template-columns: minmax(0, 1fr) minmax(300px, 0.82fr);
   align-items: center;
@@ -1193,6 +1253,7 @@ textarea:focus {
   .service-summary,
   .feature-card-grid,
   .service-flow,
+  .pricing-grid,
   .channel-grid,
   .auth-grid,
   .summary-grid,
@@ -1212,6 +1273,7 @@ textarea:focus {
   }
 
   .feature-card,
+  .pricing-card,
   .channel-card {
     min-height: auto;
   }

@@ -335,6 +335,40 @@ def get_effective_subscription(settings: Settings, user: dict[str, Any]) -> Subs
     return local
 
 
+def activate_paid_subscription(
+    settings: Settings,
+    *,
+    user_id: int,
+    plan_code: str = "plus",
+    days: int = 30,
+) -> SubscriptionRef:
+    plan = _normalize_plan(plan_code)
+    if plan == "free":
+        raise ValueError("paid subscription plan must not be free")
+    now = utc_now_iso()
+    period_end = (utc_now() + timedelta(days=int(days))).isoformat()
+    quota_total = int(SUBSCRIPTION_PLANS[plan]["quota_total"])
+    with closing(db.connect(settings.database_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO subscriptions (user_id, plan, quota_total, quota_used, period_start, period_end, source, updated_at)
+            VALUES (?, ?, ?, 0, ?, ?, 'pwa', ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                plan = excluded.plan,
+                quota_total = excluded.quota_total,
+                quota_used = 0,
+                period_start = excluded.period_start,
+                period_end = excluded.period_end,
+                source = 'pwa',
+                updated_at = excluded.updated_at
+            """,
+            (int(user_id), plan, quota_total, now, period_end, now),
+        )
+        conn.commit()
+    return SubscriptionRef("pwa", int(user_id), plan, quota_total, 0, now, period_end, settings.database_path)
+
+
 def _update_quota(ref: SubscriptionRef, quota_used: int) -> None:
     with closing(sqlite3.connect(ref.db_path)) as conn:
         cur = conn.cursor()

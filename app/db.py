@@ -262,6 +262,39 @@ def init_db(db_path: Path) -> None:
 
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                provider_payment_id TEXT NOT NULL,
+                plan_code TEXT NOT NULL DEFAULT 'plus',
+                amount_rub INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                confirmation_url TEXT,
+                idempotence_key TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                paid_at TEXT,
+                raw_payload TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        _ensure_column(cur, "payments", "confirmation_url", "TEXT")
+        _ensure_column(cur, "payments", "idempotence_key", "TEXT")
+        _ensure_column(cur, "payments", "paid_at", "TEXT")
+        _ensure_column(cur, "payments", "raw_payload", "TEXT")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider_payment_id
+            ON payments(provider, provider_payment_id)
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_user_created ON payments(user_id, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_provider_status ON payments(provider, status)")
+
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS triage_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -339,6 +372,167 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
+
+
+def _json_dump(value: dict[str, Any] | None) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _json_load(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payment_public(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    item = dict(row)
+    item["raw_payload"] = _json_load(item.get("raw_payload"))
+    return item
+
+
+def create_payment_record(
+    db_path: Path,
+    *,
+    user_id: int,
+    provider: str,
+    provider_payment_id: str,
+    amount_rub: int,
+    status: str,
+    plan_code: str = "plus",
+    confirmation_url: str | None = None,
+    idempotence_key: str | None = None,
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO payments (
+                user_id, provider, provider_payment_id, plan_code, amount_rub,
+                status, confirmation_url, idempotence_key, created_at, updated_at,
+                paid_at, raw_payload
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            ON CONFLICT(provider, provider_payment_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                plan_code = excluded.plan_code,
+                amount_rub = excluded.amount_rub,
+                status = excluded.status,
+                confirmation_url = excluded.confirmation_url,
+                idempotence_key = excluded.idempotence_key,
+                updated_at = excluded.updated_at,
+                raw_payload = excluded.raw_payload
+            """,
+            (
+                int(user_id),
+                provider,
+                provider_payment_id,
+                plan_code,
+                int(amount_rub),
+                status,
+                confirmation_url,
+                idempotence_key,
+                now,
+                now,
+                _json_dump(raw_payload),
+            ),
+        )
+        conn.commit()
+        cur.execute(
+            """
+            SELECT *
+            FROM payments
+            WHERE provider = ? AND provider_payment_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_payment_id),
+        )
+        row = cur.fetchone()
+        result = _payment_public(row)
+        if result is None:
+            raise RuntimeError("payment_record_not_created")
+        return result
+
+
+def update_payment_status(
+    db_path: Path,
+    *,
+    provider: str,
+    provider_payment_id: str,
+    status: str,
+    paid_at: str | None = None,
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        if raw_payload is None:
+            cur.execute(
+                """
+                UPDATE payments
+                SET status = ?, paid_at = COALESCE(?, paid_at), updated_at = ?
+                WHERE provider = ? AND provider_payment_id = ?
+                """,
+                (status, paid_at, now, provider, provider_payment_id),
+            )
+        else:
+            cur.execute(
+                """
+                UPDATE payments
+                SET status = ?, paid_at = COALESCE(?, paid_at), updated_at = ?, raw_payload = ?
+                WHERE provider = ? AND provider_payment_id = ?
+                """,
+                (status, paid_at, now, _json_dump(raw_payload), provider, provider_payment_id),
+            )
+        conn.commit()
+        cur.execute(
+            """
+            SELECT *
+            FROM payments
+            WHERE provider = ? AND provider_payment_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_payment_id),
+        )
+        return _payment_public(cur.fetchone())
+
+
+def get_payment_record(db_path: Path, *, provider: str, provider_payment_id: str) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM payments
+            WHERE provider = ? AND provider_payment_id = ?
+            LIMIT 1
+            """,
+            (provider, provider_payment_id),
+        ).fetchone()
+        return _payment_public(row)
+
+
+def get_last_payment(db_path: Path, *, user_id: int, provider: str = "yookassa") -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM payments
+            WHERE user_id = ? AND provider = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(user_id), provider),
+        ).fetchone()
+        return _payment_public(row)
 
 
 def create_auth_challenge(
@@ -651,6 +845,7 @@ def merge_users(db_path: Path, *, source_user_id: int, target_user_id: int) -> d
             ("triage_logs", "user_id"),
             ("triage_followups", "user_id"),
             ("feedback", "user_id"),
+            ("payments", "user_id"),
         ):
             if _table_exists(cur, table):
                 cur.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (target_id, source_id))
@@ -781,6 +976,12 @@ def get_user_by_session(db_path: Path, *, token_hash: str) -> dict[str, Any] | N
             (token_hash, utc_now_iso()),
         )
         return row_to_dict(cur.fetchone())
+
+
+def get_user_by_id(db_path: Path, *, user_id: int) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ? LIMIT 1", (int(user_id),)).fetchone()
+        return row_to_dict(row)
 
 
 def list_pets(db_path: Path, *, owner_id: int) -> list[dict[str, Any]]:

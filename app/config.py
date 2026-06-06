@@ -38,6 +38,13 @@ class Settings:
     smtp_use_tls: bool
     bot_database_path: str
     core_api_secret: str
+    yookassa_shop_id: str
+    yookassa_secret_key: str
+    yookassa_return_url: str
+    yookassa_webhook_secret: str
+    yookassa_receipt_email: str
+    yookassa_tax_system_code: str
+    yookassa_vat_code: str
 
 
 def get_settings() -> Settings:
@@ -62,4 +69,11 @@ def get_settings() -> Settings:
         smtp_use_tls=_bool_env("SMTP_USE_TLS", default=True),
         bot_database_path=os.getenv("BOT_DATABASE_PATH", "").strip(),
         core_api_secret=os.getenv("CORE_API_SECRET", "").strip(),
+        yookassa_shop_id=os.getenv("YOOKASSA_SHOP_ID", "").strip(),
+        yookassa_secret_key=os.getenv("YOOKASSA_SECRET_KEY", ""),
+        yookassa_return_url=os.getenv("YOOKASSA_RETURN_URL", "").strip(),
+        yookassa_webhook_secret=os.getenv("YOOKASSA_WEBHOOK_SECRET", "").strip(),
+        yookassa_receipt_email=os.getenv("YOOKASSA_RECEIPT_EMAIL", "").strip(),
+        yookassa_tax_system_code=os.getenv("YOOKASSA_TAX_SYSTEM_CODE", "").strip(),
+        yookassa_vat_code=os.getenv("YOOKASSA_VAT_CODE", "1").strip() or "1",
     )

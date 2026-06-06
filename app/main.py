@@ -23,8 +23,20 @@ from app.knowledge import check_food, find_food, food_to_public
 from app.llm_triage import call_triage_llm, extract_urgency, short_summary
 from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
 from app.medical_safety import detect_red_flags, render_red_flag_response
+from app.payments.yookassa import (
+    PLUS_DAYS,
+    PROVIDER as YOOKASSA_PROVIDER,
+    YooKassaConfigError,
+    YooKassaPaymentError,
+    YooKassaPaymentValidationError,
+    confirmation_url as yookassa_confirmation_url,
+    create_plus_payment as create_yookassa_plus_payment,
+    get_payment as get_yookassa_payment,
+    payment_status as yookassa_payment_status,
+    validate_plus_payment as validate_yookassa_plus_payment,
+)
 from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
-from app.subscriptions import get_effective_subscription, refund_quota, try_consume_quota
+from app.subscriptions import activate_paid_subscription, get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 from app.telegram_sync import (
     sync_pwa_measurement_to_telegram,
@@ -159,6 +171,23 @@ class FeedbackPayload(BaseModel):
 
 class FollowupAnswerPayload(BaseModel):
     answer: str = Field(min_length=2, max_length=20)
+
+
+class PaymentCreateResponse(BaseModel):
+    ok: bool
+    status: str
+    payment_id: str | None = None
+    confirmation_url: str | None = None
+    message: str
+    subscription: dict | None = None
+
+
+class PaymentStatusResponse(BaseModel):
+    ok: bool
+    status: str
+    payment_id: str | None = None
+    message: str
+    subscription: dict | None = None
 
 
 class TelegramCoreSyncEvent(BaseModel):
@@ -739,6 +768,96 @@ def current_user(token: str = Depends(_require_bearer)) -> dict:
     return user
 
 
+def _payment_message(status: str) -> str:
+    messages = {
+        "pending": "Платёж создан. Перейдите к оплате и затем вернитесь проверить статус.",
+        "waiting_for_capture": "Платёж ожидает подтверждения. Если деньги списались, проверьте статус через минуту.",
+        "succeeded": "Plus подключён на 30 дней.",
+        "canceled": "Платёж отменён или не завершён.",
+        "invalid": "Платёж не прошёл серверную проверку. Напишите в поддержку.",
+    }
+    return messages.get(status, "Статус платежа обновлён.")
+
+
+def _safe_enqueue_subscription_after_payment(sub: dict | None) -> bool:
+    if not sub or sub.get("source") != "telegram":
+        return False
+    try:
+        return _enqueue_core_outbound_subscription_for_bot_user(int(sub["user_id"]))
+    except Exception as exc:
+        logger.warning("PWA payment subscription outbound sync skipped: %s", exc)
+        return False
+
+
+def _activate_plus_from_valid_payment(*, user: dict, payment: dict[str, Any], record: dict[str, Any]) -> PaymentStatusResponse:
+    validate_yookassa_plus_payment(
+        payment,
+        expected_user_id=int(record["user_id"]),
+        expected_amount_rub=int(record["amount_rub"]),
+    )
+    paid_at = str(payment.get("captured_at") or utc_now().isoformat())
+    db.update_payment_status(
+        settings.database_path,
+        provider=YOOKASSA_PROVIDER,
+        provider_payment_id=str(record["provider_payment_id"]),
+        status="succeeded",
+        paid_at=paid_at,
+        raw_payload=payment,
+    )
+    activate_paid_subscription(settings, user_id=int(user["id"]), plan_code="plus", days=PLUS_DAYS)
+    effective = get_effective_subscription(settings, user).to_public()
+    _safe_enqueue_subscription_after_payment(effective)
+    return PaymentStatusResponse(
+        ok=True,
+        status="succeeded",
+        payment_id=str(record["provider_payment_id"]),
+        message=_payment_message("succeeded"),
+        subscription=effective,
+    )
+
+
+def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) -> PaymentStatusResponse:
+    if int(record["user_id"]) != int(user["id"]):
+        raise HTTPException(status_code=404, detail="payment_not_found")
+    try:
+        payment = get_yookassa_payment(settings, str(record["provider_payment_id"]))
+    except YooKassaConfigError as exc:
+        raise HTTPException(status_code=503, detail="payment_provider_not_configured") from exc
+    except YooKassaPaymentError as exc:
+        logger.warning("YooKassa payment status failed: %s", exc)
+        raise HTTPException(status_code=502, detail="payment_provider_error") from exc
+
+    status = yookassa_payment_status(payment)
+    if status == "succeeded":
+        try:
+            return _activate_plus_from_valid_payment(user=user, payment=payment, record=record)
+        except YooKassaPaymentValidationError as exc:
+            logger.warning("YooKassa payment validation failed for %s: %s", record.get("provider_payment_id"), exc)
+            db.update_payment_status(
+                settings.database_path,
+                provider=YOOKASSA_PROVIDER,
+                provider_payment_id=str(record["provider_payment_id"]),
+                status="invalid",
+                raw_payload=payment,
+            )
+            raise HTTPException(status_code=409, detail="payment_verification_failed") from exc
+
+    db.update_payment_status(
+        settings.database_path,
+        provider=YOOKASSA_PROVIDER,
+        provider_payment_id=str(record["provider_payment_id"]),
+        status=status,
+        raw_payload=payment,
+    )
+    return PaymentStatusResponse(
+        ok=status not in {"canceled", "invalid"},
+        status=status,
+        payment_id=str(record["provider_payment_id"]),
+        message=_payment_message(status),
+        subscription=get_effective_subscription(settings, user).to_public(),
+    )
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
@@ -1082,6 +1201,115 @@ def me(user: dict = Depends(current_user)) -> dict:
         "subscription": get_effective_subscription(settings, user).to_public(),
         "telegram_profile_sync": telegram_profile_sync,
     }
+
+
+@app.post("/api/payments/plus/create", response_model=PaymentCreateResponse)
+def payment_plus_create(user: dict = Depends(current_user)) -> PaymentCreateResponse:
+    sub = get_effective_subscription(settings, user)
+    if sub.plan != "free":
+        return PaymentCreateResponse(
+            ok=True,
+            status="already_active",
+            message="Plus уже активен. Повторная оплата сейчас не нужна.",
+            subscription=sub.to_public(),
+        )
+
+    try:
+        payment = create_yookassa_plus_payment(
+            settings,
+            user_id=int(user["id"]),
+            user_email=str(user.get("email") or "") or None,
+        )
+    except YooKassaConfigError as exc:
+        raise HTTPException(status_code=503, detail="payment_provider_not_configured") from exc
+    except YooKassaPaymentError as exc:
+        logger.warning("YooKassa create payment failed: %s", exc)
+        raise HTTPException(status_code=502, detail="payment_provider_error") from exc
+
+    payment_id = str(payment.get("id") or "").strip()
+    pay_url = yookassa_confirmation_url(payment)
+    if not payment_id or not pay_url:
+        raise HTTPException(status_code=502, detail="payment_confirmation_missing")
+
+    status = yookassa_payment_status(payment)
+    db.create_payment_record(
+        settings.database_path,
+        user_id=int(user["id"]),
+        provider=YOOKASSA_PROVIDER,
+        provider_payment_id=payment_id,
+        amount_rub=200,
+        status=status,
+        plan_code="plus",
+        confirmation_url=pay_url,
+        idempotence_key=str(payment.get("idempotence_key") or ""),
+        raw_payload=payment,
+    )
+    return PaymentCreateResponse(
+        ok=True,
+        status=status,
+        payment_id=payment_id,
+        confirmation_url=pay_url,
+        message=_payment_message(status),
+        subscription=sub.to_public(),
+    )
+
+
+@app.get("/api/payments/plus/status", response_model=PaymentStatusResponse)
+def payment_plus_last_status(user: dict = Depends(current_user)) -> PaymentStatusResponse:
+    record = db.get_last_payment(settings.database_path, user_id=int(user["id"]), provider=YOOKASSA_PROVIDER)
+    if not record:
+        return PaymentStatusResponse(
+            ok=False,
+            status="not_found",
+            message="Платёж не найден. Сначала нажмите «Оплатить Plus».",
+            subscription=get_effective_subscription(settings, user).to_public(),
+        )
+    return _refresh_yookassa_payment_for_user(record=record, user=user)
+
+
+@app.get("/api/payments/{payment_id}/status", response_model=PaymentStatusResponse)
+def payment_status(payment_id: str, user: dict = Depends(current_user)) -> PaymentStatusResponse:
+    record = db.get_payment_record(
+        settings.database_path,
+        provider=YOOKASSA_PROVIDER,
+        provider_payment_id=str(payment_id),
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="payment_not_found")
+    return _refresh_yookassa_payment_for_user(record=record, user=user)
+
+
+@app.post("/api/webhooks/yookassa")
+async def yookassa_webhook(request: Request, secret: str | None = Query(default=None)) -> dict:
+    if settings.yookassa_webhook_secret and not constant_time_equal(secret or "", settings.yookassa_webhook_secret):
+        raise HTTPException(status_code=403, detail="invalid_webhook_secret")
+
+    payload = await request.json()
+    event = str(payload.get("event") or "")
+    obj = payload.get("object") or {}
+    if not isinstance(obj, dict):
+        return {"ok": True, "ignored": "missing_object"}
+    payment_id = str(obj.get("id") or "").strip()
+    if not payment_id:
+        return {"ok": True, "ignored": "missing_payment_id"}
+    if event and event not in {"payment.succeeded", "payment.canceled", "payment.waiting_for_capture"}:
+        return {"ok": True, "ignored": event}
+
+    record = db.get_payment_record(settings.database_path, provider=YOOKASSA_PROVIDER, provider_payment_id=payment_id)
+    if not record:
+        logger.warning("YooKassa webhook for unknown payment %s", payment_id)
+        return {"ok": True, "ignored": "unknown_payment"}
+    user = db.get_user_by_id(settings.database_path, user_id=int(record["user_id"]))
+    if not user:
+        logger.warning("YooKassa webhook payment %s has missing user %s", payment_id, record.get("user_id"))
+        return {"ok": True, "ignored": "missing_user"}
+
+    try:
+        result = _refresh_yookassa_payment_for_user(record=record, user=user)
+    except HTTPException as exc:
+        logger.warning("YooKassa webhook processing failed for %s: %s", payment_id, exc.detail)
+        return {"ok": True, "status": "failed", "detail": exc.detail}
+    return {"ok": True, "status": result.status, "payment_id": result.payment_id}
 
 
 @app.get("/api/pets")
