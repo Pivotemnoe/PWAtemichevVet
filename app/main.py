@@ -19,7 +19,7 @@ from app import db
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
 from app.followups import detect_followup_scenario, followup_due_at, followup_payload
-from app.knowledge import check_food, find_food, food_to_public
+from app.knowledge import check_food, find_care, find_faq, find_food, food_to_public
 from app.llm_triage import call_triage_llm, extract_urgency, short_summary
 from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
 from app.medical_safety import detect_red_flags, render_red_flag_response
@@ -1528,6 +1528,26 @@ def food_search(q: str) -> dict:
 @app.post("/api/food/check")
 def food_check(payload: FoodCheckPayload) -> dict:
     return check_food(payload.query, payload.ingredients)
+
+
+@app.get("/api/faq")
+def faq_list(
+    q: str = Query(default="", max_length=160),
+    limit: int = Query(default=6, ge=1, le=20),
+    user: dict = Depends(current_user),
+) -> dict:
+    subscription = get_effective_subscription(settings, user)
+    return {"items": find_faq(q, plan=subscription.plan, limit=limit)}
+
+
+@app.get("/api/care")
+def care_list(
+    q: str = Query(default="", max_length=160),
+    limit: int = Query(default=6, ge=1, le=20),
+    user: dict = Depends(current_user),
+) -> dict:
+    subscription = get_effective_subscription(settings, user)
+    return {"items": find_care(q, plan=subscription.plan, limit=limit)}
 
 
 @app.post("/api/feedback")

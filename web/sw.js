@@ -1,8 +1,8 @@
-const CACHE_NAME = "temichevvet-pwa-subscription-tariffs-1";
+const CACHE_NAME = "temichevvet-pwa-knowledge-sections-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260606-public-offer-1",
-  "/static/app.js?v=20260606-subscription-tariffs-1",
+  "/static/styles.css?v=20260607-knowledge-sections-1",
+  "/static/app.js?v=20260607-knowledge-sections-1",
   "/static/manifest.webmanifest",
   "/static/assets/icon.svg",
   "/static/assets/logo_temichevvet.jpg",

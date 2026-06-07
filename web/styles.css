@@ -876,6 +876,50 @@ textarea:focus {
   margin-bottom: 4px;
 }
 
+.knowledge-results {
+  margin-top: 18px;
+}
+
+.knowledge-results h3 {
+  margin: 0 0 12px;
+}
+
+.knowledge-card {
+  display: grid;
+  align-items: start;
+  justify-content: stretch;
+}
+
+.knowledge-card details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.knowledge-card summary {
+  color: var(--blue);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.knowledge-card details p {
+  margin: 10px 0 0;
+}
+
+.knowledge-card ol {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 22px;
+  color: #34425a;
+  line-height: 1.45;
+}
+
+.compact-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
 .meta-row {
   display: flex;
   flex-wrap: wrap;

@@ -557,6 +557,8 @@ async function renderHome() {
       <button class="primary-button" data-action="triage" type="button">🩺 Разобрать жалобу</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
       <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
+      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
+      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
       <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
     </div>
     ${renderDueFollowups(dueFollowups)}
@@ -1073,6 +1075,146 @@ async function renderFood() {
       resultEl.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(error.message)}</div>`;
     }
   });
+}
+
+const knowledgeSections = {
+  care: {
+    title: "Уход и привычки",
+    icon: "🧴",
+    endpoint: "/api/care",
+    intro: "Карточки по уходу, поведению, шерсти, когтям, ушам, зубам, прогулкам и домашней безопасности.",
+    label: "Тема ухода",
+    placeholder: "когти у кошки, уход за щенком, переезд с питомцем",
+    empty: "Карточки по уходу не найдены. Попробуйте другую формулировку."
+  },
+  faq: {
+    title: "Вопросы и ответы",
+    icon: "❓",
+    endpoint: "/api/faq",
+    intro: "Частые вопросы по здоровью, профилактике, тревожным признакам, подготовке к врачу и уходу.",
+    label: "Вопрос или тема",
+    placeholder: "вакцинация котёнка, понос у собаки, что сказать врачу",
+    empty: "Подходящие ответы не найдены. Попробуйте другую формулировку."
+  }
+};
+
+function speciesText(values) {
+  const list = Array.isArray(values) ? values : [];
+  const labels = list
+    .map((value) => {
+      if (value === "cat") return "кошки";
+      if (value === "dog") return "собаки";
+      return value;
+    })
+    .filter(Boolean);
+  return labels.length ? labels.join(", ") : "кошки и собаки";
+}
+
+function renderKnowledgeMeta(item) {
+  const parts = [];
+  if (item.category) parts.push(item.category);
+  parts.push(speciesText(item.species));
+  return `<div class="meta-row">${parts.map((part) => `<span>${escapeHtml(part)}</span>`).join("")}</div>`;
+}
+
+function renderFaqItem(item) {
+  return `
+    <article class="item-card knowledge-card">
+      <div>
+        <h3>${escapeHtml(item.question || "Вопрос")}</h3>
+        ${renderKnowledgeMeta(item)}
+        <p>${escapeHtml(item.short_answer || "Краткий ответ пока не заполнен.")}</p>
+        ${item.detailed_answer ? `
+          <details>
+            <summary>Подробный ответ</summary>
+            <p>${nl2br(item.detailed_answer)}</p>
+          </details>
+        ` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderCareItem(item) {
+  const steps = Array.isArray(item.steps) ? item.steps.filter(Boolean) : [];
+  return `
+    <article class="item-card knowledge-card">
+      <div>
+        <h3>${escapeHtml(item.title || "Карточка ухода")}</h3>
+        ${renderKnowledgeMeta(item)}
+        <p>${escapeHtml(item.summary || "Краткое описание пока не заполнено.")}</p>
+        ${item.details ? `
+          <details>
+            <summary>Подробная инструкция</summary>
+            <p>${nl2br(item.details)}</p>
+            ${steps.length ? `<ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+          </details>
+        ` : ""}
+        ${item.warning ? `<div class="notice danger compact-note">${escapeHtml(item.warning)}</div>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderKnowledgeItems(kind, items, query) {
+  const config = knowledgeSections[kind];
+  if (!items.length) {
+    return `<div class="notice">${escapeHtml(config.empty)}</div>`;
+  }
+  const title = query ? "Найдено" : kind === "care" ? "Популярные карточки" : "Популярные вопросы";
+  const cards = items.map((item) => (kind === "care" ? renderCareItem(item) : renderFaqItem(item))).join("");
+  return `
+    <div class="knowledge-results">
+      <h3>${title}</h3>
+      <div class="list-stack">${cards}</div>
+    </div>
+  `;
+}
+
+async function renderKnowledgeSection(kind) {
+  const config = knowledgeSections[kind];
+  setWorkspace(`
+    <div class="workspace-head">
+      <div>
+        <h2>${config.icon} ${config.title}</h2>
+        <p>${escapeHtml(config.intro)}</p>
+      </div>
+      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+    </div>
+    <form class="form-grid one-column" id="knowledgeSearchForm">
+      <label>
+        <span>${escapeHtml(config.label)}</span>
+        <input name="query" placeholder="${escapeHtml(config.placeholder)}" />
+      </label>
+      <button class="primary-button" type="submit">Найти</button>
+    </form>
+    <div class="care-note">
+      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет разбор жалобы или очный осмотр ветеринарного врача.
+    </div>
+    <div id="knowledgeResult"></div>
+  `);
+
+  const form = document.querySelector("#knowledgeSearchForm");
+  const resultEl = document.querySelector("#knowledgeResult");
+
+  async function loadItems(query = "") {
+    resultEl.innerHTML = `<p class="hint">Загружаю...</p>`;
+    try {
+      const params = new URLSearchParams({ q: query, limit: "8" });
+      const data = await api(`${config.endpoint}?${params.toString()}`);
+      resultEl.innerHTML = renderKnowledgeItems(kind, data.items || [], query);
+    } catch (error) {
+      resultEl.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(readableError(error.message))}</div>`;
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    await loadItems(String(formData.get("query") || "").trim());
+  });
+
+  await loadItems("");
 }
 
 function paymentStatusNotice(message, type = "") {
@@ -1608,6 +1750,8 @@ document.addEventListener("click", async (event) => {
     if (action === "pets") await renderPets();
     if (action === "triage") await renderTriage();
     if (action === "food") await renderFood();
+    if (action === "care") await renderKnowledgeSection("care");
+    if (action === "faq") await renderKnowledgeSection("faq");
     if (action === "reminders") await renderReminders();
     if (action === "subscription") {
       await refreshAccountState();
