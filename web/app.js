@@ -487,6 +487,63 @@ function renderPetBadges(pet) {
   return parts.length ? `<div class="meta-row">${parts.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
 }
 
+function subscriptionSummary() {
+  const sub = state.subscription || {};
+  const planTitle = sub.title || (sub.plan === "plus" ? "Plus" : "Free");
+  const quotaTotal = Number.isFinite(Number(sub.quota_total)) ? Number(sub.quota_total) : 0;
+  const quotaUsed = Number.isFinite(Number(sub.quota_used)) ? Number(sub.quota_used) : 0;
+  const quotaLeft = Number.isFinite(Number(sub.quota_left)) ? Number(sub.quota_left) : Math.max(0, quotaTotal - quotaUsed);
+  const source = sub.source === "telegram" ? "Telegram" : "PWA";
+  return { planTitle, quotaTotal, quotaUsed, quotaLeft, source };
+}
+
+function connectedProviderLabels() {
+  const labels = [];
+  if (state.user?.email) labels.push("Email");
+  if (isProviderConnected("telegram")) labels.push("Telegram");
+  if (isProviderConnected("max")) labels.push("MAX");
+  return labels.length ? labels.join(", ") : "не подключены";
+}
+
+function renderHomeGuide(hasPets) {
+  return `
+    <section class="guide-panel">
+      <div class="guide-copy">
+        <p class="section-label">С чего начать</p>
+        <h3>Личный кабинет помогает не терять важные детали</h3>
+        <p>Выберите ближайший шаг. Все события сохраняются в истории, если привязать их к карточке питомца.</p>
+      </div>
+      <div class="guide-steps">
+        <button class="guide-step" data-action="pets" type="button">
+          <strong>${hasPets ? "1. Проверьте карточку" : "1. Добавьте питомца"}</strong>
+          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают разбору." : "Так разборы, вес и напоминания будут храниться в одном месте."}</span>
+        </button>
+        <button class="guide-step" data-action="triage" type="button">
+          <strong>2. Разберите жалобу</strong>
+          <span>Опишите симптомы простыми словами, чтобы получить уровень срочности.</span>
+        </button>
+        <button class="guide-step" data-action="reminders" type="button">
+          <strong>3. Поставьте напоминание</strong>
+          <span>Вакцинация, обработка от паразитов, осмотр, груминг или своя задача.</span>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderEmptyBlock({ icon = "ℹ️", title, text, action, actionText }) {
+  return `
+    <div class="empty-state empty-card">
+      <div class="empty-icon">${icon}</div>
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(text)}</p>
+        ${action ? `<button class="primary-button compact" data-action="${action}" type="button">${escapeHtml(actionText || "Продолжить")}</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
 async function loadDueFollowups() {
   try {
     const data = await api("/api/followups/due");
@@ -522,15 +579,18 @@ function renderDueFollowups(items) {
 }
 
 async function renderHome() {
+  await refreshAccountState();
   await refreshPets();
   const dueFollowups = await loadDueFollowups();
   const petCount = state.pets.length;
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
+  const sub = subscriptionSummary();
+  const providerLabels = connectedProviderLabels();
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Личный кабинет владельца</h2>
-        <p>Здесь собраны питомцы, история здоровья, наблюдения, вес, напоминания и быстрые проверки питания. Данные привязаны к вашему входу.</p>
+        <h2>Личный кабинет TemichevVet</h2>
+        <p>Питомцы, разборы, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
       </div>
       <button class="secondary-button compact" data-action="pets" type="button">🐾 Мои питомцы</button>
     </div>
@@ -551,16 +611,31 @@ async function renderHome() {
         <span>основной питомец</span>
       </div>
       <div class="summary-card">
-        <strong>Email / Telegram / MAX</strong>
-        <span>доступ к кабинету</span>
+        <strong>${escapeHtml(sub.planTitle)}</strong>
+        <span>${sub.quotaLeft} из ${sub.quotaTotal} разборов доступно</span>
+      </div>
+      <div class="summary-card">
+        <strong>${escapeHtml(providerLabels)}</strong>
+        <span>способы входа</span>
+      </div>
+      <div class="summary-card">
+        <strong>${escapeHtml(sub.source)}</strong>
+        <span>источник подписки</span>
+      </div>
+      <div class="summary-card">
+        <strong>${dueFollowups.length}</strong>
+        <span>контролей состояния ждут ответа</span>
       </div>
     </div>
+    ${renderHomeGuide(Boolean(petCount))}
     <div class="next-actions">
       <button class="primary-button" data-action="triage" type="button">🩺 Разобрать жалобу</button>
+      <button class="secondary-button" data-action="pets" type="button">🐾 Мои питомцы</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
       <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
       <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
       <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
+      <button class="secondary-button" data-action="subscription" type="button">💳 Подписка</button>
       <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
     </div>
     ${renderDueFollowups(dueFollowups)}
@@ -926,7 +1001,13 @@ async function renderPetHistory(petId) {
   const data = await api(`/api/pets/${petId}/history`);
   const items = data.items.length
     ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.details || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
-    : "<p>История пока пустая.</p>";
+    : renderEmptyBlock({
+        icon: "📜",
+        title: "История пока пустая",
+        text: "После первого разбора, наблюдения, веса или напоминания события появятся здесь.",
+        action: "triage",
+        actionText: "Разобрать жалобу"
+      });
   setWorkspace(`
     <div class="workspace-head">
       <h2>История здоровья</h2>
@@ -940,7 +1021,11 @@ async function renderPetObservations(petId) {
   const data = await api(`/api/pets/${petId}/observations`);
   const items = data.items.length
     ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(observationTypeLabel(item.obs_type))}</h3><p>${escapeHtml(item.payload?.text || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
-    : "<p>Наблюдений пока нет.</p>";
+    : renderEmptyBlock({
+        icon: "📊",
+        title: "Наблюдений пока нет",
+        text: "Добавляйте короткие заметки о состоянии, аппетите, активности, стуле или симптомах.",
+      });
   setWorkspace(`
     <div class="workspace-head">
       <h2>Наблюдения</h2>
@@ -968,7 +1053,11 @@ async function renderPetWeights(petId) {
   const data = await api(`/api/pets/${petId}/weights`);
   const items = data.items.length
     ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.weight_kg)} кг</h3><p>${escapeHtml(item.note || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
-    : "<p>Истории веса пока нет.</p>";
+    : renderEmptyBlock({
+        icon: "⚖️",
+        title: "Истории веса пока нет",
+        text: "Сохраняйте вес периодически, чтобы видеть динамику и быстрее замечать изменения.",
+      });
   setWorkspace(`
     <div class="workspace-head">
       <h2>Вес</h2>
@@ -1019,7 +1108,11 @@ async function renderReminders(petId = null) {
           `
         )
         .join("")
-    : "<p>Напоминаний пока нет.</p>";
+    : renderEmptyBlock({
+        icon: "⏰",
+        title: "Напоминаний пока нет",
+        text: "Создайте напоминание о вакцинации, обработке от паразитов, осмотре, груминге или своей задаче.",
+      });
 
   setWorkspace(`
     <div class="workspace-head">
@@ -1081,6 +1174,10 @@ async function renderTriage(prefillPetId = null) {
         <p>Сначала срабатывают красные симптомы. Это помогает не ждать онлайн-ответ там, где нужна клиника.</p>
       </div>
     </div>
+    <div class="care-note">
+      TemichevVet не ставит диагноз и не назначает лечение. Если есть тяжёлое дыхание, судороги,
+      потеря сознания, кровь, признаки отравления или резкое ухудшение — сразу обращайтесь в клинику.
+    </div>
     <form class="form-grid one-column" id="triageForm">
       <label><span>Питомец</span><select name="pet_id"><option value="">Без привязки</option>${petOptions(prefillPetId || state.currentPetId || "")}</select></label>
       <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка второй день плохо ест, стала вялая..." required></textarea></label>
@@ -1114,8 +1211,9 @@ async function renderTriage(prefillPetId = null) {
         </div>
         <div class="next-actions">
           ${petId ? `<button class="secondary-button" data-open-pet="${petId}" type="button">🐾 Открыть карточку</button>` : ""}
-          <button class="secondary-button" data-action="reminders" type="button">➕ Добавить напоминание</button>
-          <button class="primary-button" data-action="triage" type="button">🩺 Новый разбор</button>
+          ${petId ? `<button class="secondary-button" data-pet-view="reminders" data-pet-id="${petId}" type="button">⏰ Добавить напоминание</button>` : `<button class="secondary-button" data-action="reminders" type="button">⏰ Добавить напоминание</button>`}
+          ${petId ? `<button class="secondary-button" data-pet-view="history" data-pet-id="${petId}" type="button">📜 История питомца</button>` : ""}
+          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить новым разбором</button>
         </div>
       `;
     } catch (error) {
@@ -1156,6 +1254,11 @@ async function renderFood() {
       resultEl.innerHTML = `
         <div class="result-box ${data.item && !data.item.allowed ? "danger" : ""}">
           <pre>${escapeHtml(data.message)}</pre>
+        </div>
+        <div class="next-actions">
+          <button class="secondary-button" data-action="food" type="button">Проверить ещё продукт</button>
+          <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
+          <button class="secondary-button" data-action="home" type="button">⬅️ В меню</button>
         </div>
       `;
     } catch (error) {
@@ -1472,7 +1575,19 @@ function renderFeedback() {
 async function renderGlobalHistory() {
   await refreshPets();
   if (!state.pets.length) {
-    setWorkspace(`<h2>История здоровья</h2><p>Сначала добавьте питомца.</p><button class="primary-button" data-action="pets" type="button">Добавить питомца</button>`);
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>История здоровья</h2>
+        <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      </div>
+      ${renderEmptyBlock({
+        icon: "📜",
+        title: "Сначала добавьте питомца",
+        text: "История хранится по карточкам питомцев, чтобы не смешивать разные обращения.",
+        action: "pets",
+        actionText: "Добавить питомца"
+      })}
+    `);
     return;
   }
   await renderPetHistory(state.currentPetId || state.pets[0].id);
@@ -1481,7 +1596,19 @@ async function renderGlobalHistory() {
 async function renderGlobalObservations() {
   await refreshPets();
   if (!state.pets.length) {
-    setWorkspace(`<h2>Наблюдения</h2><p>Сначала добавьте питомца.</p><button class="primary-button" data-action="pets" type="button">Добавить питомца</button>`);
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>Наблюдения</h2>
+        <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      </div>
+      ${renderEmptyBlock({
+        icon: "📊",
+        title: "Сначала добавьте питомца",
+        text: "Наблюдения лучше вести по конкретной карточке: так видна динамика состояния.",
+        action: "pets",
+        actionText: "Добавить питомца"
+      })}
+    `);
     return;
   }
   await renderPetObservations(state.currentPetId || state.pets[0].id);

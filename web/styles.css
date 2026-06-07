@@ -780,12 +780,67 @@ textarea:focus {
 
 .summary-card strong {
   font-size: 22px;
+  line-height: 1.2;
 }
 
 .summary-card span,
 .item-card small,
 .meta-row span {
   color: var(--muted);
+}
+
+.guide-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.guide-copy h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.guide-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.guide-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.guide-step {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 82px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.guide-step:hover {
+  border-color: var(--blue);
+  background: #f1f8ff;
+}
+
+.guide-step strong {
+  font-size: 16px;
+}
+
+.guide-step span {
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .profile-card {
@@ -835,6 +890,35 @@ textarea:focus {
 .empty-state {
   display: grid;
   gap: 12px;
+}
+
+.empty-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.empty-card h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.empty-card p {
+  margin-bottom: 10px;
+}
+
+.empty-icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 24px;
 }
 
 .empty-state img {
@@ -1301,6 +1385,7 @@ textarea:focus {
   .channel-grid,
   .auth-grid,
   .summary-grid,
+  .guide-panel,
   .detail-grid,
   .form-grid,
   .inline-form {
@@ -1399,5 +1484,15 @@ textarea:focus {
   .next-actions .primary-button,
   .next-actions .secondary-button {
     width: 100%;
+  }
+
+  .empty-card {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .empty-icon {
+    width: 48px;
+    height: 48px;
   }
 }
