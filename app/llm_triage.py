@@ -290,7 +290,11 @@ def call_triage_llm(
         raise RuntimeError("openai_package_not_installed") from exc
 
     model = _model_for_plan(plan_code)
-    client = OpenAI(api_key=api_key, timeout=45.0)
+    client_options: dict[str, Any] = {"api_key": api_key, "timeout": 45.0}
+    openai_base_url = (os.getenv("OPENAI_BASE_URL") or "").strip()
+    if openai_base_url:
+        client_options["base_url"] = openai_base_url.rstrip("/")
+    client = OpenAI(**client_options)
     request: dict[str, Any] = {
         "model": model,
         "messages": [
