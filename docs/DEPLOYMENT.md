@@ -20,8 +20,9 @@ http://127.0.0.1:8080
 Copy `.env.example` to `.env` and set values:
 
 - `APP_ENV`: `development` or `production`.
+- `SESSION_SECRET`: long random secret, at least 32 characters. Production startup fails if it is missing or left as the default value.
 - `DATABASE_PATH`: SQLite path for the PWA database.
-- `DEV_AUTH_CODE_LOG`: `1` only for local development.
+- `DEV_AUTH_CODE_LOG`: `1` only for local development. Production startup fails if it is enabled.
 - `SMTP_FROM_EMAIL`: sender address for email codes.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_USE_TLS`: email delivery settings.
 - `TELEGRAM_BOT_USERNAME`: optional Telegram login provider.
@@ -42,8 +43,11 @@ The app listens on port `8080` by default.
 - Use HTTPS through nginx or another reverse proxy.
 - Keep `.env` out of git.
 - Disable `DEV_AUTH_CODE_LOG`.
+- Use a non-default `SESSION_SECRET` of at least 32 characters.
 - Configure real SMTP before public email login.
 - Configure MAX webhook after the PWA is available over HTTPS.
+- Verify security headers on `/` and `Cache-Control: no-store` on `/api/*`.
+- Verify rate limits for email code, auth status, payment, feedback, triage and account data endpoints.
 - Back up the SQLite database or switch to Postgres before active marketing traffic.
 - Add monitoring for 5xx errors and failed auth attempts.
 

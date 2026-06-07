@@ -46,6 +46,8 @@
 ## Stage 5: Release Hardening
 
 - Add backups, monitoring, error logs, and CI before public release.
-- Add rate limits for auth endpoints and email code requests.
-- Add privacy/data deletion process.
+- Rate limits for auth, payments, triage, feedback, export and data deletion requests are in place.
+- Security headers are applied by the FastAPI middleware.
+- User can revoke current session, revoke all sessions, export account data and submit a data deletion request.
+- Next: add structured access/error audit logs and CI checks.
 - Prepare PostgreSQL migration before active growth.

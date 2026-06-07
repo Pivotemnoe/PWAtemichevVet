@@ -960,6 +960,40 @@ def create_session(db_path: Path, *, user_id: int, token_hash: str, expires_at: 
         conn.commit()
 
 
+def revoke_session(db_path: Path, *, token_hash: str) -> bool:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE sessions
+            SET revoked_at = ?
+            WHERE token_hash = ?
+              AND revoked_at IS NULL
+            """,
+            (utc_now_iso(), token_hash),
+        )
+        revoked = cur.rowcount > 0
+        conn.commit()
+        return revoked
+
+
+def revoke_user_sessions(db_path: Path, *, user_id: int) -> int:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE sessions
+            SET revoked_at = ?
+            WHERE user_id = ?
+              AND revoked_at IS NULL
+            """,
+            (utc_now_iso(), int(user_id)),
+        )
+        revoked = int(cur.rowcount or 0)
+        conn.commit()
+        return revoked
+
+
 def get_user_by_session(db_path: Path, *, token_hash: str) -> dict[str, Any] | None:
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
@@ -982,6 +1016,122 @@ def get_user_by_id(db_path: Path, *, user_id: int) -> dict[str, Any] | None:
     with closing(connect(db_path)) as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ? LIMIT 1", (int(user_id),)).fetchone()
         return row_to_dict(row)
+
+
+def export_user_data(db_path: Path, *, user_id: int) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        user = row_to_dict(conn.execute("SELECT * FROM users WHERE id = ? LIMIT 1", (int(user_id),)).fetchone())
+        if not user:
+            return None
+
+        def select_all(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+            return rows_to_dicts(conn.execute(query, params).fetchall())
+
+        pets = select_all(
+            """
+            SELECT *
+            FROM pets
+            WHERE owner_id = ?
+            ORDER BY is_main DESC, id DESC
+            """,
+            (int(user_id),),
+        )
+        pet_ids = [int(item["id"]) for item in pets]
+        placeholders = ",".join("?" for _ in pet_ids) or "NULL"
+
+        return {
+            "user": user,
+            "external_accounts": select_all(
+                """
+                SELECT provider, provider_user_id, display_name, created_at
+                FROM external_accounts
+                WHERE user_id = ?
+                ORDER BY provider
+                """,
+                (int(user_id),),
+            ),
+            "subscription": row_to_dict(
+                conn.execute("SELECT * FROM subscriptions WHERE user_id = ? LIMIT 1", (int(user_id),)).fetchone()
+            ),
+            "pets": pets,
+            "pet_history": select_all(
+                f"""
+                SELECT *
+                FROM pet_history
+                WHERE pet_id IN ({placeholders})
+                ORDER BY created_at DESC, id DESC
+                """,
+                tuple(pet_ids),
+            )
+            if pet_ids
+            else [],
+            "observations": select_all(
+                """
+                SELECT *
+                FROM pet_observations
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            ),
+            "measurements": select_all(
+                f"""
+                SELECT *
+                FROM pet_measurements
+                WHERE pet_id IN ({placeholders})
+                ORDER BY created_at DESC, id DESC
+                """,
+                tuple(pet_ids),
+            )
+            if pet_ids
+            else [],
+            "reminders": select_all(
+                """
+                SELECT *
+                FROM reminders
+                WHERE user_id = ?
+                ORDER BY due_date ASC, COALESCE(due_time, '99:99') ASC, id ASC
+                """,
+                (int(user_id),),
+            ),
+            "triage_logs": select_all(
+                """
+                SELECT *
+                FROM triage_logs
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            ),
+            "triage_followups": select_all(
+                """
+                SELECT *
+                FROM triage_followups
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            ),
+            "payments": select_all(
+                """
+                SELECT id, provider, provider_payment_id, plan_code, amount_rub, status,
+                       confirmation_url, created_at, updated_at, paid_at
+                FROM payments
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            ),
+            "feedback": select_all(
+                """
+                SELECT *
+                FROM feedback
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            ),
+        }
 
 
 def list_pets(db_path: Path, *, owner_id: int) -> list[dict[str, Any]]:

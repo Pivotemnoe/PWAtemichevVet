@@ -4,14 +4,16 @@ import json
 import logging
 import re
 import sqlite3
+from collections import defaultdict, deque
 from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -52,8 +54,28 @@ from app.telegram_sync import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
 
-app = FastAPI(title="TemichevVet PWA API", version="0.1.0")
 settings = get_settings()
+
+
+def _validate_production_settings() -> None:
+    if settings.app_env != "production":
+        return
+    errors: list[str] = []
+    if not settings.session_secret or settings.session_secret == "change-me-long-random-secret":
+        errors.append("SESSION_SECRET must be set in production")
+    if len(settings.session_secret) < 32:
+        errors.append("SESSION_SECRET must be at least 32 characters")
+    if settings.dev_auth_code_log:
+        errors.append("DEV_AUTH_CODE_LOG must be disabled in production")
+    if bool(settings.yookassa_shop_id) != bool(settings.yookassa_secret_key):
+        errors.append("YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY must be configured together")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+_validate_production_settings()
+
+app = FastAPI(title="TemichevVet PWA API", version="0.1.0")
 db.init_db(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 logger = logging.getLogger(__name__)
@@ -61,6 +83,111 @@ logger = logging.getLogger(__name__)
 EMAIL_CODE_COOLDOWN_SECONDS = 60
 EMAIL_CODE_MAX_PER_HOUR = 5
 EMAIL_CODE_MAX_VERIFY_ATTEMPTS = 5
+
+
+RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = (
+    ("auth_email_start", {"POST"}, ("/api/auth/email/start",), 20, 3600),
+    ("auth_email_verify", {"POST"}, ("/api/auth/email/verify",), 40, 3600),
+    ("auth_provider_start", {"POST"}, ("/api/auth/telegram/start", "/api/auth/max/start"), 30, 3600),
+    ("account_provider_start", {"POST"}, ("/api/account/telegram/start", "/api/account/max/start"), 30, 3600),
+    ("auth_provider_status", {"GET"}, ("/api/auth/telegram/status", "/api/auth/max/status"), 150, 600),
+    ("payment", {"GET", "POST"}, ("/api/payments",), 60, 3600),
+    ("feedback", {"POST"}, ("/api/feedback",), 10, 3600),
+    ("triage", {"POST"}, ("/api/triage",), 30, 3600),
+    ("account_export", {"GET"}, ("/api/account/export",), 5, 3600),
+    ("account_deletion", {"POST"}, ("/api/account/deletion-request",), 3, 86400),
+    ("account_sessions", {"POST"}, ("/api/account/sessions/revoke-all", "/api/auth/logout"), 20, 3600),
+)
+
+_rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip() or "unknown"
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit_identity(request: Request, name: str) -> str:
+    authorization = request.headers.get("authorization", "")
+    match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
+    if match:
+        token_hash = hash_value(match.group(1).strip(), settings.session_secret)
+        return f"{name}:token:{token_hash[:24]}"
+    return f"{name}:ip:{_client_ip(request)}"
+
+
+def _rate_limit_retry_after(key: str, *, limit: int, window_seconds: int) -> int | None:
+    now = monotonic()
+    bucket = _rate_limit_buckets[key]
+    while bucket and now - bucket[0] > window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        return max(1, int(window_seconds - (now - bucket[0])))
+    bucket.append(now)
+    return None
+
+
+def _request_rate_limit_retry_after(request: Request) -> int | None:
+    path = request.url.path
+    method = request.method.upper()
+    for name, methods, prefixes, limit, window_seconds in RATE_LIMIT_RULES:
+        if method not in methods:
+            continue
+        if not any(path.startswith(prefix) for prefix in prefixes):
+            continue
+        key = _rate_limit_identity(request, name)
+        return _rate_limit_retry_after(key, limit=limit, window_seconds=window_seconds)
+    return None
+
+
+def _apply_security_headers(request: Request, response) -> None:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "; ".join(
+            (
+                "default-src 'self'",
+                "base-uri 'self'",
+                "object-src 'none'",
+                "frame-ancestors 'none'",
+                "script-src 'self'",
+                "style-src 'self'",
+                "img-src 'self' data:",
+                "font-src 'self' data:",
+                "connect-src 'self'",
+                "worker-src 'self'",
+                "form-action 'self' https://*.yookassa.ru https://yookassa.ru https://*.yoomoney.ru https://yoomoney.ru",
+            )
+        ),
+    )
+    if settings.app_env == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    retry_after = _request_rate_limit_retry_after(request)
+    if retry_after is not None:
+        response = JSONResponse(
+            status_code=429,
+            content={"detail": "rate_limited", "retry_after": retry_after},
+        )
+        response.headers["Retry-After"] = str(retry_after)
+        _apply_security_headers(request, response)
+        return response
+    response = await call_next(request)
+    _apply_security_headers(request, response)
+    return response
 
 
 class EmailStartRequest(BaseModel):
@@ -167,6 +294,11 @@ class FoodCheckPayload(BaseModel):
 class FeedbackPayload(BaseModel):
     text: str = Field(min_length=5, max_length=2000)
     category: str | None = Field(default=None, max_length=80)
+
+
+class DataDeletionRequest(BaseModel):
+    confirm: str = Field(min_length=3, max_length=40)
+    comment: str | None = Field(default=None, max_length=500)
 
 
 class FollowupAnswerPayload(BaseModel):
@@ -1200,6 +1332,56 @@ def me(user: dict = Depends(current_user)) -> dict:
         "external_accounts": db.list_external_accounts(settings.database_path, user_id=int(user["id"])),
         "subscription": get_effective_subscription(settings, user).to_public(),
         "telegram_profile_sync": telegram_profile_sync,
+    }
+
+
+@app.post("/api/auth/logout")
+def auth_logout(token: str = Depends(_require_bearer)) -> dict:
+    db.revoke_session(
+        settings.database_path,
+        token_hash=hash_value(token, settings.session_secret),
+    )
+    return {"ok": True, "message": "Сессия завершена."}
+
+
+@app.post("/api/account/sessions/revoke-all")
+def account_revoke_sessions(user: dict = Depends(current_user)) -> dict:
+    revoked = db.revoke_user_sessions(settings.database_path, user_id=int(user["id"]))
+    return {"ok": True, "revoked": revoked, "message": "Все активные сессии завершены."}
+
+
+@app.get("/api/account/export")
+def account_export(user: dict = Depends(current_user)) -> dict:
+    data = db.export_user_data(settings.database_path, user_id=int(user["id"]))
+    if not data:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    return {
+        "exported_at": utc_now().isoformat(),
+        "format": "temichevvet_user_export_v1",
+        "data": data,
+    }
+
+
+@app.post("/api/account/deletion-request")
+def account_deletion_request(payload: DataDeletionRequest, user: dict = Depends(current_user)) -> dict:
+    if payload.confirm.strip().upper() != "УДАЛИТЬ":
+        raise HTTPException(status_code=400, detail="invalid_deletion_confirmation")
+    comment = _clean_optional_text(payload.comment) or "Без комментария."
+    text = (
+        "Запрос удаления персональных данных из PWA и связанных мессенджеров.\n"
+        f"Пользователь: #{int(user['id'])}, email: {user.get('email') or 'не указан'}.\n"
+        f"Комментарий: {comment}"
+    )
+    item = db.create_feedback(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        text=text,
+        category="data_deletion_request",
+    )
+    return {
+        "ok": True,
+        "item": item,
+        "message": "Запрос на удаление данных создан. Команда TemichevVet проверит связанные входы и свяжется с вами.",
     }
 
 

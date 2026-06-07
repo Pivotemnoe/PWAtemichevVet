@@ -92,7 +92,9 @@ function readableError(message) {
     payment_provider_error: "Платёжный сервис временно не ответил. Попробуйте позже.",
     payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
     payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
-    payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку."
+    payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку.",
+    rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
+    invalid_deletion_confirmation: "Для запроса удаления нужно ввести слово УДАЛИТЬ."
   };
   return messages[text] || text || "Не удалось выполнить действие.";
 }
@@ -605,6 +607,16 @@ async function renderAccountLinks() {
     <div class="care-note">
       Мессенджер нужен только для подтверждения личности. После подтверждения вернитесь сюда: сайт сам завершит привязку.
     </div>
+    <div class="profile-card">
+      <h3>Безопасность и данные</h3>
+      <p>Здесь можно завершить активные входы, скачать данные кабинета или оставить запрос на удаление персональных данных.</p>
+      <div class="inline-actions">
+        <button class="secondary-button compact" data-action="export-account-data" type="button">Скачать мои данные</button>
+        <button class="secondary-button compact" data-action="revoke-sessions" type="button">Выйти со всех устройств</button>
+        <button class="secondary-button compact danger-text" data-action="show-data-deletion" type="button">Запросить удаление данных</button>
+      </div>
+      <div id="dataDeletionPanel"></div>
+    </div>
     <p class="hint" id="accountLinkHint"></p>
   `);
 }
@@ -684,6 +696,81 @@ async function pollAccountLink(provider, loginState, attempt = 0) {
     setAccountLinkHint(readableError(error.message));
   }
   setTimeout(() => pollAccountLink(provider, loginState, attempt + 1), 3000);
+}
+
+async function downloadAccountData() {
+  setAccountLinkHint("Готовлю выгрузку данных...");
+  const data = await api("/api/account/export");
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const datePart = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `temichevvet-data-${datePart}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setAccountLinkHint("Выгрузка данных сформирована.");
+}
+
+async function revokeAllSessions() {
+  if (!confirm("Завершить все активные входы в этот кабинет? После этого нужно будет войти заново.")) return;
+  await api("/api/account/sessions/revoke-all", { method: "POST", body: "{}" });
+  stopTelegramPolling();
+  clearTelegramLogin();
+  stopMaxPolling();
+  clearMaxLogin();
+  localStorage.removeItem("tvv_token");
+  state.token = "";
+  state.user = null;
+  state.externalAccounts = [];
+  state.subscription = null;
+  setAuthMode(false);
+  openAuthDialog();
+  emailHint.textContent = "Все сессии завершены. Войдите заново удобным способом.";
+}
+
+function renderDataDeletionPanel() {
+  const panel = document.querySelector("#dataDeletionPanel");
+  if (!panel) return;
+  panel.innerHTML = `
+    <form class="form-grid deletion-form" id="dataDeletionForm">
+      <div class="care-note">
+        Удаление затрагивает сайт, PWA и связанные мессенджеры. Чтобы избежать случайного удаления питомцев, истории или подписки, команда сначала проверит запрос.
+      </div>
+      <label>
+        <span>Для подтверждения введите УДАЛИТЬ</span>
+        <input name="confirm" autocomplete="off" placeholder="УДАЛИТЬ" />
+      </label>
+      <label>
+        <span>Комментарий, если нужен</span>
+        <textarea name="comment" rows="3" placeholder="Например: удалить аккаунт и все связанные данные"></textarea>
+      </label>
+      <button class="secondary-button danger-text" type="submit">Отправить запрос на удаление</button>
+    </form>
+  `;
+  document.querySelector("#dataDeletionForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitDataDeletionRequest(event.currentTarget);
+    } catch (error) {
+      setAccountLinkHint(readableError(error.message));
+    }
+  });
+}
+
+async function submitDataDeletionRequest(form) {
+  const formData = new FormData(form);
+  const confirmValue = String(formData.get("confirm") || "");
+  const comment = String(formData.get("comment") || "");
+  const data = await api("/api/account/deletion-request", {
+    method: "POST",
+    body: JSON.stringify({ confirm: confirmValue, comment })
+  });
+  setAccountLinkHint(data.message || "Запрос на удаление данных создан.");
+  const panel = document.querySelector("#dataDeletionPanel");
+  if (panel) panel.innerHTML = "";
 }
 
 async function renderPets() {
@@ -1644,7 +1731,14 @@ cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary")
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
 
-logoutBtn.addEventListener("click", () => {
+logoutBtn.addEventListener("click", async () => {
+  if (state.token) {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Local logout still needs to happen even if the session is already expired.
+    }
+  }
   stopTelegramPolling();
   clearTelegramLogin();
   stopMaxPolling();
@@ -1653,6 +1747,7 @@ logoutBtn.addEventListener("click", () => {
   state.token = "";
   state.user = null;
   state.externalAccounts = [];
+  state.subscription = null;
   setAuthMode(false);
 });
 
@@ -1760,11 +1855,14 @@ document.addEventListener("click", async (event) => {
     if (action === "pay-plus") await startPlusPayment();
     if (action === "check-plus-payment") await checkPlusPaymentStatus();
     if (action === "account") await renderAccountLinks();
+    if (action === "export-account-data") await downloadAccountData();
+    if (action === "revoke-sessions") await revokeAllSessions();
+    if (action === "show-data-deletion") renderDataDeletionPanel();
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();
     if (action === "observations") await renderGlobalObservations();
   } catch (error) {
-    showError(`Ошибка: ${error.message}`);
+    showError(`Ошибка: ${readableError(error.message)}`);
   }
 });
 
