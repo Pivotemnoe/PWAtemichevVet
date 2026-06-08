@@ -9,9 +9,9 @@
 
 ## VPS Layout
 
-- App path: `/root/temichevvet_pwa`
-- App database: `/root/temichevvet_pwa/pwa.db`
-- App env file: `/root/temichevvet_pwa/.env`
+- App path: `/opt/temichevvet/pwa`
+- App database: `/opt/temichevvet/data/pwa.db`
+- App env file: `/opt/temichevvet/pwa/.env`
 - Systemd service: `temichevvet_pwa.service`
 - Reverse proxy: `nginx`
 - Internal app bind: `127.0.0.1:8081`
@@ -26,6 +26,20 @@ systemctl is-active temichevvet_pwa.service
 systemctl is-active nginx
 curl -sS http://127.0.0.1:8081/api/health
 curl -sS https://temichevvet.ru/api/health
+```
+
+Closed monitoring:
+
+```bash
+curl -sS https://temichevvet.ru/api/monitoring/status \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET"
+```
+
+Closed audit:
+
+```bash
+curl -sS "https://temichevvet.ru/api/admin/security-audit?limit=50" \
+  -H "X-Temichevvet-Admin-Secret: $ADMIN_API_SECRET"
 ```
 
 ## MAX Webhook

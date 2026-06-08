@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 from collections import defaultdict, deque
@@ -109,6 +110,41 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _audit_ip_hash(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    return hash_value(_client_ip(request), settings.session_secret)[:24]
+
+
+def _audit(
+    request: Request | None,
+    event_type: str,
+    *,
+    user_id: int | None = None,
+    provider: str | None = None,
+    status: str = "ok",
+    actor: str = "system",
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        db.create_security_audit_event(
+            settings.database_path,
+            event_type=event_type,
+            user_id=user_id,
+            provider=provider,
+            status=status,
+            ip_hash=_audit_ip_hash(request),
+            actor=actor,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        logger.warning("Security audit write failed for %s: %s", event_type, exc)
+
+
 def _rate_limit_identity(request: Request, name: str) -> str:
     authorization = request.headers.get("authorization", "")
     match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
@@ -185,7 +221,25 @@ async def security_middleware(request: Request, call_next):
         response.headers["Retry-After"] = str(retry_after)
         _apply_security_headers(request, response)
         return response
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        _audit(
+            request,
+            "http.server_error",
+            status="error",
+            actor="system",
+            metadata={"method": request.method, "path": request.url.path, "error": type(exc).__name__},
+        )
+        raise
+    if response.status_code >= 500 and request.url.path.startswith("/api/"):
+        _audit(
+            request,
+            "http.5xx",
+            status="error",
+            actor="system",
+            metadata={"method": request.method, "path": request.url.path, "status_code": response.status_code},
+        )
     _apply_security_headers(request, response)
     return response
 
@@ -448,6 +502,16 @@ def _safe_sync_triage_to_telegram(**kwargs) -> dict:
         return sync_triage_to_telegram(settings, **kwargs)
     except Exception as exc:
         logger.warning("PWA triage Telegram sync failed: %s", exc)
+        user = kwargs.get("pwa_user") or {}
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            metadata={"operation": "triage", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -456,6 +520,15 @@ def _safe_sync_telegram_profile_to_pwa(user: dict) -> dict:
         return sync_telegram_profile_to_pwa(settings, user)
     except Exception as exc:
         logger.warning("Telegram to PWA profile sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            metadata={"operation": "profile_to_pwa", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -464,6 +537,17 @@ def _safe_sync_pwa_pet_to_telegram(user: dict, pet: dict) -> dict:
         return sync_pwa_pet_to_telegram(settings, pwa_user=user, pet=pet)
     except Exception as exc:
         logger.warning("PWA pet Telegram sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="pet",
+            entity_id=str(pet.get("id") or ""),
+            metadata={"operation": "pet_to_telegram", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -472,6 +556,17 @@ def _safe_sync_pwa_reminder_to_telegram(user: dict, reminder: dict) -> dict:
         return sync_pwa_reminder_to_telegram(settings, pwa_user=user, reminder=reminder)
     except Exception as exc:
         logger.warning("PWA reminder Telegram sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="reminder",
+            entity_id=str(reminder.get("id") or ""),
+            metadata={"operation": "reminder_to_telegram", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -480,6 +575,17 @@ def _safe_sync_pwa_reminder_deactivation(user: dict, reminder_id: int) -> dict:
         return sync_pwa_reminder_deactivation(settings, pwa_user=user, reminder_id=reminder_id)
     except Exception as exc:
         logger.warning("PWA reminder Telegram deactivation failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="reminder",
+            entity_id=str(reminder_id),
+            metadata={"operation": "reminder_deactivation", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -488,6 +594,17 @@ def _safe_sync_pwa_observation_to_telegram(user: dict, observation: dict) -> dic
         return sync_pwa_observation_to_telegram(settings, pwa_user=user, observation=observation)
     except Exception as exc:
         logger.warning("PWA observation Telegram sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="observation",
+            entity_id=str(observation.get("id") or ""),
+            metadata={"operation": "observation_to_telegram", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -496,6 +613,17 @@ def _safe_sync_pwa_measurement_to_telegram(user: dict, measurement: dict) -> dic
         return sync_pwa_measurement_to_telegram(settings, pwa_user=user, measurement=measurement)
     except Exception as exc:
         logger.warning("PWA measurement Telegram sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="measurement",
+            entity_id=str(measurement.get("id") or ""),
+            metadata={"operation": "measurement_to_telegram", "error": type(exc).__name__},
+        )
         return {"synced": False, "reason": "sync_error"}
 
 
@@ -528,6 +656,26 @@ def _require_core_api_secret(authorization: Annotated[str | None, Header()] = No
         raise HTTPException(status_code=401, detail="invalid_authorization_header")
     if not constant_time_equal(match.group(1).strip(), settings.core_api_secret):
         raise HTTPException(status_code=403, detail="invalid_core_api_secret")
+
+
+def _require_admin_api_secret(x_temichevvet_admin_secret: Annotated[str | None, Header()] = None) -> None:
+    if not settings.admin_api_secret:
+        raise HTTPException(status_code=503, detail="admin_api_not_configured")
+    if not x_temichevvet_admin_secret or not constant_time_equal(
+        x_temichevvet_admin_secret,
+        settings.admin_api_secret,
+    ):
+        raise HTTPException(status_code=403, detail="invalid_admin_api_secret")
+
+
+def _require_monitoring_api_secret(x_temichevvet_monitoring_secret: Annotated[str | None, Header()] = None) -> None:
+    if not settings.monitoring_api_secret:
+        raise HTTPException(status_code=503, detail="monitoring_api_not_configured")
+    if not x_temichevvet_monitoring_secret or not constant_time_equal(
+        x_temichevvet_monitoring_secret,
+        settings.monitoring_api_secret,
+    ):
+        raise HTTPException(status_code=403, detail="invalid_monitoring_api_secret")
 
 
 def _core_mirror_db_path() -> Path:
@@ -900,6 +1048,18 @@ def current_user(token: str = Depends(_require_bearer)) -> dict:
     return user
 
 
+def _audit_ownership_denied(request: Request | None, user: dict, *, entity_type: str, entity_id: int | str) -> None:
+    _audit(
+        request,
+        "access.ownership_denied",
+        user_id=int(user["id"]) if user.get("id") else None,
+        status="warning",
+        actor="user",
+        entity_type=entity_type,
+        entity_id=str(entity_id),
+    )
+
+
 def _payment_message(status: str) -> str:
     messages = {
         "pending": "Платёж создан. Перейдите к оплате и затем вернитесь проверить статус.",
@@ -918,6 +1078,15 @@ def _safe_enqueue_subscription_after_payment(sub: dict | None) -> bool:
         return _enqueue_core_outbound_subscription_for_bot_user(int(sub["user_id"]))
     except Exception as exc:
         logger.warning("PWA payment subscription outbound sync skipped: %s", exc)
+        _audit(
+            None,
+            "sync.subscription_outbound_failed",
+            user_id=int(sub["user_id"]) if sub.get("user_id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            metadata={"operation": "payment_subscription_outbound", "error": type(exc).__name__},
+        )
         return False
 
 
@@ -939,6 +1108,29 @@ def _activate_plus_from_valid_payment(*, user: dict, payment: dict[str, Any], re
     activate_paid_subscription(settings, user_id=int(user["id"]), plan_code="plus", days=PLUS_DAYS)
     effective = get_effective_subscription(settings, user).to_public()
     _safe_enqueue_subscription_after_payment(effective)
+    if str(record.get("status") or "") != "succeeded":
+        _audit(
+            None,
+            "payment.succeeded",
+            user_id=int(user["id"]),
+            provider=YOOKASSA_PROVIDER,
+            status="ok",
+            actor="provider",
+            entity_type="payment",
+            entity_id=str(record["provider_payment_id"]),
+            metadata={"amount_rub": int(record["amount_rub"]), "plan": "plus"},
+        )
+        _audit(
+            None,
+            "subscription.activated",
+            user_id=int(user["id"]),
+            provider=YOOKASSA_PROVIDER,
+            status="ok",
+            actor="system",
+            entity_type="subscription",
+            entity_id="plus",
+            metadata={"days": PLUS_DAYS, "source": "pwa_payment"},
+        )
     return PaymentStatusResponse(
         ok=True,
         status="succeeded",
@@ -950,13 +1142,35 @@ def _activate_plus_from_valid_payment(*, user: dict, payment: dict[str, Any], re
 
 def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) -> PaymentStatusResponse:
     if int(record["user_id"]) != int(user["id"]):
+        _audit(
+            None,
+            "payment.ownership_denied",
+            user_id=int(user["id"]),
+            provider=YOOKASSA_PROVIDER,
+            status="warning",
+            actor="user",
+            entity_type="payment",
+            entity_id=str(record.get("provider_payment_id") or ""),
+        )
         raise HTTPException(status_code=404, detail="payment_not_found")
     try:
         payment = get_yookassa_payment(settings, str(record["provider_payment_id"]))
     except YooKassaConfigError as exc:
+        _audit(None, "payment.provider_config_error", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="system")
         raise HTTPException(status_code=503, detail="payment_provider_not_configured") from exc
     except YooKassaPaymentError as exc:
         logger.warning("YooKassa payment status failed: %s", exc)
+        _audit(
+            None,
+            "payment.provider_error",
+            user_id=int(user["id"]),
+            provider=YOOKASSA_PROVIDER,
+            status="error",
+            actor="provider",
+            entity_type="payment",
+            entity_id=str(record["provider_payment_id"]),
+            metadata={"operation": "status", "error": type(exc).__name__},
+        )
         raise HTTPException(status_code=502, detail="payment_provider_error") from exc
 
     status = yookassa_payment_status(payment)
@@ -965,6 +1179,17 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
             return _activate_plus_from_valid_payment(user=user, payment=payment, record=record)
         except YooKassaPaymentValidationError as exc:
             logger.warning("YooKassa payment validation failed for %s: %s", record.get("provider_payment_id"), exc)
+            _audit(
+                None,
+                "payment.validation_failed",
+                user_id=int(user["id"]),
+                provider=YOOKASSA_PROVIDER,
+                status="error",
+                actor="provider",
+                entity_type="payment",
+                entity_id=str(record["provider_payment_id"]),
+                metadata={"error": type(exc).__name__},
+            )
             db.update_payment_status(
                 settings.database_path,
                 provider=YOOKASSA_PROVIDER,
@@ -996,8 +1221,99 @@ def index() -> FileResponse:
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"ok": True, "service": "temichevvet-pwa", "env": settings.app_env}
+def health():
+    try:
+        with closing(db.connect(settings.database_path)) as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        logger.warning("Health database check failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "service": "temichevvet-pwa", "env": settings.app_env, "database": "error"},
+        )
+    return {"ok": True, "service": "temichevvet-pwa", "env": settings.app_env, "database": "ok"}
+
+
+@app.get("/api/monitoring/status")
+def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict:
+    now = utc_now()
+    since_1h = (now - timedelta(hours=1)).isoformat()
+    since_24h = (now - timedelta(days=1)).isoformat()
+    database_ok = True
+    database_error = None
+    try:
+        with closing(db.connect(settings.database_path)) as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        database_ok = False
+        database_error = type(exc).__name__
+
+    def audit_counts(since: str) -> dict[str, int | None]:
+        if not database_ok:
+            return {"server_5xx": None, "payment_errors": None, "llm_errors": None, "sync_errors": None}
+        return {
+            "server_5xx": db.count_security_audit_events_since(
+                settings.database_path,
+                since=since,
+                status="error",
+                event_type_prefix="http.",
+            ),
+            "payment_errors": db.count_security_audit_events_since(
+                settings.database_path,
+                since=since,
+                status="error",
+                event_type_prefix="payment.",
+            ),
+            "llm_errors": db.count_security_audit_events_since(
+                settings.database_path,
+                since=since,
+                status="error",
+                event_type_prefix="llm.",
+            ),
+            "sync_errors": db.count_security_audit_events_since(
+                settings.database_path,
+                since=since,
+                status="error",
+                event_type_prefix="sync.",
+            ),
+        }
+
+    return {
+        "ok": database_ok,
+        "service": "temichevvet-pwa",
+        "env": settings.app_env,
+        "checked_at": now.isoformat(),
+        "checks": {
+            "database": {"ok": database_ok, "error": database_error},
+            "email_configured": _email_delivery_enabled(),
+            "telegram_login_configured": bool(settings.telegram_bot_username and settings.telegram_auth_secret),
+            "max_login_configured": bool(settings.max_bot_username and settings.max_bot_token),
+            "yookassa_configured": bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
+            "llm_configured": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL")),
+            "core_api_configured": bool(settings.core_api_secret),
+        },
+        "events_1h": audit_counts(since_1h),
+        "events_24h": audit_counts(since_24h),
+    }
+
+
+@app.get("/api/admin/security-audit")
+def admin_security_audit(
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    event_type: Annotated[str | None, Query(max_length=120)] = None,
+    user_id: Annotated[int | None, Query(ge=1)] = None,
+    status: Annotated[str | None, Query(max_length=40)] = None,
+    _: None = Depends(_require_admin_api_secret),
+) -> dict:
+    return {
+        "items": db.list_security_audit_events(
+            settings.database_path,
+            limit=limit,
+            event_type=event_type,
+            user_id=user_id,
+            status=status,
+        )
+    }
 
 
 @app.get("/api/internal/telegram-sync/ping")
@@ -1125,14 +1441,16 @@ def public_config() -> dict:
 
 
 @app.post("/api/auth/email/start", response_model=EmailStartResponse)
-def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
+def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStartResponse:
     if not _email_delivery_enabled():
+        _audit(request, "auth.email_code_failed", provider="email", status="error", actor="user", metadata={"reason": "not_configured"})
         raise HTTPException(status_code=503, detail="email_not_configured")
 
     email = _normalize_email(str(payload.email))
     last_challenge = db.get_last_auth_challenge(settings.database_path, channel="email", target=email)
     last_created_at = _parse_iso_dt(last_challenge.get("created_at") if last_challenge else None)
     if last_created_at and utc_now() - last_created_at < timedelta(seconds=EMAIL_CODE_COOLDOWN_SECONDS):
+        _audit(request, "auth.email_code_rate_limited", provider="email", status="warning", actor="user")
         raise HTTPException(status_code=429, detail="email_code_too_many_requests")
 
     recent_count = db.count_auth_challenges_since(
@@ -1142,6 +1460,7 @@ def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
         since=(utc_now() - timedelta(hours=1)).isoformat(),
     )
     if recent_count >= EMAIL_CODE_MAX_PER_HOUR:
+        _audit(request, "auth.email_code_rate_limited", provider="email", status="warning", actor="user")
         raise HTTPException(status_code=429, detail="email_code_hour_limit")
 
     code = make_code()
@@ -1157,7 +1476,9 @@ def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
             send_login_code(settings, email=email, code=code)
         except Exception:
             logger.exception("Failed to send email login code")
+            _audit(request, "auth.email_code_failed", provider="email", status="error", actor="system", metadata={"reason": "delivery_failed"})
             raise HTTPException(status_code=503, detail="email_delivery_failed") from None
+    _audit(request, "auth.email_code_sent", provider="email", status="ok", actor="user", metadata={"target_hash": hash_value(email, settings.session_secret)[:16]})
     return EmailStartResponse(
         ok=True,
         message="Код отправлен на email.",
@@ -1166,10 +1487,11 @@ def auth_email_start(payload: EmailStartRequest) -> EmailStartResponse:
 
 
 @app.post("/api/auth/email/verify", response_model=SessionResponse)
-def auth_email_verify(payload: EmailVerifyRequest) -> SessionResponse:
+def auth_email_verify(payload: EmailVerifyRequest, request: Request) -> SessionResponse:
     email = _normalize_email(str(payload.email))
     challenge = db.find_active_challenge(settings.database_path, channel="email", target=email)
     if not challenge:
+        _audit(request, "auth.email_verify_failed", provider="email", status="warning", actor="user", metadata={"reason": "not_found"})
         raise HTTPException(status_code=400, detail="code_expired_or_not_found")
 
     code_hash = hash_value(payload.code.strip(), settings.session_secret)
@@ -1177,7 +1499,9 @@ def auth_email_verify(payload: EmailVerifyRequest) -> SessionResponse:
         failed_attempts = db.increment_challenge_failed_attempts(settings.database_path, int(challenge["id"]))
         if failed_attempts >= EMAIL_CODE_MAX_VERIFY_ATTEMPTS:
             db.consume_challenge(settings.database_path, int(challenge["id"]))
+            _audit(request, "auth.email_verify_failed", provider="email", status="warning", actor="user", metadata={"reason": "attempts_exceeded"})
             raise HTTPException(status_code=400, detail="code_attempts_exceeded")
+        _audit(request, "auth.email_verify_failed", provider="email", status="warning", actor="user", metadata={"reason": "invalid_code"})
         raise HTTPException(status_code=400, detail="invalid_code")
 
     db.consume_challenge(settings.database_path, int(challenge["id"]))
@@ -1189,24 +1513,28 @@ def auth_email_verify(payload: EmailVerifyRequest) -> SessionResponse:
         token_hash=hash_value(token, settings.session_secret),
         expires_at=(utc_now() + timedelta(days=30)).isoformat(),
     )
+    _audit(request, "auth.login_success", user_id=int(user["id"]), provider="email", status="ok", actor="user")
     return SessionResponse(token=token, user=user)
 
 
 @app.post("/api/auth/telegram/start", response_model=ProviderStartResponse)
-def auth_telegram_start() -> ProviderStartResponse:
+def auth_telegram_start(request: Request) -> ProviderStartResponse:
     if not settings.telegram_bot_username:
+        _audit(request, "auth.provider_start_failed", provider="telegram", status="warning", actor="user", metadata={"reason": "bot_username_missing"})
         return ProviderStartResponse(
             enabled=False,
             provider="telegram",
             message="Вход через Telegram будет доступен после настройки бота.",
         )
     if not settings.telegram_auth_secret:
+        _audit(request, "auth.provider_start_failed", provider="telegram", status="warning", actor="user", metadata={"reason": "auth_secret_missing"})
         return ProviderStartResponse(
             enabled=False,
             provider="telegram",
             message="Вход через Telegram настраивается. Пока используйте email.",
         )
     state, url = create_telegram_login_challenge(settings)
+    _audit(request, "auth.provider_start", provider="telegram", status="ok", actor="user")
     return ProviderStartResponse(
         enabled=True,
         provider="telegram",
@@ -1217,26 +1545,38 @@ def auth_telegram_start() -> ProviderStartResponse:
 
 
 @app.get("/api/auth/telegram/status", response_model=ProviderStatusResponse)
-def auth_telegram_status(state: str) -> ProviderStatusResponse:
+def auth_telegram_status(state: str, request: Request) -> ProviderStatusResponse:
     result = complete_telegram_login(settings, state)
+    if result.get("status") == "complete" and isinstance(result.get("user"), dict):
+        _audit(
+            request,
+            "auth.login_success",
+            user_id=int(result["user"]["id"]),
+            provider="telegram",
+            status="ok",
+            actor="user",
+        )
     return ProviderStatusResponse(**result)
 
 
 @app.post("/api/account/telegram/start", response_model=ProviderStartResponse)
-def account_telegram_start(user: dict = Depends(current_user)) -> ProviderStartResponse:
+def account_telegram_start(request: Request, user: dict = Depends(current_user)) -> ProviderStartResponse:
     if not settings.telegram_bot_username:
+        _audit(request, "account.provider_link_start_failed", user_id=int(user["id"]), provider="telegram", status="warning", actor="user", metadata={"reason": "bot_username_missing"})
         return ProviderStartResponse(
             enabled=False,
             provider="telegram",
             message="Подключение Telegram будет доступно после настройки бота.",
         )
     if not settings.telegram_auth_secret:
+        _audit(request, "account.provider_link_start_failed", user_id=int(user["id"]), provider="telegram", status="warning", actor="user", metadata={"reason": "auth_secret_missing"})
         return ProviderStartResponse(
             enabled=False,
             provider="telegram",
             message="Подключение Telegram настраивается.",
         )
     state, url = create_telegram_login_challenge(settings, link_user_id=int(user["id"]))
+    _audit(request, "account.provider_link_start", user_id=int(user["id"]), provider="telegram", status="ok", actor="user")
     return ProviderStartResponse(
         enabled=True,
         provider="telegram",
@@ -1249,6 +1589,7 @@ def account_telegram_start(user: dict = Depends(current_user)) -> ProviderStartR
 @app.post("/api/auth/telegram/complete")
 def auth_telegram_complete(
     payload: TelegramCompleteRequest,
+    request: Request,
     x_temichevvet_telegram_secret: Annotated[str | None, Header()] = None,
 ) -> dict:
     if not settings.telegram_auth_secret:
@@ -1257,6 +1598,7 @@ def auth_telegram_complete(
         x_temichevvet_telegram_secret,
         settings.telegram_auth_secret,
     ):
+        _audit(request, "auth.telegram_complete_forbidden", provider="telegram", status="warning", actor="provider")
         raise HTTPException(status_code=403, detail="invalid_telegram_auth_secret")
     result = confirm_telegram_login(
         settings,
@@ -1266,19 +1608,23 @@ def auth_telegram_complete(
         username=_clean_optional_text(payload.username),
     )
     if not result.get("handled"):
+        _audit(request, "auth.telegram_complete_failed", provider="telegram", status="warning", actor="provider", metadata={"reason": result.get("reason") or "not_handled"})
         raise HTTPException(status_code=404, detail=result.get("reason") or "telegram_challenge_not_found")
+    _audit(request, "auth.telegram_confirmed", provider="telegram", status="ok", actor="provider")
     return {"ok": True, "state": result.get("state")}
 
 
 @app.post("/api/auth/max/start", response_model=ProviderStartResponse)
-def auth_max_start() -> ProviderStartResponse:
+def auth_max_start(request: Request) -> ProviderStartResponse:
     if not settings.max_bot_username or not settings.max_bot_token:
+        _audit(request, "auth.provider_start_failed", provider="max", status="warning", actor="user", metadata={"reason": "max_not_configured"})
         return ProviderStartResponse(
             enabled=False,
             provider="max",
             message="Вход через MAX будет доступен после настройки имени и токена бота.",
         )
     state, url = create_max_login_challenge(settings)
+    _audit(request, "auth.provider_start", provider="max", status="ok", actor="user")
     return ProviderStartResponse(
         enabled=True,
         provider="max",
@@ -1289,20 +1635,31 @@ def auth_max_start() -> ProviderStartResponse:
 
 
 @app.get("/api/auth/max/status", response_model=ProviderStatusResponse)
-def auth_max_status(state: str) -> ProviderStatusResponse:
+def auth_max_status(state: str, request: Request) -> ProviderStatusResponse:
     result = complete_max_login(settings, state)
+    if result.get("status") == "complete" and isinstance(result.get("user"), dict):
+        _audit(
+            request,
+            "auth.login_success",
+            user_id=int(result["user"]["id"]),
+            provider="max",
+            status="ok",
+            actor="user",
+        )
     return ProviderStatusResponse(**result)
 
 
 @app.post("/api/account/max/start", response_model=ProviderStartResponse)
-def account_max_start(user: dict = Depends(current_user)) -> ProviderStartResponse:
+def account_max_start(request: Request, user: dict = Depends(current_user)) -> ProviderStartResponse:
     if not settings.max_bot_username or not settings.max_bot_token:
+        _audit(request, "account.provider_link_start_failed", user_id=int(user["id"]), provider="max", status="warning", actor="user", metadata={"reason": "max_not_configured"})
         return ProviderStartResponse(
             enabled=False,
             provider="max",
             message="Подключение MAX будет доступно после настройки имени и токена бота.",
         )
     state, url = create_max_login_challenge(settings, link_user_id=int(user["id"]))
+    _audit(request, "account.provider_link_start", user_id=int(user["id"]), provider="max", status="ok", actor="user")
     return ProviderStartResponse(
         enabled=True,
         provider="max",
@@ -1318,9 +1675,18 @@ async def max_webhook(
     x_max_bot_api_secret: Annotated[str | None, Header()] = None,
 ) -> dict:
     if settings.max_webhook_secret and x_max_bot_api_secret != settings.max_webhook_secret:
+        _audit(request, "auth.max_webhook_forbidden", provider="max", status="warning", actor="provider")
         raise HTTPException(status_code=403, detail="invalid_webhook_secret")
     update = await request.json()
     result = process_max_update(settings, update)
+    _audit(
+        request,
+        "auth.max_webhook",
+        provider="max",
+        status="ok" if result.get("handled") else "warning",
+        actor="provider",
+        metadata={"handled": bool(result.get("handled")), "reason": result.get("reason") or ""},
+    )
     return {"ok": True, **result}
 
 
@@ -1336,17 +1702,21 @@ def me(user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/api/auth/logout")
-def auth_logout(token: str = Depends(_require_bearer)) -> dict:
+def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> dict:
+    token_hash = hash_value(token, settings.session_secret)
+    user = db.get_user_by_session(settings.database_path, token_hash=token_hash)
     db.revoke_session(
         settings.database_path,
-        token_hash=hash_value(token, settings.session_secret),
+        token_hash=token_hash,
     )
+    _audit(request, "auth.logout", user_id=int(user["id"]) if user else None, status="ok", actor="user")
     return {"ok": True, "message": "Сессия завершена."}
 
 
 @app.post("/api/account/sessions/revoke-all")
-def account_revoke_sessions(user: dict = Depends(current_user)) -> dict:
+def account_revoke_sessions(request: Request, user: dict = Depends(current_user)) -> dict:
     revoked = db.revoke_user_sessions(settings.database_path, user_id=int(user["id"]))
+    _audit(request, "auth.sessions_revoked", user_id=int(user["id"]), status="ok", actor="user", metadata={"revoked": revoked})
     return {"ok": True, "revoked": revoked, "message": "Все активные сессии завершены."}
 
 
@@ -1363,8 +1733,9 @@ def account_export(user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/api/account/deletion-request")
-def account_deletion_request(payload: DataDeletionRequest, user: dict = Depends(current_user)) -> dict:
+def account_deletion_request(payload: DataDeletionRequest, request: Request, user: dict = Depends(current_user)) -> dict:
     if payload.confirm.strip().upper() != "УДАЛИТЬ":
+        _audit(request, "account.deletion_request_failed", user_id=int(user["id"]), status="warning", actor="user", metadata={"reason": "invalid_confirmation"})
         raise HTTPException(status_code=400, detail="invalid_deletion_confirmation")
     comment = _clean_optional_text(payload.comment) or "Без комментария."
     text = (
@@ -1378,6 +1749,7 @@ def account_deletion_request(payload: DataDeletionRequest, user: dict = Depends(
         text=text,
         category="data_deletion_request",
     )
+    _audit(request, "account.deletion_requested", user_id=int(user["id"]), status="ok", actor="user", entity_type="feedback", entity_id=str(item.get("id") or ""))
     return {
         "ok": True,
         "item": item,
@@ -1386,9 +1758,10 @@ def account_deletion_request(payload: DataDeletionRequest, user: dict = Depends(
 
 
 @app.post("/api/payments/plus/create", response_model=PaymentCreateResponse)
-def payment_plus_create(user: dict = Depends(current_user)) -> PaymentCreateResponse:
+def payment_plus_create(request: Request, user: dict = Depends(current_user)) -> PaymentCreateResponse:
     sub = get_effective_subscription(settings, user)
     if sub.plan != "free":
+        _audit(request, "payment.create_skipped", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="ok", actor="user", metadata={"reason": "already_active", "plan": sub.plan})
         return PaymentCreateResponse(
             ok=True,
             status="already_active",
@@ -1403,14 +1776,17 @@ def payment_plus_create(user: dict = Depends(current_user)) -> PaymentCreateResp
             user_email=str(user.get("email") or "") or None,
         )
     except YooKassaConfigError as exc:
+        _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="system", metadata={"reason": "not_configured"})
         raise HTTPException(status_code=503, detail="payment_provider_not_configured") from exc
     except YooKassaPaymentError as exc:
         logger.warning("YooKassa create payment failed: %s", exc)
+        _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", metadata={"error": type(exc).__name__})
         raise HTTPException(status_code=502, detail="payment_provider_error") from exc
 
     payment_id = str(payment.get("id") or "").strip()
     pay_url = yookassa_confirmation_url(payment)
     if not payment_id or not pay_url:
+        _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", metadata={"reason": "confirmation_missing"})
         raise HTTPException(status_code=502, detail="payment_confirmation_missing")
 
     status = yookassa_payment_status(payment)
@@ -1425,6 +1801,17 @@ def payment_plus_create(user: dict = Depends(current_user)) -> PaymentCreateResp
         confirmation_url=pay_url,
         idempotence_key=str(payment.get("idempotence_key") or ""),
         raw_payload=payment,
+    )
+    _audit(
+        request,
+        "payment.created",
+        user_id=int(user["id"]),
+        provider=YOOKASSA_PROVIDER,
+        status="ok",
+        actor="user",
+        entity_type="payment",
+        entity_id=payment_id,
+        metadata={"amount_rub": 200, "plan": "plus", "provider_status": status},
     )
     return PaymentCreateResponse(
         ok=True,
@@ -1464,33 +1851,41 @@ def payment_status(payment_id: str, user: dict = Depends(current_user)) -> Payme
 @app.post("/api/webhooks/yookassa")
 async def yookassa_webhook(request: Request, secret: str | None = Query(default=None)) -> dict:
     if settings.yookassa_webhook_secret and not constant_time_equal(secret or "", settings.yookassa_webhook_secret):
+        _audit(request, "payment.webhook_forbidden", provider=YOOKASSA_PROVIDER, status="warning", actor="provider")
         raise HTTPException(status_code=403, detail="invalid_webhook_secret")
 
     payload = await request.json()
     event = str(payload.get("event") or "")
     obj = payload.get("object") or {}
     if not isinstance(obj, dict):
+        _audit(request, "payment.webhook_ignored", provider=YOOKASSA_PROVIDER, status="warning", actor="provider", metadata={"reason": "missing_object"})
         return {"ok": True, "ignored": "missing_object"}
     payment_id = str(obj.get("id") or "").strip()
     if not payment_id:
+        _audit(request, "payment.webhook_ignored", provider=YOOKASSA_PROVIDER, status="warning", actor="provider", metadata={"reason": "missing_payment_id"})
         return {"ok": True, "ignored": "missing_payment_id"}
     if event and event not in {"payment.succeeded", "payment.canceled", "payment.waiting_for_capture"}:
+        _audit(request, "payment.webhook_ignored", provider=YOOKASSA_PROVIDER, status="ok", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"event": event})
         return {"ok": True, "ignored": event}
 
     record = db.get_payment_record(settings.database_path, provider=YOOKASSA_PROVIDER, provider_payment_id=payment_id)
     if not record:
         logger.warning("YooKassa webhook for unknown payment %s", payment_id)
+        _audit(request, "payment.webhook_unknown", provider=YOOKASSA_PROVIDER, status="warning", actor="provider", entity_type="payment", entity_id=payment_id)
         return {"ok": True, "ignored": "unknown_payment"}
     user = db.get_user_by_id(settings.database_path, user_id=int(record["user_id"]))
     if not user:
         logger.warning("YooKassa webhook payment %s has missing user %s", payment_id, record.get("user_id"))
+        _audit(request, "payment.webhook_missing_user", provider=YOOKASSA_PROVIDER, status="error", actor="provider", entity_type="payment", entity_id=payment_id)
         return {"ok": True, "ignored": "missing_user"}
 
     try:
         result = _refresh_yookassa_payment_for_user(record=record, user=user)
     except HTTPException as exc:
         logger.warning("YooKassa webhook processing failed for %s: %s", payment_id, exc.detail)
+        _audit(request, "payment.webhook_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"detail": exc.detail})
         return {"ok": True, "status": "failed", "detail": exc.detail}
+    _audit(request, "payment.webhook_processed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="ok", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"status": result.status})
     return {"ok": True, "status": result.status, "payment_id": result.payment_id}
 
 
@@ -1524,10 +1919,11 @@ def create_pet(payload: PetPayload, user: dict = Depends(current_user)) -> dict:
 
 
 @app.get("/api/pets/{pet_id}")
-def get_pet(pet_id: int, user: dict = Depends(current_user)) -> dict:
+def get_pet(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     _safe_sync_telegram_profile_to_pwa(user)
     pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id)
     if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     reminders = db.list_reminders(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id) or []
     observations = db.list_observations(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=5) or []
@@ -1561,7 +1957,7 @@ def _pet_what_now(reminders: list[dict], observations: list[dict], weights: list
 
 
 @app.patch("/api/pets/{pet_id}")
-def update_pet(pet_id: int, payload: PetPatchPayload, user: dict = Depends(current_user)) -> dict:
+def update_pet(pet_id: int, payload: PetPatchPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     values = payload.model_dump(exclude_unset=True)
     if "pet_type" in values and values["pet_type"] is not None:
         values["pet_type"] = _normalize_pet_type(values["pet_type"])
@@ -1574,6 +1970,7 @@ def update_pet(pet_id: int, payload: PetPatchPayload, user: dict = Depends(curre
             values[key] = _clean_optional_text(values[key])
     pet = db.update_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, values=values)
     if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
     _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
@@ -1582,9 +1979,10 @@ def update_pet(pet_id: int, payload: PetPatchPayload, user: dict = Depends(curre
 
 
 @app.post("/api/pets/{pet_id}/main")
-def set_main_pet(pet_id: int, payload: MainPetPayload, user: dict = Depends(current_user)) -> dict:
+def set_main_pet(pet_id: int, payload: MainPetPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     pet = db.set_main_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, is_main=payload.is_main)
     if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
     _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
@@ -1592,32 +1990,35 @@ def set_main_pet(pet_id: int, payload: MainPetPayload, user: dict = Depends(curr
 
 
 @app.delete("/api/pets/{pet_id}")
-def delete_pet(pet_id: int, user: dict = Depends(current_user)) -> dict:
+def delete_pet(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     if not db.delete_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     return {"ok": True}
 
 
 @app.get("/api/pets/{pet_id}/history")
-def pet_history(pet_id: int, user: dict = Depends(current_user)) -> dict:
+def pet_history(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_history(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     return {"items": items}
 
 
 @app.get("/api/pets/{pet_id}/weights")
-def pet_weights(pet_id: int, user: dict = Depends(current_user)) -> dict:
+def pet_weights(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_measurements(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     return {"items": items}
 
 
 @app.post("/api/pets/{pet_id}/weights")
-def add_pet_weight(pet_id: int, payload: MeasurementPayload, user: dict = Depends(current_user)) -> dict:
+def add_pet_weight(pet_id: int, payload: MeasurementPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     item = db.create_measurement(
         settings.database_path,
         owner_id=int(user["id"]),
@@ -1626,6 +2027,7 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, user: dict = Depend
         note=_clean_optional_text(payload.note),
     )
     if not item:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     sync_result = _safe_sync_pwa_measurement_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
@@ -1636,16 +2038,17 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, user: dict = Depend
 
 
 @app.get("/api/pets/{pet_id}/observations")
-def pet_observations(pet_id: int, user: dict = Depends(current_user)) -> dict:
+def pet_observations(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     _safe_sync_telegram_profile_to_pwa(user)
     items = db.list_observations(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=50)
     if items is None:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     return {"items": [_parse_json_payload(row) for row in items]}
 
 
 @app.post("/api/pets/{pet_id}/observations")
-def add_pet_observation(pet_id: int, payload: ObservationPayload, user: dict = Depends(current_user)) -> dict:
+def add_pet_observation(pet_id: int, payload: ObservationPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     body = json.dumps({"text": _clean_text(payload.text)}, ensure_ascii=False)
     item = db.create_observation(
         settings.database_path,
@@ -1655,6 +2058,7 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, user: dict = D
         payload=body,
     )
     if not item:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     sync_result = _safe_sync_pwa_observation_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
@@ -1671,7 +2075,7 @@ def reminders(user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/api/reminders")
-def add_reminder(payload: ReminderPayload, user: dict = Depends(current_user)) -> dict:
+def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     item = db.create_reminder(
         settings.database_path,
         owner_id=int(user["id"]),
@@ -1684,6 +2088,8 @@ def add_reminder(payload: ReminderPayload, user: dict = Depends(current_user)) -
         notes=_clean_optional_text(payload.notes),
     )
     if item is None:
+        if payload.pet_id is not None:
+            _audit_ownership_denied(request, user, entity_type="pet", entity_id=payload.pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     sync_result = _safe_sync_pwa_reminder_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
@@ -1694,10 +2100,11 @@ def add_reminder(payload: ReminderPayload, user: dict = Depends(current_user)) -
 
 
 @app.delete("/api/reminders/{reminder_id}")
-def delete_reminder(reminder_id: int, user: dict = Depends(current_user)) -> dict:
+def delete_reminder(reminder_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     sync_result = _safe_sync_pwa_reminder_deactivation(user, reminder_id)
     _enqueue_core_outbound_from_sync(sync_result, (("telegram_reminder_id", "reminders"),))
     if not db.deactivate_reminder(settings.database_path, owner_id=int(user["id"]), reminder_id=reminder_id):
+        _audit_ownership_denied(request, user, entity_type="reminder", entity_id=reminder_id)
         raise HTTPException(status_code=404, detail="reminder_not_found")
     return {"ok": True}
 
@@ -1752,7 +2159,7 @@ def due_followups(user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/api/followups/{followup_id}/answer")
-def answer_followup(followup_id: int, payload: FollowupAnswerPayload, user: dict = Depends(current_user)) -> dict:
+def answer_followup(followup_id: int, payload: FollowupAnswerPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     answer = payload.answer.strip().lower()
     if answer not in {"better", "same", "worse", "retry"}:
         raise HTTPException(status_code=400, detail="invalid_followup_answer")
@@ -1762,6 +2169,7 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, user: dict
         followup_id=followup_id,
         answer=answer,
     ):
+        _audit_ownership_denied(request, user, entity_type="followup", entity_id=followup_id)
         raise HTTPException(status_code=404, detail="followup_not_found")
     messages = {
         "better": "Хорошо. Продолжайте наблюдение и следуйте рекомендациям врача, если они были даны.",
@@ -1773,10 +2181,11 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, user: dict
 
 
 @app.post("/api/triage")
-def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
+def triage(payload: TriageRequest, request: Request, user: dict = Depends(current_user)) -> dict:
     _safe_sync_telegram_profile_to_pwa(user)
     pet_id = payload.pet_id
     if pet_id is not None and not db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
     pets = db.list_pets(settings.database_path, owner_id=int(user["id"]))
     selected_pet = (
@@ -1830,6 +2239,16 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
                 ("telegram_followup_id", "triage_followups"),
             ),
         )
+        _audit(
+            request,
+            "triage.red_flag",
+            user_id=int(user["id"]),
+            status="ok",
+            actor="system",
+            entity_type="triage",
+            entity_id=str(log["id"] if log else ""),
+            metadata={"urgency": "red", "matched_count": len(red_flags.matched), "subscription_source": sub.source},
+        )
         return {
             "status": "red",
             "urgency": "red",
@@ -1863,6 +2282,14 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
     except Exception as exc:
         refund_quota(sub, amount=1)
         logger.exception("PWA triage LLM failed: %s", exc)
+        _audit(
+            request,
+            "llm.triage_failed",
+            user_id=int(user["id"]),
+            status="error",
+            actor="system",
+            metadata={"error": type(exc).__name__, "plan": sub.plan},
+        )
         raise HTTPException(
             status_code=503,
             detail="Не удалось получить разбор. Запрос не списан, попробуйте позже.",
@@ -1919,6 +2346,24 @@ def triage(payload: TriageRequest, user: dict = Depends(current_user)) -> dict:
             ("telegram_observation_id", "pet_observations"),
             ("telegram_followup_id", "triage_followups"),
         ),
+    )
+    _audit(
+        request,
+        "triage.completed",
+        user_id=int(user["id"]),
+        status="ok",
+        actor="system",
+        entity_type="triage",
+        entity_id=str(log["id"] if log else ""),
+        metadata={
+            "urgency": urgency,
+            "plan": sub.plan,
+            "subscription_source": sub.source,
+            "prompt_tokens": llm_result.prompt_tokens,
+            "completion_tokens": llm_result.completion_tokens,
+            "total_tokens": llm_result.total_tokens,
+            "model": llm_result.model,
+        },
     )
     return {
         "status": "saved",

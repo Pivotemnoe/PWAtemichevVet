@@ -49,5 +49,16 @@
 - Rate limits for auth, payments, triage, feedback, export and data deletion requests are in place.
 - Security headers are applied by the FastAPI middleware.
 - User can revoke current session, revoke all sessions, export account data and submit a data deletion request.
-- Next: add structured access/error audit logs and CI checks.
-- Prepare PostgreSQL migration before active growth.
+- Structured security audit logs are in place for auth, provider linking, payments, LLM errors, sync errors and ownership-denied attempts.
+- Public `/api/health` and closed `/api/monitoring/status` are available for uptime and operational checks.
+- GitHub CI is prepared for Python checks, JS checks, API smoke tests, mocked payments and ownership tests.
+- PostgreSQL migration is documented and should be done before active growth.
+
+## P2: Development And Growth
+
+- Keep SQLite for MVP, but prepare PostgreSQL before scaling.
+- Add richer admin UI for `security_audit_events` after the first traffic test.
+- Add real external uptime provider for `https://temichevvet.ru/api/health`.
+- Add alert rules for 5xx, YooKassa errors, LLM failures and Telegram sync failures.
+- Add more API regression tests as new PWA scenarios move from Telegram into the web app.
+- Do not expose Telegram/MAX sync internals to the user until the linking flow is stable.

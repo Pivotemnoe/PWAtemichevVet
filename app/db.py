@@ -363,6 +363,43 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id, created_at)")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS security_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                user_id INTEGER,
+                provider TEXT,
+                status TEXT NOT NULL,
+                ip_hash TEXT,
+                actor TEXT NOT NULL DEFAULT 'system',
+                entity_type TEXT,
+                entity_id TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_security_audit_type_created
+            ON security_audit_events(event_type, created_at)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_security_audit_user_created
+            ON security_audit_events(user_id, created_at)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_security_audit_status_created
+            ON security_audit_events(status, created_at)
+            """
+        )
         conn.commit()
 
 
@@ -388,6 +425,135 @@ def _json_load(value: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _safe_audit_metadata(value: dict[str, Any] | None) -> str | None:
+    if not value:
+        return None
+    safe: dict[str, Any] = {}
+    for key, item in value.items():
+        if item is None:
+            continue
+        if isinstance(item, (bool, int, float)):
+            safe[str(key)[:80]] = item
+            continue
+        text = str(item)
+        safe[str(key)[:80]] = text[:240]
+    payload = _json_dump(safe)
+    if payload and len(payload) > 1600:
+        return payload[:1600]
+    return payload
+
+
+def create_security_audit_event(
+    db_path: Path,
+    *,
+    event_type: str,
+    user_id: int | None = None,
+    provider: str | None = None,
+    status: str = "ok",
+    ip_hash: str | None = None,
+    actor: str = "system",
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO security_audit_events (
+                event_type, user_id, provider, status, ip_hash, actor,
+                entity_type, entity_id, metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_type[:120],
+                int(user_id) if user_id is not None else None,
+                provider[:40] if provider else None,
+                status[:40],
+                ip_hash[:80] if ip_hash else None,
+                actor[:40] if actor else "system",
+                entity_type[:80] if entity_type else None,
+                entity_id[:120] if entity_id else None,
+                _safe_audit_metadata(metadata),
+                now,
+            ),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM security_audit_events WHERE id = ?", (int(cur.lastrowid),))
+        row = cur.fetchone()
+        item = row_to_dict(row)
+        if not item:
+            raise RuntimeError("security_audit_event_not_created")
+        item["metadata"] = _json_load(item.get("metadata"))
+        return item
+
+
+def list_security_audit_events(
+    db_path: Path,
+    *,
+    limit: int = 100,
+    event_type: str | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if event_type:
+        clauses.append("event_type = ?")
+        params.append(event_type)
+    if user_id is not None:
+        clauses.append("user_id = ?")
+        params.append(int(user_id))
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM security_audit_events
+            {where}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (*params, int(limit)),
+        ).fetchall()
+    items = rows_to_dicts(rows)
+    for item in items:
+        item["metadata"] = _json_load(item.get("metadata"))
+    return items
+
+
+def count_security_audit_events_since(
+    db_path: Path,
+    *,
+    since: str,
+    status: str | None = None,
+    event_type_prefix: str | None = None,
+) -> int:
+    clauses = ["created_at >= ?"]
+    params: list[Any] = [since]
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if event_type_prefix:
+        clauses.append("event_type LIKE ?")
+        params.append(f"{event_type_prefix}%")
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM security_audit_events
+            WHERE {' AND '.join(clauses)}
+            """,
+            tuple(params),
+        ).fetchone()
+        return int((row or (0,))[0] or 0)
 
 
 def _payment_public(row: sqlite3.Row | None) -> dict[str, Any] | None:
