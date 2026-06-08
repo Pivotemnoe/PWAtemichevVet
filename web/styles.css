@@ -1307,6 +1307,123 @@ textarea:focus {
   width: auto;
 }
 
+.admin-view {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 24px auto 48px;
+}
+
+.admin-login-panel {
+  display: grid;
+  place-items: center;
+  min-height: 56vh;
+}
+
+.admin-login-card {
+  width: min(520px, 100%);
+}
+
+.admin-login-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.admin-content {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-generated {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.admin-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-metric small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.admin-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.admin-section h2 {
+  margin: 0 0 14px;
+  font-size: 1.2rem;
+}
+
+.admin-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-status {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-2);
+}
+
+.admin-status strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.admin-status.ok strong {
+  color: var(--green);
+}
+
+.admin-status.warn strong {
+  color: #b42318;
+}
+
+.admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.admin-table td {
+  color: var(--text);
+}
+
+.admin-table tr:last-child td {
+  border-bottom: 0;
+}
+
 @media (max-width: 760px) {
   .topbar {
     min-height: 86px;
@@ -1385,6 +1502,8 @@ textarea:focus {
   .channel-grid,
   .auth-grid,
   .summary-grid,
+  .admin-summary,
+  .admin-status-grid,
   .guide-panel,
   .detail-grid,
   .form-grid,

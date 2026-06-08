@@ -1,8 +1,8 @@
-const CACHE_NAME = "temichevvet-pwa-ios-icon-1";
+const CACHE_NAME = "temichevvet-pwa-admin-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260608-ios-icon-1",
-  "/static/app.js?v=20260608-ios-icon-1",
+  "/static/styles.css?v=20260608-admin-1",
+  "/static/app.js?v=20260608-admin-1",
   "/static/manifest.webmanifest",
   "/static/assets/app-icon-192.png",
   "/static/assets/app-icon-512.png",

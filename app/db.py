@@ -91,6 +91,20 @@ def init_db(db_path: Path) -> None:
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_auth_target ON auth_challenges(channel, target, created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                ip_hash TEXT,
+                user_agent TEXT
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_sessions_token ON admin_sessions(token_hash)")
 
         cur.execute(
             """
@@ -1176,6 +1190,64 @@ def get_user_by_session(db_path: Path, *, token_hash: str) -> dict[str, Any] | N
             (token_hash, utc_now_iso()),
         )
         return row_to_dict(cur.fetchone())
+
+
+def create_admin_session(
+    db_path: Path,
+    *,
+    token_hash: str,
+    expires_at: str,
+    ip_hash: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO admin_sessions (token_hash, created_at, expires_at, ip_hash, user_agent)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                token_hash,
+                utc_now_iso(),
+                expires_at,
+                ip_hash[:80] if ip_hash else None,
+                user_agent[:240] if user_agent else None,
+            ),
+        )
+        conn.commit()
+
+
+def get_admin_session(db_path: Path, *, token_hash: str) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM admin_sessions
+            WHERE token_hash = ?
+              AND revoked_at IS NULL
+              AND expires_at > ?
+            LIMIT 1
+            """,
+            (token_hash, utc_now_iso()),
+        ).fetchone()
+        return row_to_dict(row)
+
+
+def revoke_admin_session(db_path: Path, *, token_hash: str) -> bool:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE admin_sessions
+            SET revoked_at = ?
+            WHERE token_hash = ?
+              AND revoked_at IS NULL
+            """,
+            (utc_now_iso(), token_hash),
+        )
+        revoked = cur.rowcount > 0
+        conn.commit()
+        return revoked
 
 
 def get_user_by_id(db_path: Path, *, user_id: int) -> dict[str, Any] | None:

@@ -6,10 +6,10 @@
     <meta name="theme-color" content="#1476d4" />
     <title>TemichevVet</title>
     <link rel="manifest" href="/static/manifest.webmanifest" />
-    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260608-ios-icon-1" type="image/png" sizes="192x192" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260608-ios-icon-1" />
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260608-ios-icon-1" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260608-ios-icon-1" />
+    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260608-admin-1" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260608-admin-1" />
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260608-admin-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260608-admin-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -314,6 +314,41 @@
             <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
           </div>
         </section>
+
+        <section class="admin-view" id="adminView" hidden>
+          <div class="admin-login-panel" id="adminLoginPanel">
+            <div class="panel admin-login-card">
+              <p class="section-label">Админка TemichevVet</p>
+              <h1>Вход администратора</h1>
+              <p>Доступ только для владельца сервиса. Вход защищён отдельным паролем, короткой сессией и журналом безопасности.</p>
+              <form id="adminLoginForm" class="admin-login-form">
+                <label>
+                  <span>Пароль администратора</span>
+                  <input id="adminPasswordInput" type="password" autocomplete="current-password" minlength="8" required />
+                </label>
+                <button class="primary-button" type="submit">Войти</button>
+              </form>
+              <p class="hint" id="adminLoginHint"></p>
+            </div>
+          </div>
+
+          <div class="admin-dashboard" id="adminDashboardPanel" hidden>
+            <div class="dashboard-head">
+              <div>
+                <p class="section-label">Администрирование</p>
+                <h1>TemichevVet: контроль сервиса</h1>
+                <p>Пользователи, оплаты, подписки, безопасность, синхронизация и технические ошибки.</p>
+              </div>
+              <div class="inline-actions">
+                <button class="secondary-button compact" id="adminRefreshBtn" type="button">Обновить</button>
+                <button class="secondary-button compact" id="adminLogoutBtn" type="button">Выйти</button>
+              </div>
+            </div>
+            <div id="adminContent" class="admin-content">
+              <div class="notice">Загружаю данные админки...</div>
+            </div>
+          </div>
+        </section>
       </main>
 
       <footer class="legal-footer">
@@ -358,6 +393,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260608-ios-icon-1" type="module"></script>
+    <script src="/static/app.js?v=20260608-admin-1" type="module"></script>
   </body>
 </html>

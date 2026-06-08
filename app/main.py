@@ -38,7 +38,7 @@ from app.payments.yookassa import (
     payment_status as yookassa_payment_status,
     validate_plus_payment as validate_yookassa_plus_payment,
 )
-from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now
+from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now, verify_password_hash
 from app.subscriptions import activate_paid_subscription, get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 from app.telegram_sync import (
@@ -98,6 +98,7 @@ RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = 
     ("account_export", {"GET"}, ("/api/account/export",), 5, 3600),
     ("account_deletion", {"POST"}, ("/api/account/deletion-request",), 3, 86400),
     ("account_sessions", {"POST"}, ("/api/account/sessions/revoke-all", "/api/auth/logout"), 20, 3600),
+    ("admin_login", {"POST"}, ("/api/admin/auth/login",), 8, 900),
 )
 
 _rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
@@ -194,11 +195,11 @@ def _apply_security_headers(request: Request, response) -> None:
                 "base-uri 'self'",
                 "object-src 'none'",
                 "frame-ancestors 'none'",
-                "script-src 'self'",
+                "script-src 'self' https://mc.yandex.ru",
                 "style-src 'self'",
-                "img-src 'self' data:",
+                "img-src 'self' data: https://mc.yandex.ru https://*.mc.yandex.ru",
                 "font-src 'self' data:",
-                "connect-src 'self'",
+                "connect-src 'self' https://mc.yandex.ru https://*.mc.yandex.ru",
                 "worker-src 'self'",
                 "form-action 'self' https://*.yookassa.ru https://yookassa.ru https://*.yoomoney.ru https://yoomoney.ru",
             )
@@ -257,6 +258,16 @@ class EmailStartResponse(BaseModel):
 class EmailVerifyRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=4, max_length=12)
+
+
+class AdminLoginRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=256)
+
+
+class AdminLoginResponse(BaseModel):
+    ok: bool
+    token: str
+    expires_at: str
 
 
 class SessionResponse(BaseModel):
@@ -1048,6 +1059,159 @@ def current_user(token: str = Depends(_require_bearer)) -> dict:
     return user
 
 
+def _require_admin_bearer(authorization: Annotated[str | None, Header()] = None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="authorization_required")
+    match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
+    if not match:
+        raise HTTPException(status_code=401, detail="invalid_authorization_header")
+    return match.group(1).strip()
+
+
+def current_admin_session(token: str = Depends(_require_admin_bearer)) -> dict:
+    token_hash = hash_value(token, settings.session_secret)
+    session = db.get_admin_session(settings.database_path, token_hash=token_hash)
+    if not session:
+        raise HTTPException(status_code=401, detail="invalid_admin_session")
+    return session
+
+
+def _admin_scalar(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()) -> int:
+    row = conn.execute(query, params).fetchone()
+    return int((row or (0,))[0] or 0)
+
+
+def _admin_rows(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def _admin_dashboard_payload() -> dict[str, Any]:
+    now = utc_now()
+    now_iso = now.isoformat()
+    since_24h = (now - timedelta(days=1)).isoformat()
+    since_30d = (now - timedelta(days=30)).isoformat()
+    today = date.today().isoformat()
+    with closing(db.connect(settings.database_path)) as conn:
+        overview = {
+            "users_total": _admin_scalar(conn, "SELECT COUNT(*) FROM users"),
+            "users_today": _admin_scalar(conn, "SELECT COUNT(*) FROM users WHERE created_at >= ?", (today,)),
+            "pets_total": _admin_scalar(conn, "SELECT COUNT(*) FROM pets"),
+            "active_plus": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM subscriptions WHERE plan = 'plus' AND (period_end IS NULL OR period_end > ?)",
+                (now_iso,),
+            ),
+            "active_reminders": _admin_scalar(conn, "SELECT COUNT(*) FROM reminders WHERE is_active = 1"),
+            "triage_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_24h,)),
+            "triage_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_30d,)),
+            "feedback_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM feedback WHERE created_at >= ?", (since_30d,)),
+            "security_errors_24h": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM security_audit_events WHERE created_at >= ? AND status = 'error'",
+                (since_24h,),
+            ),
+            "paid_payments_30d": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM payments WHERE created_at >= ? AND status IN ('succeeded', 'paid')",
+                (since_30d,),
+            ),
+            "revenue_30d_rub": _admin_scalar(
+                conn,
+                "SELECT COALESCE(SUM(amount_rub), 0) FROM payments WHERE created_at >= ? AND status IN ('succeeded', 'paid')",
+                (since_30d,),
+            ),
+            "tokens_30d": _admin_scalar(
+                conn,
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM triage_logs WHERE created_at >= ?",
+                (since_30d,),
+            ),
+        }
+        payments_by_status = _admin_rows(
+            conn,
+            """
+            SELECT status, COUNT(*) AS count, COALESCE(SUM(amount_rub), 0) AS amount_rub
+            FROM payments
+            GROUP BY status
+            ORDER BY count DESC
+            """,
+        )
+        providers = _admin_rows(
+            conn,
+            """
+            SELECT provider, COUNT(*) AS count
+            FROM external_accounts
+            GROUP BY provider
+            ORDER BY provider
+            """,
+        )
+        recent_payments = _admin_rows(
+            conn,
+            """
+            SELECT p.id, p.user_id, u.email, p.provider, p.provider_payment_id, p.plan_code,
+                   p.amount_rub, p.status, p.created_at, p.updated_at, p.paid_at
+            FROM payments p
+            LEFT JOIN users u ON u.id = p.user_id
+            ORDER BY p.id DESC
+            LIMIT 50
+            """,
+        )
+        recent_users = _admin_rows(
+            conn,
+            """
+            SELECT u.id, u.email, u.name, u.created_at, u.updated_at,
+                   COUNT(DISTINCT p.id) AS pets_count,
+                   COUNT(DISTINCT t.id) AS triage_count,
+                   GROUP_CONCAT(DISTINCT ea.provider) AS providers,
+                   s.plan AS plan,
+                   s.quota_total, s.quota_used, s.period_end
+            FROM users u
+            LEFT JOIN pets p ON p.owner_id = u.id
+            LEFT JOIN triage_logs t ON t.user_id = u.id
+            LEFT JOIN external_accounts ea ON ea.user_id = u.id
+            LEFT JOIN subscriptions s ON s.user_id = u.id
+            GROUP BY u.id
+            ORDER BY u.id DESC
+            LIMIT 50
+            """,
+        )
+        recent_triage = _admin_rows(
+            conn,
+            """
+            SELECT t.id, t.user_id, t.pet_id, p.pet_name, p.pet_type, t.urgency_level,
+                   t.created_at, t.prompt_tokens, t.completion_tokens, t.total_tokens,
+                   t.model, t.subscription_source
+            FROM triage_logs t
+            LEFT JOIN pets p ON p.id = t.pet_id
+            ORDER BY t.id DESC
+            LIMIT 50
+            """,
+        )
+        recent_feedback = _admin_rows(
+            conn,
+            """
+            SELECT f.id, f.user_id, u.email, f.category, f.created_at,
+                   SUBSTR(f.text, 1, 220) AS preview
+            FROM feedback f
+            LEFT JOIN users u ON u.id = f.user_id
+            ORDER BY f.id DESC
+            LIMIT 30
+            """,
+        )
+        recent_audit = db.list_security_audit_events(settings.database_path, limit=80)
+
+    return {
+        "generated_at": now_iso,
+        "overview": overview,
+        "payments_by_status": payments_by_status,
+        "providers": providers,
+        "recent_payments": recent_payments,
+        "recent_users": recent_users,
+        "recent_triage": recent_triage,
+        "recent_feedback": recent_feedback,
+        "recent_audit": recent_audit,
+    }
+
+
 def _audit_ownership_denied(request: Request | None, user: dict, *, entity_type: str, entity_id: int | str) -> None:
     _audit(
         request,
@@ -1333,6 +1497,67 @@ def admin_security_audit(
             status=status,
         )
     }
+
+
+@app.post("/api/admin/auth/login", response_model=AdminLoginResponse)
+def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginResponse:
+    if not settings.admin_password_hash:
+        _audit(request, "admin.login_disabled", status="error", actor="admin")
+        raise HTTPException(status_code=503, detail="admin_not_configured")
+    if not verify_password_hash(payload.password, settings.admin_password_hash):
+        _audit(request, "admin.login_failed", status="warning", actor="admin")
+        raise HTTPException(status_code=403, detail="invalid_admin_password")
+    token = make_token()
+    expires_at = (utc_now() + timedelta(hours=12)).isoformat()
+    db.create_admin_session(
+        settings.database_path,
+        token_hash=hash_value(token, settings.session_secret),
+        expires_at=expires_at,
+        ip_hash=_audit_ip_hash(request),
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    _audit(request, "admin.login_success", status="ok", actor="admin")
+    return AdminLoginResponse(ok=True, token=token, expires_at=expires_at)
+
+
+@app.post("/api/admin/auth/logout")
+def admin_logout(request: Request, token: str = Depends(_require_admin_bearer)) -> dict:
+    revoked = db.revoke_admin_session(settings.database_path, token_hash=hash_value(token, settings.session_secret))
+    _audit(request, "admin.logout", status="ok", actor="admin", metadata={"revoked": revoked})
+    return {"ok": True, "revoked": revoked}
+
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(request: Request, _: dict = Depends(current_admin_session)) -> dict:
+    payload = _admin_dashboard_payload()
+    _audit(request, "admin.dashboard_view", status="ok", actor="admin")
+    return payload
+
+
+@app.get("/api/admin/audit")
+def admin_audit(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    event_type: Annotated[str | None, Query(max_length=120)] = None,
+    user_id: Annotated[int | None, Query(ge=1)] = None,
+    status: Annotated[str | None, Query(max_length=40)] = None,
+    _: dict = Depends(current_admin_session),
+) -> dict:
+    _audit(request, "admin.audit_view", status="ok", actor="admin", metadata={"limit": limit})
+    return {
+        "items": db.list_security_audit_events(
+            settings.database_path,
+            limit=limit,
+            event_type=event_type,
+            user_id=user_id,
+            status=status,
+        )
+    }
+
+
+@app.get("/api/admin/system/status")
+def admin_system_status(_: dict = Depends(current_admin_session)) -> dict:
+    return monitoring_status()
 
 
 @app.get("/api/internal/telegram-sync/ping")

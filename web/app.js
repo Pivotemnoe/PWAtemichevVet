@@ -1,5 +1,6 @@
 const state = {
   token: localStorage.getItem("tvv_token") || "",
+  adminToken: localStorage.getItem("tvv_admin_token") || "",
   telegramLoginState: localStorage.getItem("tvv_telegram_login_state") || "",
   telegramLoginUrl: localStorage.getItem("tvv_telegram_login_url") || "",
   maxLoginState: localStorage.getItem("tvv_max_login_state") || "",
@@ -17,9 +18,21 @@ const state = {
 
 const LEGAL_UPDATED_AT = "5 июня 2026";
 const OPERATOR_EMAIL = "support@temichevvet.ru";
+const METRIKA_ID = 109726654;
+let metrikaLoaded = false;
+const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 
 const authView = document.querySelector("#authView");
 const dashboardView = document.querySelector("#dashboardView");
+const adminView = document.querySelector("#adminView");
+const adminLoginPanel = document.querySelector("#adminLoginPanel");
+const adminDashboardPanel = document.querySelector("#adminDashboardPanel");
+const adminLoginForm = document.querySelector("#adminLoginForm");
+const adminPasswordInput = document.querySelector("#adminPasswordInput");
+const adminLoginHint = document.querySelector("#adminLoginHint");
+const adminRefreshBtn = document.querySelector("#adminRefreshBtn");
+const adminLogoutBtn = document.querySelector("#adminLogoutBtn");
+const adminContent = document.querySelector("#adminContent");
 const openAuthBtn = document.querySelector("#openAuthBtn");
 const authDialog = document.querySelector("#authDialog");
 const authCloseBtn = document.querySelector("#authCloseBtn");
@@ -66,7 +79,16 @@ const periodicityOptions = [
 function setAuthMode(isAuthed) {
   authView.hidden = isAuthed;
   dashboardView.hidden = !isAuthed;
+  if (adminView) adminView.hidden = true;
   if (isAuthed) closeAuthDialog();
+}
+
+function setAdminMode(isAuthed) {
+  if (authView) authView.hidden = true;
+  if (dashboardView) dashboardView.hidden = true;
+  if (adminView) adminView.hidden = false;
+  if (adminLoginPanel) adminLoginPanel.hidden = isAuthed;
+  if (adminDashboardPanel) adminDashboardPanel.hidden = !isAuthed;
 }
 
 function openAuthDialog() {
@@ -306,11 +328,11 @@ const legalDocuments = {
       </section>
       <section>
         <h3>Аналитика</h3>
-        <p>На текущем этапе сторонняя рекламная аналитика не используется. Если она будет подключена, сервис должен обновить этот раздел и запрашивать согласие на необязательные cookie.</p>
+        <p>При выборе “Принять все” сервис подключает Яндекс.Метрику для понимания посещаемости, кликов, технических ошибок и удобства интерфейса. Это помогает улучшать сайт, но не является обязательным для входа и работы личного кабинета.</p>
       </section>
       <section>
         <h3>Как отказаться</h3>
-        <p>Необходимые cookie/localStorage нужны для входа и безопасности. Их можно удалить в настройках браузера, но после этого потребуется войти снова.</p>
+        <p>Необходимые cookie/localStorage нужны для входа и безопасности. От аналитики можно отказаться, выбрав “Только необходимые”. Данные можно удалить в настройках браузера, но после этого потребуется войти снова.</p>
       </section>
     `
   },
@@ -349,18 +371,56 @@ function closeLegalModal() {
 
 function showCookieBannerIfNeeded() {
   if (!cookieBanner) return;
-  if (!localStorage.getItem("tvv_cookie_consent")) {
+  const consent = getCookieConsent();
+  if (!consent) {
     cookieBanner.hidden = false;
+    return;
   }
+  if (consent.value === "all") loadMetrika();
 }
 
 function setCookieConsent(value) {
   localStorage.setItem("tvv_cookie_consent", JSON.stringify({
     value,
     accepted_at: new Date().toISOString(),
-    version: "20260605-legal-support-1"
+    version: "20260608-admin-metrika-1"
   }));
   cookieBanner.hidden = true;
+  if (value === "all") loadMetrika();
+}
+
+function getCookieConsent() {
+  try {
+    const raw = localStorage.getItem("tvv_cookie_consent");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadMetrika() {
+  if (metrikaLoaded || typeof window === "undefined") return;
+  metrikaLoaded = true;
+  window.ym = window.ym || function () {
+    (window.ym.a = window.ym.a || []).push(arguments);
+  };
+  window.ym.l = 1 * new Date();
+  if (![...document.scripts].some((script) => script.src === `https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}`)) {
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = `https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}`;
+    document.head.append(script);
+  }
+  window.ym(METRIKA_ID, "init", {
+    ssr: true,
+    webvisor: true,
+    clickmap: true,
+    ecommerce: "dataLayer",
+    referrer: document.referrer,
+    url: location.href,
+    accurateTrackBounce: true,
+    trackLinks: true
+  });
 }
 
 function formatDateTime(value) {
@@ -413,7 +473,192 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function adminApi(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+  if (state.adminToken) {
+    headers.Authorization = `Bearer ${state.adminToken}`;
+  }
+  const response = await fetch(path, { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.detail || "admin_request_failed");
+  }
+  return data;
+}
+
+function adminReadableError(message) {
+  const messages = {
+    admin_not_configured: "Админка не настроена на сервере.",
+    invalid_admin_password: "Пароль не подошёл.",
+    invalid_admin_session: "Админ-сессия истекла. Войдите снова.",
+    authorization_required: "Нужно войти в админку.",
+    rate_limited: "Слишком много попыток входа. Подождите и попробуйте снова."
+  };
+  return messages[message] || readableError(message);
+}
+
+function setAdminHint(text, danger = false) {
+  if (!adminLoginHint) return;
+  adminLoginHint.textContent = text || "";
+  adminLoginHint.className = danger ? "hint danger-text" : "hint";
+}
+
+function adminCell(value) {
+  return escapeHtml(value === null || value === undefined || value === "" ? "—" : value);
+}
+
+function renderAdminMetric(label, value, hint = "") {
+  return `
+    <div class="summary-card admin-metric">
+      <strong>${adminCell(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+      ${hint ? `<small>${escapeHtml(hint)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderAdminTable(title, rows, columns, emptyText = "Данных пока нет") {
+  const head = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
+  const body = rows.length
+    ? rows.map((row) => `
+        <tr>
+          ${columns.map((column) => `<td>${column.render ? column.render(row) : adminCell(row[column.key])}</td>`).join("")}
+        </tr>
+      `).join("")
+    : `<tr><td colspan="${columns.length}">${escapeHtml(emptyText)}</td></tr>`;
+  return `
+    <section class="admin-section">
+      <h2>${escapeHtml(title)}</h2>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr>${head}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminDashboard(data, system = null) {
+  const overview = data.overview || {};
+  const checks = system?.checks || {};
+  adminContent.innerHTML = `
+    <div class="admin-generated">Обновлено: ${formatDateTime(data.generated_at)}</div>
+    <div class="summary-grid admin-summary">
+      ${renderAdminMetric("Пользователей", overview.users_total, `+${overview.users_today || 0} сегодня`)}
+      ${renderAdminMetric("Питомцев", overview.pets_total)}
+      ${renderAdminMetric("Активный Plus", overview.active_plus)}
+      ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
+      ${renderAdminMetric("Разборов за 24 часа", overview.triage_24h)}
+      ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
+      ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
+      ${renderAdminMetric("Ошибок безопасности 24ч", overview.security_errors_24h)}
+    </div>
+    <section class="admin-section">
+      <h2>Системный статус</h2>
+      <div class="admin-status-grid">
+        ${Object.entries({
+          "База": system?.checks?.database?.ok,
+          "Email": checks.email_configured,
+          "Telegram login": checks.telegram_login_configured,
+          "MAX login": checks.max_login_configured,
+          "YooKassa": checks.yookassa_configured,
+          "LLM": checks.llm_configured,
+          "Core API": checks.core_api_configured
+        }).map(([label, ok]) => `
+          <div class="admin-status ${ok ? "ok" : "warn"}">
+            <strong>${ok ? "OK" : "Нет"}</strong>
+            <span>${escapeHtml(label)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+    ${renderAdminTable("Платежи по статусам", data.payments_by_status || [], [
+      { key: "status", label: "Статус" },
+      { key: "count", label: "Кол-во" },
+      { key: "amount_rub", label: "Сумма, ₽" }
+    ])}
+    ${renderAdminTable("Последние платежи", data.recent_payments || [], [
+      { key: "id", label: "ID" },
+      { key: "email", label: "Пользователь" },
+      { key: "provider", label: "Провайдер" },
+      { key: "provider_payment_id", label: "Платёж" },
+      { key: "amount_rub", label: "₽" },
+      { key: "status", label: "Статус" },
+      { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) },
+      { key: "paid_at", label: "Оплачен", render: (row) => formatDateTime(row.paid_at) }
+    ])}
+    ${renderAdminTable("Последние пользователи", data.recent_users || [], [
+      { key: "id", label: "ID" },
+      { key: "email", label: "Email" },
+      { key: "providers", label: "Входы" },
+      { key: "plan", label: "Тариф" },
+      { key: "pets_count", label: "Питомцы" },
+      { key: "triage_count", label: "Разборы" },
+      { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
+    ])}
+    ${renderAdminTable("Последние разборы без медицинского текста", data.recent_triage || [], [
+      { key: "id", label: "ID" },
+      { key: "user_id", label: "User" },
+      { key: "pet_name", label: "Питомец", render: (row) => adminCell(row.pet_name ? `${row.pet_type || "питомец"} — ${row.pet_name}` : "—") },
+      { key: "urgency_level", label: "Срочность" },
+      { key: "total_tokens", label: "Токены" },
+      { key: "model", label: "Модель" },
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
+    ])}
+    ${renderAdminTable("Обратная связь", data.recent_feedback || [], [
+      { key: "id", label: "ID" },
+      { key: "email", label: "Пользователь" },
+      { key: "category", label: "Категория" },
+      { key: "preview", label: "Кратко" },
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
+    ])}
+    ${renderAdminTable("Журнал безопасности", data.recent_audit || [], [
+      { key: "id", label: "ID" },
+      { key: "event_type", label: "Событие" },
+      { key: "status", label: "Статус" },
+      { key: "actor", label: "Кто" },
+      { key: "user_id", label: "User" },
+      { key: "provider", label: "Канал" },
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
+    ])}
+  `;
+}
+
+async function loadAdminDashboard() {
+  setAdminMode(true);
+  adminContent.innerHTML = `<div class="notice">Загружаю данные админки...</div>`;
+  const [dashboard, system] = await Promise.all([
+    adminApi("/api/admin/dashboard"),
+    adminApi("/api/admin/system/status")
+  ]);
+  renderAdminDashboard(dashboard, system);
+}
+
+async function bootstrapAdmin() {
+  setAdminMode(Boolean(state.adminToken));
+  if (!state.adminToken) {
+    setTimeout(() => adminPasswordInput?.focus(), 0);
+    return;
+  }
+  try {
+    await loadAdminDashboard();
+  } catch (error) {
+    localStorage.removeItem("tvv_admin_token");
+    state.adminToken = "";
+    setAdminMode(false);
+    setAdminHint(adminReadableError(error.message), true);
+  }
+}
+
 async function bootstrap() {
+  if (isAdminRoute) {
+    await bootstrapAdmin();
+    return;
+  }
   const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus";
   if (!state.token) {
     setAuthMode(false);
@@ -1843,6 +2088,45 @@ async function pollMaxLogin(loginState, attempt = 0) {
   }
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
+
+adminLoginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setAdminHint("Проверяю пароль...");
+  try {
+    const data = await adminApi("/api/admin/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password: adminPasswordInput.value })
+    });
+    state.adminToken = data.token;
+    localStorage.setItem("tvv_admin_token", data.token);
+    adminPasswordInput.value = "";
+    setAdminHint("");
+    await loadAdminDashboard();
+  } catch (error) {
+    setAdminHint(adminReadableError(error.message), true);
+  }
+});
+
+adminRefreshBtn?.addEventListener("click", async () => {
+  try {
+    await loadAdminDashboard();
+  } catch (error) {
+    adminContent.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(adminReadableError(error.message))}</div>`;
+  }
+});
+
+adminLogoutBtn?.addEventListener("click", async () => {
+  if (state.adminToken) {
+    try {
+      await adminApi("/api/admin/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Local admin logout still needs to happen if the server session has expired.
+    }
+  }
+  localStorage.removeItem("tvv_admin_token");
+  state.adminToken = "";
+  setAdminMode(false);
+});
 
 openAuthBtn.addEventListener("click", openAuthDialog);
 authCloseBtn.addEventListener("click", closeAuthDialog);
