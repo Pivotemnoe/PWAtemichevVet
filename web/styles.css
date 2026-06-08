@@ -1368,6 +1368,13 @@ textarea:focus {
   gap: 10px;
 }
 
+.admin-error-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .admin-status {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1380,12 +1387,54 @@ textarea:focus {
   margin-bottom: 4px;
 }
 
+.admin-status small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .admin-status.ok strong {
   color: var(--green);
 }
 
 .admin-status.warn strong {
   color: #b42318;
+}
+
+.admin-explain {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.admin-settings {
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.admin-settings summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.admin-credentials-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  align-items: end;
+}
+
+.admin-credentials-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .admin-table-wrap {
@@ -1504,6 +1553,8 @@ textarea:focus {
   .summary-grid,
   .admin-summary,
   .admin-status-grid,
+  .admin-error-grid,
+  .admin-credentials-form,
   .guide-panel,
   .detail-grid,
   .form-grid,

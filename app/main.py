@@ -38,7 +38,16 @@ from app.payments.yookassa import (
     payment_status as yookassa_payment_status,
     validate_plus_payment as validate_yookassa_plus_payment,
 )
-from app.security import constant_time_equal, expires_in, hash_value, make_code, make_token, utc_now, verify_password_hash
+from app.security import (
+    constant_time_equal,
+    expires_in,
+    hash_value,
+    make_code,
+    make_password_hash,
+    make_token,
+    utc_now,
+    verify_password_hash,
+)
 from app.subscriptions import activate_paid_subscription, get_effective_subscription, refund_quota, try_consume_quota
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 from app.telegram_sync import (
@@ -261,6 +270,7 @@ class EmailVerifyRequest(BaseModel):
 
 
 class AdminLoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
     password: str = Field(min_length=8, max_length=256)
 
 
@@ -268,6 +278,12 @@ class AdminLoginResponse(BaseModel):
     ok: bool
     token: str
     expires_at: str
+
+
+class AdminCredentialsRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=256)
+    new_username: str | None = Field(default=None, min_length=3, max_length=80)
+    new_password: str | None = Field(default=None, min_length=12, max_length=256)
 
 
 class SessionResponse(BaseModel):
@@ -407,6 +423,35 @@ class TelegramCoreOutboundAck(BaseModel):
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _normalize_admin_username(username: str) -> str:
+    return username.strip().lower()
+
+
+def _update_env_values(values: dict[str, str]) -> None:
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        raise HTTPException(status_code=500, detail="env_file_not_found")
+    lines = env_path.read_text().splitlines()
+    existing = {
+        line.split("=", 1)[0].strip(): index
+        for index, line in enumerate(lines)
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    for key, value in values.items():
+        if key in existing:
+            lines[existing[key]] = f"{key}={value}"
+        else:
+            lines.append(f"{key}={value}")
+        os.environ[key] = value
+    env_path.write_text("\n".join(lines).rstrip() + "\n")
+    try:
+        os.chmod(env_path, 0o640)
+    except OSError:
+        logger.warning("Failed to chmod .env", exc_info=True)
+    global settings
+    settings = get_settings()
 
 
 def _email_delivery_enabled() -> bool:
@@ -1461,20 +1506,32 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
             ),
         }
 
+    checks = {
+        "database": {"ok": database_ok, "error": database_error},
+        "email_configured": _email_delivery_enabled(),
+        "telegram_login_configured": bool(settings.telegram_bot_username and settings.telegram_auth_secret),
+        "max_login_configured": bool(settings.max_bot_username and settings.max_bot_token),
+        "yookassa_configured": bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
+        "llm_configured": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL")),
+        "core_api_configured": bool(settings.core_api_secret),
+    }
+    status_help = {
+        "database": "База данных PWA доступна. Если тут ошибка, сайт не сможет сохранять пользователей, питомцев и платежи.",
+        "email_configured": "Email-вход работает, когда на сервере есть SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD и SMTP_FROM_EMAIL.",
+        "telegram_login_configured": "Telegram-вход и привязка работают, когда есть TELEGRAM_BOT_USERNAME и TELEGRAM_AUTH_SECRET, одинаковый с Telegram-ботом.",
+        "max_login_configured": "MAX-вход работает, когда есть MAX_BOT_USERNAME и MAX_BOT_TOKEN.",
+        "yookassa_configured": "Оплата Plus работает, когда есть YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY.",
+        "llm_configured": "Разбор жалобы работает, когда есть OPENAI_API_KEY или OPENAI_BASE_URL для шлюза LLM.",
+        "core_api_configured": "Синхронизация Telegram -> PWA работает, когда есть CORE_API_SECRET, одинаковый с NL Telegram-ботом.",
+    }
+
     return {
         "ok": database_ok,
         "service": "temichevvet-pwa",
         "env": settings.app_env,
         "checked_at": now.isoformat(),
-        "checks": {
-            "database": {"ok": database_ok, "error": database_error},
-            "email_configured": _email_delivery_enabled(),
-            "telegram_login_configured": bool(settings.telegram_bot_username and settings.telegram_auth_secret),
-            "max_login_configured": bool(settings.max_bot_username and settings.max_bot_token),
-            "yookassa_configured": bool(settings.yookassa_shop_id and settings.yookassa_secret_key),
-            "llm_configured": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL")),
-            "core_api_configured": bool(settings.core_api_secret),
-        },
+        "checks": checks,
+        "status_help": status_help,
         "events_1h": audit_counts(since_1h),
         "events_24h": audit_counts(since_24h),
     }
@@ -1504,9 +1561,12 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginRespo
     if not settings.admin_password_hash:
         _audit(request, "admin.login_disabled", status="error", actor="admin")
         raise HTTPException(status_code=503, detail="admin_not_configured")
+    if not constant_time_equal(_normalize_admin_username(payload.username), _normalize_admin_username(settings.admin_username)):
+        _audit(request, "admin.login_failed", status="warning", actor="admin", metadata={"reason": "username"})
+        raise HTTPException(status_code=403, detail="invalid_admin_credentials")
     if not verify_password_hash(payload.password, settings.admin_password_hash):
-        _audit(request, "admin.login_failed", status="warning", actor="admin")
-        raise HTTPException(status_code=403, detail="invalid_admin_password")
+        _audit(request, "admin.login_failed", status="warning", actor="admin", metadata={"reason": "password"})
+        raise HTTPException(status_code=403, detail="invalid_admin_credentials")
     token = make_token()
     expires_at = (utc_now() + timedelta(hours=12)).isoformat()
     db.create_admin_session(
@@ -1518,6 +1578,32 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginRespo
     )
     _audit(request, "admin.login_success", status="ok", actor="admin")
     return AdminLoginResponse(ok=True, token=token, expires_at=expires_at)
+
+
+@app.post("/api/admin/auth/credentials")
+def admin_change_credentials(
+    payload: AdminCredentialsRequest,
+    request: Request,
+    _: dict = Depends(current_admin_session),
+) -> dict:
+    if not verify_password_hash(payload.current_password, settings.admin_password_hash):
+        _audit(request, "admin.credentials_change_failed", status="warning", actor="admin", metadata={"reason": "current_password"})
+        raise HTTPException(status_code=403, detail="invalid_current_password")
+
+    updates: dict[str, str] = {}
+    if payload.new_username is not None:
+        username = _normalize_admin_username(payload.new_username)
+        if not re.fullmatch(r"[a-z0-9_.@-]{3,80}", username):
+            raise HTTPException(status_code=400, detail="invalid_admin_username")
+        updates["ADMIN_USERNAME"] = username
+    if payload.new_password is not None:
+        updates["ADMIN_PASSWORD_HASH"] = make_password_hash(payload.new_password)
+    if not updates:
+        raise HTTPException(status_code=400, detail="nothing_to_change")
+
+    _update_env_values(updates)
+    _audit(request, "admin.credentials_changed", status="ok", actor="admin", metadata={"username_changed": "ADMIN_USERNAME" in updates, "password_changed": "ADMIN_PASSWORD_HASH" in updates})
+    return {"ok": True, "username": settings.admin_username}
 
 
 @app.post("/api/admin/auth/logout")

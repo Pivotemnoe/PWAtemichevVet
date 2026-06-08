@@ -320,8 +320,12 @@
             <div class="panel admin-login-card">
               <p class="section-label">Админка TemichevVet</p>
               <h1>Вход администратора</h1>
-              <p>Доступ только для владельца сервиса. Вход защищён отдельным паролем, короткой сессией и журналом безопасности.</p>
+              <p>Доступ только для владельца сервиса. Вход защищён отдельным логином, паролем, короткой сессией и журналом безопасности.</p>
               <form id="adminLoginForm" class="admin-login-form">
+                <label>
+                  <span>Логин администратора</span>
+                  <input id="adminUsernameInput" type="text" autocomplete="username" minlength="3" required value="admin" />
+                </label>
                 <label>
                   <span>Пароль администратора</span>
                   <input id="adminPasswordInput" type="password" autocomplete="current-password" minlength="8" required />
@@ -344,6 +348,25 @@
                 <button class="secondary-button compact" id="adminLogoutBtn" type="button">Выйти</button>
               </div>
             </div>
+            <details class="admin-settings">
+              <summary>Сменить логин/пароль администратора</summary>
+              <form id="adminCredentialsForm" class="admin-credentials-form">
+                <label>
+                  <span>Текущий пароль</span>
+                  <input id="adminCurrentPasswordInput" type="password" autocomplete="current-password" minlength="8" required />
+                </label>
+                <label>
+                  <span>Новый логин</span>
+                  <input id="adminNewUsernameInput" type="text" autocomplete="username" minlength="3" placeholder="admin" />
+                </label>
+                <label>
+                  <span>Новый пароль</span>
+                  <input id="adminNewPasswordInput" type="password" autocomplete="new-password" minlength="12" placeholder="минимум 12 символов" />
+                </label>
+                <button class="secondary-button compact" type="submit">Сохранить</button>
+              </form>
+              <p class="hint" id="adminCredentialsHint">Пароль сохраняется только как хэш. После смены используйте новый логин и пароль при следующем входе.</p>
+            </details>
             <div id="adminContent" class="admin-content">
               <div class="notice">Загружаю данные админки...</div>
             </div>

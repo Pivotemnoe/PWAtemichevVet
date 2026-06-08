@@ -28,8 +28,14 @@ const adminView = document.querySelector("#adminView");
 const adminLoginPanel = document.querySelector("#adminLoginPanel");
 const adminDashboardPanel = document.querySelector("#adminDashboardPanel");
 const adminLoginForm = document.querySelector("#adminLoginForm");
+const adminUsernameInput = document.querySelector("#adminUsernameInput");
 const adminPasswordInput = document.querySelector("#adminPasswordInput");
 const adminLoginHint = document.querySelector("#adminLoginHint");
+const adminCredentialsForm = document.querySelector("#adminCredentialsForm");
+const adminCurrentPasswordInput = document.querySelector("#adminCurrentPasswordInput");
+const adminNewUsernameInput = document.querySelector("#adminNewUsernameInput");
+const adminNewPasswordInput = document.querySelector("#adminNewPasswordInput");
+const adminCredentialsHint = document.querySelector("#adminCredentialsHint");
 const adminRefreshBtn = document.querySelector("#adminRefreshBtn");
 const adminLogoutBtn = document.querySelector("#adminLogoutBtn");
 const adminContent = document.querySelector("#adminContent");
@@ -493,6 +499,11 @@ function adminReadableError(message) {
   const messages = {
     admin_not_configured: "Админка не настроена на сервере.",
     invalid_admin_password: "Пароль не подошёл.",
+    invalid_admin_credentials: "Логин или пароль не подошли.",
+    invalid_current_password: "Текущий пароль не подошёл.",
+    invalid_admin_username: "Логин может содержать только латинские буквы, цифры, точку, подчёркивание, дефис или @.",
+    nothing_to_change: "Введите новый логин или новый пароль.",
+    env_file_not_found: "Сервер не нашёл .env для сохранения настроек.",
     invalid_admin_session: "Админ-сессия истекла. Войдите снова.",
     authorization_required: "Нужно войти в админку.",
     rate_limited: "Слишком много попыток входа. Подождите и попробуйте снова."
@@ -545,6 +556,18 @@ function renderAdminTable(title, rows, columns, emptyText = "Данных пок
 function renderAdminDashboard(data, system = null) {
   const overview = data.overview || {};
   const checks = system?.checks || {};
+  const statusHelp = system?.status_help || {};
+  const events1h = system?.events_1h || {};
+  const events24h = system?.events_24h || {};
+  const statusItems = [
+    ["database", "База", system?.checks?.database?.ok],
+    ["email_configured", "Email", checks.email_configured],
+    ["telegram_login_configured", "Telegram login", checks.telegram_login_configured],
+    ["max_login_configured", "MAX login", checks.max_login_configured],
+    ["yookassa_configured", "YooKassa", checks.yookassa_configured],
+    ["llm_configured", "LLM", checks.llm_configured],
+    ["core_api_configured", "Core API", checks.core_api_configured]
+  ];
   adminContent.innerHTML = `
     <div class="admin-generated">Обновлено: ${formatDateTime(data.generated_at)}</div>
     <div class="summary-grid admin-summary">
@@ -555,25 +578,30 @@ function renderAdminDashboard(data, system = null) {
       ${renderAdminMetric("Разборов за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
-      ${renderAdminMetric("Ошибок безопасности 24ч", overview.security_errors_24h)}
+      ${renderAdminMetric("Событий с ошибкой 24ч", overview.security_errors_24h, "Счётчик журнала: технические сбои, ошибки входа и защиты доступа.")}
     </div>
     <section class="admin-section">
       <h2>Системный статус</h2>
+      <p class="admin-explain">Если где-то «Нет», значит сервис не видит нужную настройку на сервере или интеграция временно недоступна. Это влияет только на указанную функцию.</p>
       <div class="admin-status-grid">
-        ${Object.entries({
-          "База": system?.checks?.database?.ok,
-          "Email": checks.email_configured,
-          "Telegram login": checks.telegram_login_configured,
-          "MAX login": checks.max_login_configured,
-          "YooKassa": checks.yookassa_configured,
-          "LLM": checks.llm_configured,
-          "Core API": checks.core_api_configured
-        }).map(([label, ok]) => `
+        ${statusItems.map(([key, label, ok]) => `
           <div class="admin-status ${ok ? "ok" : "warn"}">
             <strong>${ok ? "OK" : "Нет"}</strong>
             <span>${escapeHtml(label)}</span>
+            <small>${escapeHtml(statusHelp[key] || "")}</small>
           </div>
         `).join("")}
+      </div>
+    </section>
+    <section class="admin-section">
+      <h2>Как читать ошибки</h2>
+      <p class="admin-explain">«События с ошибкой» — это не всегда взлом. Сюда попадают неверные коды входа, истёкшие сессии, частые запросы, попытки открыть чужие данные и технические ошибки API. Смотрите «Журнал безопасности»: там видно тип события, канал и время, но без лишнего медицинского текста.</p>
+      <div class="admin-error-grid">
+        ${renderAdminMetric("API/сервер за 1ч", events1h.server_5xx ?? "—", "Если 0, сайт сейчас отвечает; число за 24ч может быть старой историей после перезапуска.")}
+        ${renderAdminMetric("API/сервер за 24ч", events24h.server_5xx ?? "—", "5xx: серверная ошибка или временная недоступность API.")}
+        ${renderAdminMetric("Оплата за 24ч", events24h.payment_errors ?? "—", "Сбои создания/проверки платежа YooKassa.")}
+        ${renderAdminMetric("LLM за 24ч", events24h.llm_errors ?? "—", "Сбои разбора жалобы через модель или шлюз OpenAI.")}
+        ${renderAdminMetric("Синхронизация за 24ч", events24h.sync_errors ?? "—", "Сбои обмена данными между Telegram-ботом и PWA.")}
       </div>
     </section>
     ${renderAdminTable("Платежи по статусам", data.payments_by_status || [], [
@@ -2091,11 +2119,14 @@ async function pollMaxLogin(loginState, attempt = 0) {
 
 adminLoginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  setAdminHint("Проверяю пароль...");
+  setAdminHint("Проверяю логин и пароль...");
   try {
     const data = await adminApi("/api/admin/auth/login", {
       method: "POST",
-      body: JSON.stringify({ password: adminPasswordInput.value })
+      body: JSON.stringify({
+        username: adminUsernameInput.value,
+        password: adminPasswordInput.value
+      })
     });
     state.adminToken = data.token;
     localStorage.setItem("tvv_admin_token", data.token);
@@ -2104,6 +2135,32 @@ adminLoginForm?.addEventListener("submit", async (event) => {
     await loadAdminDashboard();
   } catch (error) {
     setAdminHint(adminReadableError(error.message), true);
+  }
+});
+
+adminCredentialsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  adminCredentialsHint.textContent = "Сохраняю...";
+  adminCredentialsHint.className = "hint";
+  try {
+    const payload = {
+      current_password: adminCurrentPasswordInput.value,
+      new_username: adminNewUsernameInput.value.trim() || null,
+      new_password: adminNewPasswordInput.value || null
+    };
+    const data = await adminApi("/api/admin/auth/credentials", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    if (data.username && adminUsernameInput) {
+      adminUsernameInput.value = data.username;
+    }
+    adminCurrentPasswordInput.value = "";
+    adminNewPasswordInput.value = "";
+    adminCredentialsHint.textContent = "Сохранено. При следующем входе используйте новый логин и пароль.";
+  } catch (error) {
+    adminCredentialsHint.textContent = adminReadableError(error.message);
+    adminCredentialsHint.className = "hint danger-text";
   }
 });
 

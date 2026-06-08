@@ -39,6 +39,7 @@ class Settings:
     bot_database_path: str
     core_api_secret: str
     admin_api_secret: str
+    admin_username: str
     admin_password_hash: str
     monitoring_api_secret: str
     yookassa_shop_id: str
@@ -73,6 +74,7 @@ def get_settings() -> Settings:
         bot_database_path=os.getenv("BOT_DATABASE_PATH", "").strip(),
         core_api_secret=os.getenv("CORE_API_SECRET", "").strip(),
         admin_api_secret=os.getenv("ADMIN_API_SECRET", "").strip(),
+        admin_username=os.getenv("ADMIN_USERNAME", "admin").strip() or "admin",
         admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", "").strip(),
         monitoring_api_secret=os.getenv("MONITORING_API_SECRET", "").strip(),
         yookassa_shop_id=os.getenv("YOOKASSA_SHOP_ID", "").strip(),
