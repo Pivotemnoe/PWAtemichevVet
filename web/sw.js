@@ -1,12 +1,14 @@
-const CACHE_NAME = "temichevvet-pwa-brand-icon-1";
+const CACHE_NAME = "temichevvet-pwa-ios-icon-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260608-brand-icon-1",
-  "/static/app.js?v=20260608-brand-icon-1",
+  "/static/styles.css?v=20260608-ios-icon-1",
+  "/static/app.js?v=20260608-ios-icon-1",
   "/static/manifest.webmanifest",
   "/static/assets/app-icon-192.png",
   "/static/assets/app-icon-512.png",
   "/static/assets/apple-touch-icon.png",
+  "/apple-touch-icon.png",
+  "/apple-touch-icon-precomposed.png",
   "/static/assets/logo_temichevvet.jpg",
   "/static/assets/triage_banner.jpg",
   "/static/assets/subscription_banner.jpg",

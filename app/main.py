@@ -1216,8 +1216,27 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
 
 
 @app.get("/")
+@app.head("/", include_in_schema=False)
 def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.head("/apple-touch-icon.png", include_in_schema=False)
+def apple_touch_icon() -> FileResponse:
+    return FileResponse(WEB_ROOT / "assets" / "apple-touch-icon.png", media_type="image/png")
+
+
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+@app.head("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def apple_touch_icon_precomposed() -> FileResponse:
+    return FileResponse(WEB_ROOT / "assets" / "apple-touch-icon.png", media_type="image/png")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.head("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(WEB_ROOT / "assets" / "app-icon-192.png", media_type="image/png")
 
 
 @app.get("/api/health")
