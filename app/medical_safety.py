@@ -102,11 +102,11 @@ def detect_red_flags(text: str | None) -> RedFlagResult:
 
 
 def render_red_flag_response(result: RedFlagResult) -> str:
-    symptoms = ", ".join(result.matched) if result.matched else "красные симптомы"
+    symptoms = ", ".join(result.matched) if result.matched else "опасные признаки"
     return (
         "🟥 Срочно в клинику\n\n"
-        f"По описанию есть красные симптомы: {symptoms}.\n\n"
-        "В такой ситуации не ждите онлайн-разбора. Свяжитесь с ветеринарной клиникой и везите питомца "
+        f"По описанию есть опасные признаки: {symptoms}.\n\n"
+        "В такой ситуации не ждите ответа сервиса. Свяжитесь с ветеринарной клиникой и везите питомца "
         "на очный осмотр как можно скорее.\n\n"
         "Что сделать сейчас:\n"
         "• держите питомца спокойно, без активных нагрузок;\n"

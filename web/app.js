@@ -25,20 +25,21 @@ const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 const authView = document.querySelector("#authView");
 const dashboardView = document.querySelector("#dashboardView");
 const adminView = document.querySelector("#adminView");
-const adminLoginPanel = document.querySelector("#adminLoginPanel");
-const adminDashboardPanel = document.querySelector("#adminDashboardPanel");
-const adminLoginForm = document.querySelector("#adminLoginForm");
-const adminUsernameInput = document.querySelector("#adminUsernameInput");
-const adminPasswordInput = document.querySelector("#adminPasswordInput");
-const adminLoginHint = document.querySelector("#adminLoginHint");
-const adminCredentialsForm = document.querySelector("#adminCredentialsForm");
-const adminCurrentPasswordInput = document.querySelector("#adminCurrentPasswordInput");
-const adminNewUsernameInput = document.querySelector("#adminNewUsernameInput");
-const adminNewPasswordInput = document.querySelector("#adminNewPasswordInput");
-const adminCredentialsHint = document.querySelector("#adminCredentialsHint");
-const adminRefreshBtn = document.querySelector("#adminRefreshBtn");
-const adminLogoutBtn = document.querySelector("#adminLogoutBtn");
-const adminContent = document.querySelector("#adminContent");
+let adminLoginPanel = null;
+let adminDashboardPanel = null;
+let adminLoginForm = null;
+let adminUsernameInput = null;
+let adminPasswordInput = null;
+let adminLoginHint = null;
+let adminCredentialsForm = null;
+let adminCurrentPasswordInput = null;
+let adminNewUsernameInput = null;
+let adminNewPasswordInput = null;
+let adminCredentialsHint = null;
+let adminRefreshBtn = null;
+let adminLogoutBtn = null;
+let adminContent = null;
+let adminMarkupReady = false;
 const openAuthBtn = document.querySelector("#openAuthBtn");
 const authDialog = document.querySelector("#authDialog");
 const authCloseBtn = document.querySelector("#authCloseBtn");
@@ -72,6 +73,15 @@ const reminderTypes = [
   ["custom", "Другое"]
 ];
 
+const reminderDefaultTitles = {
+  vaccine: "Вакцинация",
+  parasites: "Обработка от паразитов",
+  checkup: "Плановый осмотр",
+  grooming: "Груминг",
+  diet: "Корм/диета",
+  custom: "Напоминание"
+};
+
 const periodicityOptions = [
   ["once", "Один раз"],
   ["daily", "Ежедневно"],
@@ -86,15 +96,20 @@ function setAuthMode(isAuthed) {
   authView.hidden = isAuthed;
   dashboardView.hidden = !isAuthed;
   if (adminView) adminView.hidden = true;
+  document.body.classList.toggle("is-authed", Boolean(isAuthed));
+  document.body.classList.remove("is-admin");
   if (isAuthed) closeAuthDialog();
 }
 
 function setAdminMode(isAuthed) {
+  ensureAdminMarkup();
   if (authView) authView.hidden = true;
   if (dashboardView) dashboardView.hidden = true;
   if (adminView) adminView.hidden = false;
   if (adminLoginPanel) adminLoginPanel.hidden = isAuthed;
   if (adminDashboardPanel) adminDashboardPanel.hidden = !isAuthed;
+  document.body.classList.toggle("is-admin", true);
+  document.body.classList.remove("is-authed");
 }
 
 function openAuthDialog() {
@@ -162,7 +177,7 @@ const legalDocuments = {
         <ul>
           <li>email, внешние идентификаторы Telegram и MAX, сведения о способе входа;</li>
           <li>данные о питомцах: кличка, вид, возраст, вес, порода, пол, наблюдения, напоминания, история обращений;</li>
-          <li>тексты жалоб и вопросов, которые пользователь вводит для разбора состояния или питания;</li>
+          <li>тексты симптомов и вопросов, которые пользователь вводит для проверки состояния или питания;</li>
           <li>данные подписки, лимитов и платежных событий без хранения полных реквизитов банковской карты;</li>
           <li>технические данные: IP-адрес, время запроса, ошибки, данные сессии, cookie/localStorage, записи безопасности.</li>
         </ul>
@@ -232,7 +247,7 @@ const legalDocuments = {
       <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Используя сайт, PWA или подключённые мессенджеры, пользователь принимает это соглашение.</div>
       <section>
         <h3>1. Предмет</h3>
-        <p>TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, проверку жалоб, проверку питания, подписку и синхронизацию входов.</p>
+        <p>TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, проверку симптомов, проверку питания, подписку и синхронизацию входов.</p>
       </section>
       <section>
         <h3>2. Один аккаунт</h3>
@@ -272,7 +287,7 @@ const legalDocuments = {
       <section>
         <h3>2. Что входит в Plus</h3>
         <ul>
-          <li>до 10 разборов по здоровью питомца в месяц;</li>
+          <li>до 10 проверок по здоровью питомца в месяц;</li>
           <li>расширенная история обращений по питомцам;</li>
           <li>до 20 активных напоминаний;</li>
           <li>ведение до 3 питомцев в личном кабинете;</li>
@@ -375,6 +390,24 @@ function closeLegalModal() {
   legalModal.hidden = true;
 }
 
+const legalPathMap = {
+  "/privacy": "privacy",
+  "/consent": "consent",
+  "/terms": "terms",
+  "/offer": "offer",
+  "/medical-disclaimer": "medical",
+  "/cookies": "cookies",
+  "/contacts": "contacts"
+};
+
+function openLegalFromCurrentPath() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const type = legalPathMap[path];
+  if (!type) return false;
+  openLegalModal(type);
+  return true;
+}
+
 function showCookieBannerIfNeeded() {
   if (!cookieBanner) return;
   const consent = getCookieConsent();
@@ -436,9 +469,48 @@ function formatDateTime(value) {
   return date.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 }
 
+function maskEmail(email) {
+  const value = String(email || "");
+  const [name, domain] = value.split("@");
+  if (!name || !domain) return value;
+  const visible = name.length <= 2 ? name[0] || "" : `${name.slice(0, 2)}…${name.slice(-1)}`;
+  return `${visible}@${domain}`;
+}
+
+function formatPetSpecies(type) {
+  const value = String(type || "").toLowerCase();
+  if (value.includes("кош") || value === "cat") return "Кошка";
+  if (value.includes("соб") || value === "dog") return "Собака";
+  return value ? value[0].toUpperCase() + value.slice(1) : "Питомец";
+}
+
+function formatPetSex(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (["м", "m", "male", "самец", "кобель", "кот"].includes(text)) return "самец";
+  if (["ж", "f", "female", "самка", "сука", "кошка"].includes(text)) return "самка";
+  return text;
+}
+
+function formatPetAgeCompact(pet) {
+  if (pet.age_text) return pet.age_text;
+  if (!pet.birth_year) return "";
+  const years = new Date().getFullYear() - Number(pet.birth_year);
+  if (!Number.isFinite(years) || years < 0) return "";
+  const last = years % 10;
+  const lastTwo = years % 100;
+  const unit = last === 1 && lastTwo !== 11 ? "год" : [2, 3, 4].includes(last) && ![12, 13, 14].includes(lastTwo) ? "года" : "лет";
+  return `${years} ${unit}`;
+}
+
+function formatPetWeight(pet) {
+  if (!pet.weight_kg) return "";
+  return `${pet.weight_kg} кг`;
+}
+
 function petTitle(pet) {
   const main = pet.is_main ? "⭐ " : "";
-  return `${main}${pet.pet_type || "питомец"} — ${pet.pet_name || "без имени"}`;
+  return `${main}${formatPetSpecies(pet.pet_type)} — ${pet.pet_name || "без имени"}`;
 }
 
 function observationTypeLabel(value) {
@@ -511,6 +583,153 @@ function adminReadableError(message) {
   return messages[message] || readableError(message);
 }
 
+function ensureAdminMarkup() {
+  if (!adminView || adminMarkupReady) return;
+  adminView.innerHTML = `
+    <div class="admin-login-panel" id="adminLoginPanel">
+      <div class="panel admin-login-card">
+        <p class="section-label">Админка TemichevVet</p>
+        <h1>Вход администратора</h1>
+        <p>Доступ только для владельца сервиса. Вход защищён отдельным логином, паролем, короткой сессией и журналом безопасности.</p>
+        <form id="adminLoginForm" class="admin-login-form">
+          <label>
+            <span>Логин администратора</span>
+            <input id="adminUsernameInput" type="text" autocomplete="username" minlength="3" required value="admin" />
+          </label>
+          <label>
+            <span>Пароль администратора</span>
+            <input id="adminPasswordInput" type="password" autocomplete="current-password" minlength="8" required />
+          </label>
+          <button class="primary-button" type="submit">Войти</button>
+        </form>
+        <p class="hint" id="adminLoginHint"></p>
+      </div>
+    </div>
+
+    <div class="admin-dashboard" id="adminDashboardPanel" hidden>
+      <div class="dashboard-head">
+        <div>
+          <p class="section-label">Администрирование</p>
+          <h1>TemichevVet: контроль сервиса</h1>
+          <p>Пользователи, оплаты, подписки, безопасность, синхронизация и технические ошибки.</p>
+        </div>
+        <div class="inline-actions">
+          <button class="secondary-button compact" id="adminRefreshBtn" type="button">Обновить</button>
+          <button class="secondary-button compact" id="adminLogoutBtn" type="button">Выйти</button>
+        </div>
+      </div>
+      <details class="admin-settings">
+        <summary>Сменить логин/пароль администратора</summary>
+        <form id="adminCredentialsForm" class="admin-credentials-form">
+          <label>
+            <span>Текущий пароль</span>
+            <input id="adminCurrentPasswordInput" type="password" autocomplete="current-password" minlength="8" required />
+          </label>
+          <label>
+            <span>Новый логин</span>
+            <input id="adminNewUsernameInput" type="text" autocomplete="username" minlength="3" placeholder="admin" />
+          </label>
+          <label>
+            <span>Новый пароль</span>
+            <input id="adminNewPasswordInput" type="password" autocomplete="new-password" minlength="12" placeholder="минимум 12 символов" />
+          </label>
+          <button class="secondary-button compact" type="submit">Сохранить</button>
+        </form>
+        <p class="hint" id="adminCredentialsHint">Пароль сохраняется только как хэш. После смены используйте новый логин и пароль при следующем входе.</p>
+      </details>
+      <div id="adminContent" class="admin-content">
+        <div class="notice">Загружаю данные админки...</div>
+      </div>
+    </div>
+  `;
+  adminLoginPanel = adminView.querySelector("#adminLoginPanel");
+  adminDashboardPanel = adminView.querySelector("#adminDashboardPanel");
+  adminLoginForm = adminView.querySelector("#adminLoginForm");
+  adminUsernameInput = adminView.querySelector("#adminUsernameInput");
+  adminPasswordInput = adminView.querySelector("#adminPasswordInput");
+  adminLoginHint = adminView.querySelector("#adminLoginHint");
+  adminCredentialsForm = adminView.querySelector("#adminCredentialsForm");
+  adminCurrentPasswordInput = adminView.querySelector("#adminCurrentPasswordInput");
+  adminNewUsernameInput = adminView.querySelector("#adminNewUsernameInput");
+  adminNewPasswordInput = adminView.querySelector("#adminNewPasswordInput");
+  adminCredentialsHint = adminView.querySelector("#adminCredentialsHint");
+  adminRefreshBtn = adminView.querySelector("#adminRefreshBtn");
+  adminLogoutBtn = adminView.querySelector("#adminLogoutBtn");
+  adminContent = adminView.querySelector("#adminContent");
+  bindAdminEvents();
+  adminMarkupReady = true;
+}
+
+function bindAdminEvents() {
+  adminLoginForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    setAdminHint("Проверяю логин и пароль...");
+    try {
+      const data = await adminApi("/api/admin/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          username: adminUsernameInput.value,
+          password: adminPasswordInput.value
+        })
+      });
+      state.adminToken = data.token;
+      localStorage.setItem("tvv_admin_token", data.token);
+      adminPasswordInput.value = "";
+      setAdminHint("");
+      await loadAdminDashboard();
+    } catch (error) {
+      setAdminHint(adminReadableError(error.message), true);
+    }
+  });
+
+  adminCredentialsForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    adminCredentialsHint.textContent = "Сохраняю...";
+    adminCredentialsHint.className = "hint";
+    try {
+      const payload = {
+        current_password: adminCurrentPasswordInput.value,
+        new_username: adminNewUsernameInput.value.trim() || null,
+        new_password: adminNewPasswordInput.value || null
+      };
+      const data = await adminApi("/api/admin/auth/credentials", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      if (data.username && adminUsernameInput) {
+        adminUsernameInput.value = data.username;
+      }
+      adminCurrentPasswordInput.value = "";
+      adminNewPasswordInput.value = "";
+      adminCredentialsHint.textContent = "Сохранено. При следующем входе используйте новый логин и пароль.";
+    } catch (error) {
+      adminCredentialsHint.textContent = adminReadableError(error.message);
+      adminCredentialsHint.className = "hint danger-text";
+    }
+  });
+
+  adminRefreshBtn?.addEventListener("click", async () => {
+    try {
+      await loadAdminDashboard();
+    } catch (error) {
+      adminContent.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(adminReadableError(error.message))}</div>`;
+    }
+  });
+
+  adminLogoutBtn?.addEventListener("click", async () => {
+    if (state.adminToken) {
+      try {
+        await adminApi("/api/admin/auth/logout", { method: "POST", body: "{}" });
+      } catch {
+        // Local admin logout still needs to happen if the server session has expired.
+      }
+    }
+    localStorage.removeItem("tvv_admin_token");
+    state.adminToken = "";
+    setAdminMode(false);
+  });
+}
+
 function setAdminHint(text, danger = false) {
   if (!adminLoginHint) return;
   adminLoginHint.textContent = text || "";
@@ -575,7 +794,7 @@ function renderAdminDashboard(data, system = null) {
       ${renderAdminMetric("Питомцев", overview.pets_total)}
       ${renderAdminMetric("Активный Plus", overview.active_plus)}
       ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
-      ${renderAdminMetric("Разборов за 24 часа", overview.triage_24h)}
+      ${renderAdminMetric("Проверок за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
       ${renderAdminMetric("Событий с ошибкой 24ч", overview.security_errors_24h, "Счётчик журнала: технические сбои, ошибки входа и защиты доступа.")}
@@ -600,7 +819,7 @@ function renderAdminDashboard(data, system = null) {
         ${renderAdminMetric("API/сервер за 1ч", events1h.server_5xx ?? "—", "Если 0, сайт сейчас отвечает; число за 24ч может быть старой историей после перезапуска.")}
         ${renderAdminMetric("API/сервер за 24ч", events24h.server_5xx ?? "—", "5xx: серверная ошибка или временная недоступность API.")}
         ${renderAdminMetric("Оплата за 24ч", events24h.payment_errors ?? "—", "Сбои создания/проверки платежа YooKassa.")}
-        ${renderAdminMetric("LLM за 24ч", events24h.llm_errors ?? "—", "Сбои разбора жалобы через модель или шлюз OpenAI.")}
+        ${renderAdminMetric("LLM за 24ч", events24h.llm_errors ?? "—", "Сбои проверки симптомов через модель или шлюз OpenAI.")}
         ${renderAdminMetric("Синхронизация за 24ч", events24h.sync_errors ?? "—", "Сбои обмена данными между Telegram-ботом и PWA.")}
       </div>
     </section>
@@ -625,10 +844,10 @@ function renderAdminDashboard(data, system = null) {
       { key: "providers", label: "Входы" },
       { key: "plan", label: "Тариф" },
       { key: "pets_count", label: "Питомцы" },
-      { key: "triage_count", label: "Разборы" },
+      { key: "triage_count", label: "Проверки" },
       { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
     ])}
-    ${renderAdminTable("Последние разборы без медицинского текста", data.recent_triage || [], [
+    ${renderAdminTable("Последние проверки без медицинского текста", data.recent_triage || [], [
       { key: "id", label: "ID" },
       { key: "user_id", label: "User" },
       { key: "pet_name", label: "Питомец", render: (row) => adminCell(row.pet_name ? `${row.pet_type || "питомец"} — ${row.pet_name}` : "—") },
@@ -696,7 +915,9 @@ async function bootstrap() {
       pollTelegramLogin(state.telegramLoginState);
     }
     if (state.maxLoginState) {
-      clearMaxLogin();
+      openAuthDialog();
+      renderMaxWaiting(state.maxLoginUrl, state.maxLoginState);
+      pollMaxLogin(state.maxLoginState);
     }
     return;
   }
@@ -725,7 +946,9 @@ async function bootstrap() {
       pollTelegramLogin(state.telegramLoginState);
     }
     if (state.maxLoginState) {
-      clearMaxLogin();
+      openAuthDialog();
+      renderMaxWaiting(state.maxLoginUrl, state.maxLoginState);
+      pollMaxLogin(state.maxLoginState);
     }
   }
 }
@@ -753,10 +976,13 @@ function petOptions(selectedId = "") {
 
 function renderPetBadges(pet) {
   const parts = [];
-  if (pet.age_text) parts.push(`Возраст: ${pet.age_text}`);
-  if (pet.weight_kg) parts.push(`Вес: ${pet.weight_kg} кг`);
+  const age = formatPetAgeCompact(pet);
+  const weight = formatPetWeight(pet);
+  const sex = formatPetSex(pet.sex);
+  if (age) parts.push(`Возраст: ${age}`);
+  if (weight) parts.push(`Вес: ${weight}`);
   if (pet.breed) parts.push(`Порода: ${pet.breed}`);
-  if (pet.sex) parts.push(`Пол: ${pet.sex}`);
+  if (sex) parts.push(`Пол: ${sex}`);
   return parts.length ? `<div class="meta-row">${parts.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : "";
 }
 
@@ -789,10 +1015,10 @@ function renderHomeGuide(hasPets) {
       <div class="guide-steps">
         <button class="guide-step" data-action="pets" type="button">
           <strong>${hasPets ? "1. Проверьте карточку" : "1. Добавьте питомца"}</strong>
-          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают разбору." : "Так разборы, вес и напоминания будут храниться в одном месте."}</span>
+          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают проверке." : "Так проверки, вес и напоминания будут храниться в одном месте."}</span>
         </button>
         <button class="guide-step" data-action="triage" type="button">
-          <strong>2. Разберите жалобу</strong>
+          <strong>2. Проверьте симптомы</strong>
           <span>Опишите симптомы простыми словами, чтобы получить уровень срочности.</span>
         </button>
         <button class="guide-step" data-action="reminders" type="button">
@@ -801,6 +1027,80 @@ function renderHomeGuide(hasPets) {
         </button>
       </div>
     </section>
+  `;
+}
+
+const historyEventLabels = {
+  triage: "Проверка симптомов",
+  reminder: "Напоминание",
+  weight: "Вес",
+  profile: "Карточка питомца",
+  observation: "Наблюдение",
+  vaccination: "Вакцинация"
+};
+
+function humanizeUiText(value) {
+  return String(value || "")
+    .replace(/\btriage\b/gi, "Проверка симптомов")
+    .replace(/REMINDER_VACCINATION_CREATED/g, "Создано напоминание: вакцинация")
+    .replace(/REMINDER_CREATED/g, "Создано напоминание")
+    .replace(/Разбор жалобы/g, "Проверка симптомов")
+    .replace(/красные симптомы/g, "опасные признаки")
+    .replace(/онлайн-ответ/g, "ответ сервиса");
+}
+
+function historyTitle(item) {
+  const raw = humanizeUiText(item.title || "");
+  if (raw) return raw;
+  return historyEventLabels[item.event_type] || "Событие здоровья";
+}
+
+function historyEventLabel(item) {
+  return historyEventLabels[item.event_type] || humanizeUiText(item.event_type || "Событие");
+}
+
+function inferUrgencyMeta(text) {
+  const value = String(text || "").toLowerCase();
+  if (value.includes("срочно") || value.includes("красн") || value.includes("немедлен") || value.includes("в клинику")) {
+    return { label: "Срочно", className: "danger" };
+  }
+  if (value.includes("консультац") || value.includes("показать") || value.includes("врачу")) {
+    return { label: "Нужна консультация", className: "warn" };
+  }
+  if (value.includes("наблюд") || value.includes("зел")) {
+    return { label: "Наблюдение", className: "ok" };
+  }
+  return { label: "Событие", className: "neutral" };
+}
+
+function compactText(value, limit = 170) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1).trim()}…`;
+}
+
+function renderHistoryCard(item) {
+  const details = humanizeUiText(item.details || "");
+  const meta = inferUrgencyMeta(`${item.title || ""} ${details}`);
+  const summary = compactText(details || historyTitle(item));
+  return `
+    <article class="item-card history-card">
+      <div>
+        <div class="history-meta">
+          <span class="status-dot ${meta.className}">${escapeHtml(meta.label)}</span>
+          <span>${escapeHtml(historyEventLabel(item))}</span>
+          <span>${escapeHtml(formatDateTime(item.created_at))}</span>
+        </div>
+        <h3>${escapeHtml(historyTitle(item))}</h3>
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+        ${details && details.length > summary.length ? `
+          <details class="history-details">
+            <summary>Показать полный текст</summary>
+            <p>${nl2br(details)}</p>
+          </details>
+        ` : ""}
+      </div>
+    </article>
   `;
 }
 
@@ -842,7 +1142,7 @@ function renderDueFollowups(items) {
             <button class="secondary-button compact" data-followup-answer="better" data-followup-id="${item.id}" type="button">Стало лучше</button>
             <button class="secondary-button compact" data-followup-answer="same" data-followup-id="${item.id}" type="button">Без изменений</button>
             <button class="secondary-button compact danger-text" data-followup-answer="worse" data-followup-id="${item.id}" type="button">Стало хуже</button>
-            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новый разбор</button>
+            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новая проверка</button>
           </div>
         </article>
       `;
@@ -863,7 +1163,7 @@ async function renderHome() {
     <div class="workspace-head">
       <div>
         <h2>Личный кабинет TemichevVet</h2>
-        <p>Питомцы, разборы, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
+        <p>Питомцы, проверки симптомов, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
       </div>
       <button class="secondary-button compact" data-action="pets" type="button">🐾 Мои питомцы</button>
     </div>
@@ -885,7 +1185,7 @@ async function renderHome() {
       </div>
       <div class="summary-card">
         <strong>${escapeHtml(sub.planTitle)}</strong>
-        <span>${sub.quotaLeft} из ${sub.quotaTotal} разборов доступно</span>
+        <span>${sub.quotaLeft} из ${sub.quotaTotal} проверок доступно</span>
       </div>
       <div class="summary-card">
         <strong>${escapeHtml(providerLabels)}</strong>
@@ -897,22 +1197,46 @@ async function renderHome() {
       </div>
       <div class="summary-card">
         <strong>${dueFollowups.length}</strong>
-        <span>контролей состояния ждут ответа</span>
+        <span>проверок в обработке</span>
       </div>
     </div>
     ${renderHomeGuide(Boolean(petCount))}
     <div class="next-actions">
-      <button class="primary-button" data-action="triage" type="button">🩺 Разобрать жалобу</button>
+      <button class="primary-button" data-action="triage" type="button">🩺 Проверить симптомы</button>
       <button class="secondary-button" data-action="pets" type="button">🐾 Мои питомцы</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
-      <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
-      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
-      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
-      <button class="secondary-button" data-action="subscription" type="button">💳 Подписка</button>
-      <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
+      <button class="secondary-button" data-action="history" type="button">📜 История здоровья</button>
+    </div>
+    <div class="secondary-menu-row inline">
+      <button class="secondary-button compact" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
     </div>
     ${renderDueFollowups(dueFollowups)}
   `, { scroll: false });
+}
+
+function renderMore() {
+  setWorkspace(`
+    <div class="workspace-head">
+      <div>
+        <h2>Ещё</h2>
+        <p>Дополнительные разделы сервиса: справка, питание, подписка, входы и связь с командой.</p>
+      </div>
+      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+    </div>
+    <div class="detail-grid more-grid">
+      <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
+      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
+      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
+      <button class="secondary-button" data-action="observations" type="button">📊 Наблюдения</button>
+      <button class="secondary-button" data-action="subscription" type="button">💳 Подписка</button>
+      <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
+      <button class="secondary-button" data-action="feedback" type="button">✉️ Обратная связь</button>
+      <button class="secondary-button danger-text" data-action="logout" type="button">Выйти</button>
+    </div>
+    <div class="care-note">
+      Питание, уход и вопросы-ответы не расходуют лимит проверок симптомов. Для срочной ситуации используйте «Проверить симптомы».
+    </div>
+  `);
 }
 
 function isProviderConnected(provider) {
@@ -930,27 +1254,27 @@ async function renderAccountLinks() {
         <h2>Способы входа</h2>
         <p>Подключите мессенджеры к текущему кабинету, чтобы не создавать второй аккаунт и не разделять питомцев, историю и подписку.</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">На главную</button>
+      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
     </div>
     <div class="profile-card">
       <h3>Email</h3>
-      <p>${email ? `Подключён: ${escapeHtml(email)}` : "Email пока не подключён. Вход по email можно использовать отдельно через окно входа."}</p>
+      <p>${email ? `Статус: подключён · ${escapeHtml(maskEmail(email))}` : "Email пока не подключён. Вход по email можно использовать отдельно через окно входа."}</p>
     </div>
     <div class="summary-grid">
-      <div class="summary-card">
-        <strong>Telegram</strong>
-        <span>${telegramConnected ? "подключён" : "можно подключить"}</span>
-        <button class="secondary-button compact" data-link-provider="telegram" type="button" ${telegramConnected ? "disabled" : ""}>
-          ${telegramConnected ? "Подключён" : "Подключить Telegram"}
-        </button>
-      </div>
-      <div class="summary-card">
-        <strong>MAX</strong>
-        <span>${maxConnected ? "подключён" : "можно подключить"}</span>
-        <button class="secondary-button compact" data-link-provider="max" type="button" ${maxConnected ? "disabled" : ""}>
-          ${maxConnected ? "Подключён" : "Подключить MAX"}
-        </button>
-      </div>
+        <div class="summary-card">
+          <strong>Telegram</strong>
+          <span>Статус: ${telegramConnected ? "подключён" : "не подключён"}</span>
+          ${telegramConnected
+            ? `<span class="status-badge connected">Подключён</span>`
+            : `<button class="secondary-button compact" data-link-provider="telegram" type="button">Подключить Telegram</button>`}
+        </div>
+        <div class="summary-card">
+          <strong>MAX</strong>
+          <span>Статус: ${maxConnected ? "подключён" : "не подключён"}</span>
+          ${maxConnected
+            ? `<span class="status-badge connected">Подключён</span>`
+            : `<button class="secondary-button compact" data-link-provider="max" type="button">Подключить MAX</button>`}
+        </div>
     </div>
     <div class="care-note">
       Мессенджер нужен только для подтверждения личности. После подтверждения вернитесь сюда: сайт сам завершит привязку.
@@ -1127,12 +1451,13 @@ async function renderPets() {
     ? state.pets
         .map(
           (pet) => `
-            <article class="item-card">
+            <article class="item-card pet-card">
               <div>
                 <h3>${escapeHtml(petTitle(pet))}</h3>
+                <p>${pet.is_main ? "Основной питомец для быстрых проверок." : "Карточка питомца: история, вес, наблюдения и напоминания."}</p>
                 ${renderPetBadges(pet)}
               </div>
-              <button class="secondary-button compact" data-open-pet="${pet.id}" type="button">Открыть</button>
+              <button class="secondary-button compact" data-open-pet="${pet.id}" type="button">Открыть карточку</button>
             </article>
           `
         )
@@ -1153,14 +1478,14 @@ async function renderPets() {
     <form class="form-grid" id="petCreateForm">
       <h3>Добавить питомца</h3>
       <label><span>Тип</span><select name="pet_type"><option value="кошка">Кошка</option><option value="собака">Собака</option></select></label>
-      <label><span>Кличка</span><input name="pet_name" required placeholder="Лео" /></label>
-      <label><span>Порода</span><input name="breed" placeholder="Бенгальская" /></label>
-      <label><span>Пол</span><select name="sex"><option value="">Не указан</option><option value="м">М</option><option value="ж">Ж</option></select></label>
-      <label><span>Год рождения</span><input name="birth_year" inputmode="numeric" placeholder="2019" /></label>
-      <label><span>Месяц</span><input name="birth_month" inputmode="numeric" placeholder="6" /></label>
-      <label><span>День</span><input name="birth_day" inputmode="numeric" placeholder="15" /></label>
+      <label><span>Кличка</span><input name="pet_name" required placeholder="Например: Лео" /></label>
+      <label><span>Порода</span><input name="breed" placeholder="Если знаете: бенгальская, шпиц..." /></label>
+      <label><span>Пол</span><select name="sex"><option value="">Не указан</option><option value="м">Самец</option><option value="ж">Самка</option></select></label>
+      <label><span>Год рождения</span><input name="birth_year" inputmode="numeric" placeholder="Например: 2019" /></label>
+      <label><span>Месяц</span><input name="birth_month" inputmode="numeric" placeholder="Если знаете: 6" /></label>
+      <label><span>День</span><input name="birth_day" inputmode="numeric" placeholder="Если знаете: 15" /></label>
       <label><span>Вес, кг</span><input name="weight_kg" inputmode="decimal" placeholder="6.1" /></label>
-      <label class="checkbox-row"><input name="is_main" type="checkbox" /> <span>Сделать основным</span></label>
+      <label class="checkbox-row full-row"><input name="is_main" type="checkbox" /> <span>Сделать основным: он будет выбран первым в проверках и напоминаниях.</span></label>
       <button class="primary-button" type="submit">Сохранить питомца</button>
     </form>
   `);
@@ -1204,7 +1529,7 @@ async function renderPetCard(petId) {
   const pet = data.item;
   const history = (data.history || [])
     .slice(0, 5)
-    .map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${formatDateTime(item.created_at)}</span></li>`)
+    .map((item) => `<li><strong>${escapeHtml(historyTitle(item))}</strong><span>${formatDateTime(item.created_at)}</span></li>`)
     .join("");
 
   setWorkspace(`
@@ -1225,7 +1550,7 @@ async function renderPetCard(petId) {
       <button class="secondary-button" data-pet-view="observations" data-pet-id="${pet.id}" type="button">📊 Наблюдения</button>
       <button class="secondary-button" data-pet-view="weight" data-pet-id="${pet.id}" type="button">⚖️ Вес</button>
       <button class="secondary-button" data-pet-view="reminders" data-pet-id="${pet.id}" type="button">⏰ Напоминания</button>
-      <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Разобрать жалобу</button>
+      <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Проверить симптомы</button>
       <button class="secondary-button" data-pet-view="edit" data-pet-id="${pet.id}" type="button">✏️ Изменить</button>
       <button class="secondary-button" data-set-main="${pet.id}" type="button">${pet.is_main ? "⭐ Основной" : "⭐ Сделать основным"}</button>
       <button class="secondary-button danger-text" data-delete-pet="${pet.id}" type="button">🗑 Удалить</button>
@@ -1249,7 +1574,7 @@ async function renderPetEdit(petId) {
       <label><span>Тип</span><select name="pet_type"><option value="кошка" ${pet.pet_type === "кошка" ? "selected" : ""}>Кошка</option><option value="собака" ${pet.pet_type === "собака" ? "selected" : ""}>Собака</option></select></label>
       <label><span>Кличка</span><input name="pet_name" required value="${escapeHtml(pet.pet_name)}" /></label>
       <label><span>Порода</span><input name="breed" value="${escapeHtml(pet.breed || "")}" /></label>
-      <label><span>Пол</span><select name="sex"><option value="">Не указан</option><option value="м" ${pet.sex === "м" ? "selected" : ""}>М</option><option value="ж" ${pet.sex === "ж" ? "selected" : ""}>Ж</option></select></label>
+      <label><span>Пол</span><select name="sex"><option value="">Не указан</option><option value="м" ${pet.sex === "м" ? "selected" : ""}>Самец</option><option value="ж" ${pet.sex === "ж" ? "selected" : ""}>Самка</option></select></label>
       <label><span>Год рождения</span><input name="birth_year" inputmode="numeric" value="${escapeHtml(pet.birth_year || "")}" /></label>
       <label><span>Месяц</span><input name="birth_month" inputmode="numeric" value="${escapeHtml(pet.birth_month || "")}" /></label>
       <label><span>День</span><input name="birth_day" inputmode="numeric" value="${escapeHtml(pet.birth_day || "")}" /></label>
@@ -1273,13 +1598,13 @@ async function renderPetEdit(petId) {
 async function renderPetHistory(petId) {
   const data = await api(`/api/pets/${petId}/history`);
   const items = data.items.length
-    ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.details || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
+    ? data.items.map((item) => renderHistoryCard(item)).join("")
     : renderEmptyBlock({
         icon: "📜",
         title: "История пока пустая",
-        text: "После первого разбора, наблюдения, веса или напоминания события появятся здесь.",
+        text: "После первой проверки, наблюдения, веса или напоминания события появятся здесь.",
         action: "triage",
-        actionText: "Разобрать жалобу"
+        actionText: "Проверить симптомы"
       });
   setWorkspace(`
     <div class="workspace-head">
@@ -1304,9 +1629,10 @@ async function renderPetObservations(petId) {
       <h2>Наблюдения</h2>
       <button class="secondary-button compact" data-open-pet="${petId}" type="button">⬅️ В карточку</button>
     </div>
+    <div class="care-note">Наблюдения — это ваши короткие заметки: аппетит, активность, стул, весомые изменения поведения. Проверки симптомов хранятся в «Истории здоровья».</div>
     <form class="inline-form" id="observationForm">
       <input name="text" placeholder="Например: аппетит нормальный, активность ниже обычного" required />
-      <button class="primary-button compact" type="submit">Добавить</button>
+      <button class="primary-button compact" type="submit">Добавить наблюдение</button>
     </form>
     <div class="list-stack">${items}</div>
   `);
@@ -1366,6 +1692,8 @@ async function renderReminders(petId = null) {
   const data = petId ? await api(`/api/pets/${petId}`) : await api("/api/reminders");
   const reminders = petId ? data.reminders || [] : data.items || [];
   const title = petId ? `Напоминания питомца` : "Напоминания";
+  const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
+  const selectedPetId = petId || mainPet?.id || "";
   const items = reminders.length
     ? reminders
         .map(
@@ -1394,9 +1722,9 @@ async function renderReminders(petId = null) {
     </div>
     <form class="form-grid" id="reminderForm">
       <h3>Добавить напоминание</h3>
-      <label><span>Питомец</span><select name="pet_id"><option value="">Без питомца</option>${petOptions(petId || "")}</select></label>
+      <label><span>Питомец</span><select name="pet_id">${petOptions(selectedPetId)}</select></label>
       <label><span>Шаблон</span><select name="reminder_type">${reminderTypes.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
-      <label><span>Заголовок</span><input name="title" required placeholder="Обработка от паразитов" /></label>
+      <label><span>Заголовок</span><input name="title" required value="Вакцинация" placeholder="Вакцинация" /></label>
       <label><span>Дата</span><input name="due_date" type="date" required /></label>
       <label><span>Время</span><input name="due_time" type="time" /></label>
       <label><span>Повтор</span><select name="periodicity">${periodicityOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
@@ -1406,7 +1734,17 @@ async function renderReminders(petId = null) {
     <div class="list-stack">${items}</div>
   `);
 
-  document.querySelector("#reminderForm").addEventListener("submit", async (event) => {
+  const reminderForm = document.querySelector("#reminderForm");
+  const reminderTypeSelect = reminderForm.querySelector("[name='reminder_type']");
+  const reminderTitleInput = reminderForm.querySelector("[name='title']");
+  reminderTypeSelect.addEventListener("change", () => {
+    const suggested = reminderDefaultTitles[reminderTypeSelect.value] || "Напоминание";
+    if (!reminderTitleInput.value || Object.values(reminderDefaultTitles).includes(reminderTitleInput.value)) {
+      reminderTitleInput.value = suggested;
+    }
+  });
+
+  reminderForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const selectedPetId = String(form.get("pet_id") || "");
@@ -1432,30 +1770,32 @@ async function renderReminders(petId = null) {
 
 async function renderTriage(prefillPetId = null) {
   await refreshPets();
+  const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
+  const selectedPetId = prefillPetId || state.currentPetId || mainPet?.id || "";
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Разобрать жалобу</h2>
-        <p>Выберите питомца и опишите, что происходит. Если в тексте есть красные симптомы, веб-версия сразу покажет срочное предупреждение.</p>
+        <h2>Проверить симптомы</h2>
+        <p>Выберите питомца и опишите, что происходит. Если в тексте есть опасные признаки, сервис сразу покажет срочное предупреждение.</p>
       </div>
       <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
-    </div>
-    <div class="visual-strip compact-visual">
-      <img src="/static/assets/triage_banner.jpg" alt="" />
-      <div>
-        <h3>Проверьте срочность</h3>
-        <p>Сначала срабатывают красные симптомы. Это помогает не ждать онлайн-ответ там, где нужна клиника.</p>
-      </div>
     </div>
     <div class="care-note">
       TemichevVet не ставит диагноз и не назначает лечение. Если есть тяжёлое дыхание, судороги,
       потеря сознания, кровь, признаки отравления или резкое ухудшение — сразу обращайтесь в клинику.
     </div>
     <form class="form-grid one-column" id="triageForm">
-      <label><span>Питомец</span><select name="pet_id"><option value="">Без привязки</option>${petOptions(prefillPetId || state.currentPetId || "")}</select></label>
-      <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка второй день плохо ест, стала вялая..." required></textarea></label>
-      <button class="primary-button" type="submit">Проверить состояние</button>
+      <label><span>Питомец</span><select name="pet_id"><option value="">Без привязки</option>${petOptions(selectedPetId)}</select></label>
+      <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка не ест второй день, вялая, была рвота после еды" required></textarea></label>
+      <button class="primary-button" type="submit">Оценить срочность</button>
     </form>
+    <div class="visual-strip compact-visual">
+      <img src="/static/assets/triage_banner.jpg" alt="" />
+      <div>
+        <h3>Как работает проверка</h3>
+        <p>Сначала срабатывают опасные признаки. Это помогает не ждать ответ сервиса там, где нужна клиника.</p>
+      </div>
+    </div>
     <div id="triageResult"></div>
   `);
   document.querySelector("#triageForm").addEventListener("submit", async (event) => {
@@ -1479,14 +1819,14 @@ async function renderTriage(prefillPetId = null) {
         </div>
         <div class="care-note">
           Если в ответе есть пункты, которые нужно уточнить, подготовьте их для врача.
-          Можно также добавить эти данные в новый разбор — это будет отдельная проверка состояния и спишет ещё один запрос.
+          Можно также добавить эти данные в новую проверку — это будет отдельная оценка срочности и спишет ещё один запрос.
           ${data.followup ? "Контроль состояния будет показан в кабинете позже; если Telegram подключён, напоминание также уйдёт туда." : ""}
         </div>
         <div class="next-actions">
           ${petId ? `<button class="secondary-button" data-open-pet="${petId}" type="button">🐾 Открыть карточку</button>` : ""}
           ${petId ? `<button class="secondary-button" data-pet-view="reminders" data-pet-id="${petId}" type="button">⏰ Добавить напоминание</button>` : `<button class="secondary-button" data-action="reminders" type="button">⏰ Добавить напоминание</button>`}
           ${petId ? `<button class="secondary-button" data-pet-view="history" data-pet-id="${petId}" type="button">📜 История питомца</button>` : ""}
-          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить новым разбором</button>
+          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить новой проверкой</button>
         </div>
       `;
     } catch (error) {
@@ -1496,17 +1836,26 @@ async function renderTriage(prefillPetId = null) {
 }
 
 async function renderFood() {
+  await refreshPets();
+  const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
   setWorkspace(`
     <div class="workspace-head">
       <div>
         <h2>Питание</h2>
-        <p>Проверьте отдельный продукт или готовое блюдо. Если это блюдо, добавьте состав через запятую.</p>
+        <p>Проверьте отдельный продукт или готовое блюдо. Если это блюдо, лучше указать состав через запятую.</p>
       </div>
       <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
     </div>
     <form class="form-grid one-column" id="foodForm">
+      <label><span>Для кого проверяем?</span><select name="food_target">
+        <option value="">Не указывать</option>
+        ${state.pets.map((pet) => `<option value="pet:${pet.id}" ${mainPet && pet.id === mainPet.id ? "selected" : ""}>${escapeHtml(petTitle(pet))}</option>`).join("")}
+        <option value="cat">Кошка</option>
+        <option value="dog">Собака</option>
+      </select></label>
       <label><span>Продукт или блюдо</span><input name="query" placeholder="борщ, котлета, виноград, куриная грудка" required /></label>
       <label><span>Состав блюда, если известен</span><input name="ingredients" placeholder="мясо, рис, лук, соль" /></label>
+      <div class="care-note">Если блюда нет в базе, укажите ингредиенты. Например: “харчо: говядина, рис, томат, чеснок, специи”. Для отдельного продукта достаточно названия.</div>
       <button class="primary-button" type="submit">Проверить</button>
     </form>
     <div id="foodResult"></div>
@@ -1554,9 +1903,9 @@ const knowledgeSections = {
     title: "Вопросы и ответы",
     icon: "❓",
     endpoint: "/api/faq",
-    intro: "Частые вопросы по здоровью, профилактике, тревожным признакам, подготовке к врачу и уходу.",
-    label: "Вопрос или тема",
-    placeholder: "вакцинация котёнка, понос у собаки, что сказать врачу",
+    intro: "Справочник по частым вопросам: профилактика, тревожные признаки, подготовка к врачу, уход и бытовые ситуации.",
+    label: "Что хотите узнать?",
+    placeholder: "вакцинация котёнка, обработка от клещей, как подготовиться к врачу",
     empty: "Подходящие ответы не найдены. Попробуйте другую формулировку."
   }
 };
@@ -1652,7 +2001,7 @@ async function renderKnowledgeSection(kind) {
       <button class="primary-button" type="submit">Найти</button>
     </form>
     <div class="care-note">
-      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет разбор жалобы или очный осмотр ветеринарного врача.
+      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет проверку симптомов или очный осмотр ветеринарного врача.
     </div>
     <div id="knowledgeResult"></div>
   `);
@@ -1744,6 +2093,7 @@ function renderSubscription(statusHtml = "") {
   const quotaLeft = Number.isFinite(Number(sub.quota_left)) ? Number(sub.quota_left) : Math.max(0, quotaTotal - quotaUsed);
   const periodEnd = sub.period_end ? formatDateTime(sub.period_end) : "—";
   const canPay = !sub.plan || sub.plan === "free";
+  const telegramConnected = isProviderConnected("telegram");
   setWorkspace(`
     <div class="workspace-head">
       <h2>Подписка</h2>
@@ -1756,44 +2106,17 @@ function renderSubscription(statusHtml = "") {
         <p>Расширенные лимиты, история по питомцам и больше активных напоминаний. Автосписаний не будет.</p>
       </div>
     </div>
-    <div class="pricing-grid subscription-pricing" aria-label="Тарифы TemichevVet">
-      <article class="pricing-card">
-        <div>
-          <strong>Free</strong>
-          <span>Бесплатный старт</span>
-        </div>
-        <p>Базовый личный кабинет для первых проверок и ведения питомца.</p>
-        <ul>
-          <li>до 5 разборов по здоровью в первый месяц;</li>
-          <li>карточка питомца, история, наблюдения и вес;</li>
-          <li>базовый доступ к материалам и проверке питания.</li>
-        </ul>
-      </article>
-      <article class="pricing-card featured">
-        <div>
-          <strong>Plus</strong>
-          <span>200 ₽ за 30 дней</span>
-        </div>
-        <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
-        <ul>
-          <li>до 10 разборов по здоровью в месяц;</li>
-          <li>расширенная история по питомцам;</li>
-          <li>до 20 активных напоминаний;</li>
-          <li>до 3 питомцев в личном кабинете.</li>
-        </ul>
-      </article>
-    </div>
-    <p class="legal-price-note">
-      Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет
-      возвращается на Free, если Plus не продлить.
-    </p>
     <div class="profile-card">
       <h3>Ваш текущий доступ</h3>
       <p><strong>Тариф:</strong> ${escapeHtml(plan)}</p>
-      <p><strong>Использовано разборов:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
+      <p><strong>Использовано проверок:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
       <p><strong>Источник подписки:</strong> ${escapeHtml(sourceLabel)}.</p>
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
-      <div class="notice">Если Plus оплачен в Telegram, войдите через Telegram или подключите Telegram в разделе «Способы входа» — кабинет подтянет тот же доступ.</div>
+      ${telegramConnected || sourceLabel === "Telegram" ? `
+        <div class="notice">Telegram подключён: сайт и Telegram используют один аккаунт, историю и подписку.</div>
+      ` : `
+        <div class="notice">Если Plus был оплачен в Telegram, подключите Telegram в разделе «Способы входа» — кабинет подтянет тот же доступ.</div>
+      `}
       ${canPay ? `
         <div class="next-actions payment-actions">
           <button class="primary-button" data-action="pay-plus" type="button">💳 Оплатить Plus — 200 ₽</button>
@@ -1805,6 +2128,37 @@ function renderSubscription(statusHtml = "") {
       `}
       <div id="paymentResult">${statusHtml}</div>
     </div>
+    <div class="pricing-grid subscription-pricing" aria-label="Тарифы TemichevVet">
+      <article class="pricing-card">
+        <div>
+          <strong>Free</strong>
+          <span>Бесплатный старт</span>
+        </div>
+        <p>Базовый личный кабинет для первых проверок и ведения питомца.</p>
+        <ul>
+          <li>до 5 проверок по здоровью в первый месяц;</li>
+          <li>карточка питомца, история, наблюдения и вес;</li>
+          <li>базовый доступ к материалам и проверке питания.</li>
+        </ul>
+      </article>
+      <article class="pricing-card featured">
+        <div>
+          <strong>Plus</strong>
+          <span>200 ₽ за 30 дней</span>
+        </div>
+        <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
+        <ul>
+          <li>до 10 проверок по здоровью в месяц;</li>
+          <li>расширенная история по питомцам;</li>
+          <li>до 20 активных напоминаний;</li>
+          <li>до 3 питомцев в личном кабинете.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="legal-price-note">
+      Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет
+      возвращается на Free, если Plus не продлить.
+    </p>
   `);
 }
 
@@ -1818,7 +2172,13 @@ function renderFeedback() {
       Это связь с командой проекта TemichevVet, а не с ветеринарным врачом. Не отправляйте сюда симптомы, жалобы и срочные медицинские ситуации.
     </div>
     <form class="form-grid one-column" id="feedbackForm">
-      <label><span>Тема</span><input name="category" placeholder="Ошибка, оплата, идея, вопрос по кабинету" /></label>
+      <label><span>Категория</span><select name="category">
+        <option value="Ошибка">Ошибка в сервисе</option>
+        <option value="Оплата">Оплата или подписка</option>
+        <option value="Вход">Вход или привязка мессенджера</option>
+        <option value="Идея">Идея по улучшению</option>
+        <option value="Другое">Другое</option>
+      </select></label>
       <label><span>Сообщение команде</span><textarea name="text" required placeholder="Опишите вопрос по работе сервиса"></textarea></label>
       <button class="primary-button" type="submit">Отправить</button>
     </form>
@@ -1915,9 +2275,8 @@ verifyCodeBtn.addEventListener("click", async () => {
       body: JSON.stringify({ email: emailInput.value, code: codeInput.value })
     });
     state.token = data.token;
-    state.user = data.user;
-    state.externalAccounts = [];
     localStorage.setItem("tvv_token", data.token);
+    await refreshAccountState();
     setAuthMode(true);
     emailHint.textContent = "";
     await renderHome();
@@ -2117,74 +2476,6 @@ async function pollMaxLogin(loginState, attempt = 0) {
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
-adminLoginForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setAdminHint("Проверяю логин и пароль...");
-  try {
-    const data = await adminApi("/api/admin/auth/login", {
-      method: "POST",
-      body: JSON.stringify({
-        username: adminUsernameInput.value,
-        password: adminPasswordInput.value
-      })
-    });
-    state.adminToken = data.token;
-    localStorage.setItem("tvv_admin_token", data.token);
-    adminPasswordInput.value = "";
-    setAdminHint("");
-    await loadAdminDashboard();
-  } catch (error) {
-    setAdminHint(adminReadableError(error.message), true);
-  }
-});
-
-adminCredentialsForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  adminCredentialsHint.textContent = "Сохраняю...";
-  adminCredentialsHint.className = "hint";
-  try {
-    const payload = {
-      current_password: adminCurrentPasswordInput.value,
-      new_username: adminNewUsernameInput.value.trim() || null,
-      new_password: adminNewPasswordInput.value || null
-    };
-    const data = await adminApi("/api/admin/auth/credentials", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    if (data.username && adminUsernameInput) {
-      adminUsernameInput.value = data.username;
-    }
-    adminCurrentPasswordInput.value = "";
-    adminNewPasswordInput.value = "";
-    adminCredentialsHint.textContent = "Сохранено. При следующем входе используйте новый логин и пароль.";
-  } catch (error) {
-    adminCredentialsHint.textContent = adminReadableError(error.message);
-    adminCredentialsHint.className = "hint danger-text";
-  }
-});
-
-adminRefreshBtn?.addEventListener("click", async () => {
-  try {
-    await loadAdminDashboard();
-  } catch (error) {
-    adminContent.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(adminReadableError(error.message))}</div>`;
-  }
-});
-
-adminLogoutBtn?.addEventListener("click", async () => {
-  if (state.adminToken) {
-    try {
-      await adminApi("/api/admin/auth/logout", { method: "POST", body: "{}" });
-    } catch {
-      // Local admin logout still needs to happen if the server session has expired.
-    }
-  }
-  localStorage.removeItem("tvv_admin_token");
-  state.adminToken = "";
-  setAdminMode(false);
-});
-
 openAuthBtn.addEventListener("click", openAuthDialog);
 authCloseBtn.addEventListener("click", closeAuthDialog);
 authDialog.addEventListener("click", (event) => {
@@ -2224,6 +2515,10 @@ window.addEventListener("focus", () => {
   if (!state.token && state.maxLoginState) pollMaxLogin(state.maxLoginState);
 });
 
+window.addEventListener("popstate", () => {
+  if (!openLegalFromCurrentPath()) closeLegalModal();
+});
+
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && !state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);
   if (!document.hidden && !state.token && state.maxLoginState) pollMaxLogin(state.maxLoginState);
@@ -2233,7 +2528,11 @@ document.addEventListener("click", async (event) => {
   const legalButton = event.target.closest("[data-open-legal]");
   if (legalButton) {
     event.preventDefault();
-    openLegalModal(legalButton.dataset.openLegal);
+    const legalType = legalButton.dataset.openLegal;
+    if (legalButton.getAttribute("href") && legalPathMap[legalButton.getAttribute("href")]) {
+      window.history.pushState({}, "", legalButton.getAttribute("href"));
+    }
+    openLegalModal(legalType);
     return;
   }
 
@@ -2312,6 +2611,7 @@ document.addEventListener("click", async (event) => {
     if (action === "home") await renderHome();
     if (action === "pets") await renderPets();
     if (action === "triage") await renderTriage();
+    if (action === "more") renderMore();
     if (action === "food") await renderFood();
     if (action === "care") await renderKnowledgeSection("care");
     if (action === "faq") await renderKnowledgeSection("faq");
@@ -2329,6 +2629,7 @@ document.addEventListener("click", async (event) => {
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();
     if (action === "observations") await renderGlobalObservations();
+    if (action === "logout") logoutBtn.click();
   } catch (error) {
     showError(`Ошибка: ${readableError(error.message)}`);
   }
@@ -2354,3 +2655,4 @@ if ("serviceWorker" in navigator) {
 
 showCookieBannerIfNeeded();
 bootstrap();
+openLegalFromCurrentPath();
