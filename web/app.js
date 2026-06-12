@@ -908,6 +908,24 @@ async function bootstrap() {
   }
   const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus";
   if (!state.token) {
+    try {
+      const data = await api("/api/me");
+      state.user = data.user;
+      state.externalAccounts = data.external_accounts || [];
+      state.subscription = data.subscription || null;
+      setAuthMode(true);
+      if (shouldCheckPayment) {
+        renderSubscription(`<div class="notice">Вернулись с оплаты. Проверяю статус платежа...</div>`);
+        await checkPlusPaymentStatus({ replaceHistory: true });
+        return;
+      }
+      await renderHome();
+      return;
+    } catch {
+      state.user = null;
+      state.externalAccounts = [];
+      state.subscription = null;
+    }
     setAuthMode(false);
     if (state.telegramLoginState) {
       openAuthDialog();

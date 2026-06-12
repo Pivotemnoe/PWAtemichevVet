@@ -93,6 +93,22 @@ def init_db(db_path: Path) -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)")
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS review_login_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_review_login_tokens_hash ON review_login_tokens(token_hash)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_review_login_tokens_expires ON review_login_tokens(expires_at, revoked_at)")
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS admin_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token_hash TEXT NOT NULL UNIQUE,
@@ -1136,6 +1152,36 @@ def create_session(db_path: Path, *, user_id: int, token_hash: str, expires_at: 
             VALUES (?, ?, ?, ?)
             """,
             (int(user_id), token_hash, utc_now_iso(), expires_at),
+        )
+        conn.commit()
+
+
+def get_active_review_login_token(db_path: Path, *, token_hash: str) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM review_login_tokens
+            WHERE token_hash = ?
+              AND revoked_at IS NULL
+              AND expires_at > ?
+            LIMIT 1
+            """,
+            (token_hash, utc_now_iso()),
+        ).fetchone()
+        return row_to_dict(row)
+
+
+def mark_review_login_token_used(db_path: Path, *, token_hash: str) -> None:
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE review_login_tokens
+            SET last_used_at = ?
+            WHERE token_hash = ?
+              AND revoked_at IS NULL
+            """,
+            (utc_now_iso(), token_hash),
         )
         conn.commit()
 

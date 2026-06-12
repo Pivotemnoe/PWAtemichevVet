@@ -13,8 +13,8 @@ from time import monotonic
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -93,6 +93,9 @@ logger = logging.getLogger(__name__)
 EMAIL_CODE_COOLDOWN_SECONDS = 60
 EMAIL_CODE_MAX_PER_HOUR = 5
 EMAIL_CODE_MAX_VERIFY_ATTEMPTS = 5
+USER_SESSION_COOKIE = "tvv_session"
+REVIEW_ACCOUNT_EMAIL = "chatgpt-review@temichevvet.ru"
+REVIEW_SESSION_MAX_AGE_SECONDS = 72 * 60 * 60
 
 
 RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = (
@@ -423,6 +426,118 @@ class TelegramCoreOutboundAck(BaseModel):
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _is_review_user(user: dict | None) -> bool:
+    return _normalize_email(str((user or {}).get("email") or "")) == REVIEW_ACCOUNT_EMAIL
+
+
+def _ensure_review_account(*, period_end: str) -> dict:
+    user = db.get_or_create_user_by_email(settings.database_path, REVIEW_ACCOUNT_EMAIL)
+    user_id = int(user["id"])
+    now_dt = utc_now()
+    now = now_dt.isoformat()
+    due_date = (now_dt + timedelta(days=7)).date().isoformat()
+    with closing(db.connect(settings.database_path)) as conn:
+        conn.execute(
+            "UPDATE users SET name = ?, updated_at = ? WHERE id = ?",
+            ("ChatGPT review", now, user_id),
+        )
+        pet_row = conn.execute(
+            "SELECT id FROM pets WHERE owner_id = ? AND pet_name = ? LIMIT 1",
+            (user_id, "Лео тестовый"),
+        ).fetchone()
+        if pet_row:
+            pet_id = int(pet_row["id"])
+        else:
+            cur = conn.execute(
+                """
+                INSERT INTO pets (
+                    owner_id, pet_type, pet_name, added_at, birth_year,
+                    birth_precision, sex, weight_kg, breed, is_main
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (user_id, "cat", "Лео тестовый", now, 2019, "year", "m", 5.4, "домашняя"),
+            )
+            pet_id = int(cur.lastrowid)
+        if not conn.execute(
+            "SELECT 1 FROM pets WHERE owner_id = ? AND pet_name = ? LIMIT 1",
+            (user_id, "Рэй тестовый"),
+        ).fetchone():
+            conn.execute(
+                """
+                INSERT INTO pets (
+                    owner_id, pet_type, pet_name, added_at, birth_year,
+                    birth_precision, sex, weight_kg, breed, is_main
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                (user_id, "dog", "Рэй тестовый", now, 2021, "year", "m", 12.2, "метис"),
+            )
+        if not conn.execute(
+            "SELECT 1 FROM reminders WHERE user_id = ? AND title = ? LIMIT 1",
+            (user_id, "Тестовая обработка от паразитов"),
+        ).fetchone():
+            conn.execute(
+                """
+                INSERT INTO reminders (
+                    user_id, pet_id, reminder_type, title, due_date, due_time,
+                    periodicity, notes, is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    user_id,
+                    pet_id,
+                    "parasite",
+                    "Тестовая обработка от паразитов",
+                    due_date,
+                    "10:00",
+                    "once",
+                    "Демо-напоминание для проверки интерфейса.",
+                    now,
+                    now,
+                ),
+            )
+        if not conn.execute(
+            "SELECT 1 FROM pet_history WHERE pet_id = ? AND title = ? LIMIT 1",
+            (pet_id, "Демо-разбор состояния"),
+        ).fetchone():
+            conn.execute(
+                """
+                INSERT INTO pet_history (pet_id, event_type, created_at, title, details, metadata)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pet_id,
+                    "triage",
+                    now,
+                    "Демо-разбор состояния",
+                    "Тестовая запись: краткий разбор жалобы сохранён в истории питомца.",
+                    json.dumps({"urgency": "yellow", "review": True}, ensure_ascii=False),
+                ),
+            )
+        conn.execute(
+            """
+            INSERT INTO subscriptions (
+                user_id, plan, quota_total, quota_used, period_start,
+                period_end, source, updated_at
+            )
+            VALUES (?, 'plus', 10, 0, ?, ?, 'review', ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                plan = 'plus',
+                quota_total = 10,
+                quota_used = 0,
+                period_start = excluded.period_start,
+                period_end = excluded.period_end,
+                source = 'review',
+                updated_at = excluded.updated_at
+            """,
+            (user_id, now, period_end, now),
+        )
+        conn.commit()
+    return db.get_or_create_user_by_email(settings.database_path, REVIEW_ACCOUNT_EMAIL)
 
 
 def _normalize_admin_username(username: str) -> str:
@@ -1087,13 +1202,18 @@ def _parse_json_payload(row: dict) -> dict:
     return item
 
 
-def _require_bearer(authorization: Annotated[str | None, Header()] = None) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="authorization_required")
-    match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
-    if not match:
-        raise HTTPException(status_code=401, detail="invalid_authorization_header")
-    return match.group(1).strip()
+def _require_bearer(
+    authorization: Annotated[str | None, Header()] = None,
+    tvv_session: Annotated[str | None, Cookie(alias=USER_SESSION_COOKIE)] = None,
+) -> str:
+    if authorization:
+        match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
+        if not match:
+            raise HTTPException(status_code=401, detail="invalid_authorization_header")
+        return match.group(1).strip()
+    if tvv_session:
+        return tvv_session.strip()
+    raise HTTPException(status_code=401, detail="authorization_required")
 
 
 def current_user(token: str = Depends(_require_bearer)) -> dict:
@@ -1422,6 +1542,55 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
         message=_payment_message(status),
         subscription=get_effective_subscription(settings, user).to_public(),
     )
+
+
+@app.get("/review-login", include_in_schema=False)
+def review_login(request: Request, token: str = Query(min_length=24, max_length=256)) -> RedirectResponse:
+    raw_token = token.strip()
+    token_hash = hash_value(raw_token, settings.session_secret)
+    review_token = db.get_active_review_login_token(settings.database_path, token_hash=token_hash)
+    if not review_token:
+        _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "invalid_or_expired"})
+        raise HTTPException(status_code=404, detail="review_token_not_found")
+
+    email = _normalize_email(str(review_token.get("email") or ""))
+    if email != REVIEW_ACCOUNT_EMAIL:
+        _audit(request, "review_login.denied", status="warning", actor="system", metadata={"reason": "wrong_account"})
+        raise HTTPException(status_code=403, detail="review_account_forbidden")
+
+    expires_at = str(review_token["expires_at"])
+    expires_dt = _parse_iso_dt(expires_at)
+    max_age = REVIEW_SESSION_MAX_AGE_SECONDS
+    if expires_dt:
+        seconds_left = int((expires_dt - utc_now()).total_seconds())
+        if seconds_left <= 0:
+            raise HTTPException(status_code=404, detail="review_token_expired")
+        max_age = max(60, min(REVIEW_SESSION_MAX_AGE_SECONDS, seconds_left))
+
+    user = _ensure_review_account(period_end=expires_at)
+    session_token = make_token()
+    db.create_session(
+        settings.database_path,
+        user_id=int(user["id"]),
+        token_hash=hash_value(session_token, settings.session_secret),
+        expires_at=expires_at,
+    )
+    db.mark_review_login_token_used(settings.database_path, token_hash=token_hash)
+    _audit(request, "review_login.success", user_id=int(user["id"]), provider="review", status="ok", actor="user")
+
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        USER_SESSION_COOKIE,
+        session_token,
+        max_age=max_age,
+        expires=max_age,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/")
@@ -1891,6 +2060,13 @@ def auth_telegram_status(state: str, request: Request) -> ProviderStatusResponse
 
 @app.post("/api/account/telegram/start", response_model=ProviderStartResponse)
 def account_telegram_start(request: Request, user: dict = Depends(current_user)) -> ProviderStartResponse:
+    if _is_review_user(user):
+        _audit(request, "account.provider_link_blocked", user_id=int(user["id"]), provider="telegram", status="warning", actor="user", metadata={"reason": "review_account"})
+        return ProviderStartResponse(
+            enabled=False,
+            provider="telegram",
+            message="Для review-аккаунта привязка Telegram отключена.",
+        )
     if not settings.telegram_bot_username:
         _audit(request, "account.provider_link_start_failed", user_id=int(user["id"]), provider="telegram", status="warning", actor="user", metadata={"reason": "bot_username_missing"})
         return ProviderStartResponse(
@@ -1981,6 +2157,13 @@ def auth_max_status(state: str, request: Request) -> ProviderStatusResponse:
 
 @app.post("/api/account/max/start", response_model=ProviderStartResponse)
 def account_max_start(request: Request, user: dict = Depends(current_user)) -> ProviderStartResponse:
+    if _is_review_user(user):
+        _audit(request, "account.provider_link_blocked", user_id=int(user["id"]), provider="max", status="warning", actor="user", metadata={"reason": "review_account"})
+        return ProviderStartResponse(
+            enabled=False,
+            provider="max",
+            message="Для review-аккаунта привязка MAX отключена.",
+        )
     if not settings.max_bot_username or not settings.max_bot_token:
         _audit(request, "account.provider_link_start_failed", user_id=int(user["id"]), provider="max", status="warning", actor="user", metadata={"reason": "max_not_configured"})
         return ProviderStartResponse(
@@ -2032,7 +2215,7 @@ def me(user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/api/auth/logout")
-def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> dict:
+def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> JSONResponse:
     token_hash = hash_value(token, settings.session_secret)
     user = db.get_user_by_session(settings.database_path, token_hash=token_hash)
     db.revoke_session(
@@ -2040,7 +2223,9 @@ def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> dict
         token_hash=token_hash,
     )
     _audit(request, "auth.logout", user_id=int(user["id"]) if user else None, status="ok", actor="user")
-    return {"ok": True, "message": "Сессия завершена."}
+    response = JSONResponse({"ok": True, "message": "Сессия завершена."})
+    response.delete_cookie(USER_SESSION_COOKIE, path="/")
+    return response
 
 
 @app.post("/api/account/sessions/revoke-all")
@@ -2064,6 +2249,9 @@ def account_export(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/account/deletion-request")
 def account_deletion_request(payload: DataDeletionRequest, request: Request, user: dict = Depends(current_user)) -> dict:
+    if _is_review_user(user):
+        _audit(request, "account.deletion_request_blocked", user_id=int(user["id"]), status="warning", actor="user", metadata={"reason": "review_account"})
+        raise HTTPException(status_code=403, detail="review_account_operation_disabled")
     if payload.confirm.strip().upper() != "УДАЛИТЬ":
         _audit(request, "account.deletion_request_failed", user_id=int(user["id"]), status="warning", actor="user", metadata={"reason": "invalid_confirmation"})
         raise HTTPException(status_code=400, detail="invalid_deletion_confirmation")
@@ -2090,6 +2278,14 @@ def account_deletion_request(payload: DataDeletionRequest, request: Request, use
 @app.post("/api/payments/plus/create", response_model=PaymentCreateResponse)
 def payment_plus_create(request: Request, user: dict = Depends(current_user)) -> PaymentCreateResponse:
     sub = get_effective_subscription(settings, user)
+    if _is_review_user(user):
+        _audit(request, "payment.create_blocked", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="warning", actor="user", metadata={"reason": "review_account"})
+        return PaymentCreateResponse(
+            ok=False,
+            status="review_disabled",
+            message="Оплата отключена для временного review-аккаунта.",
+            subscription=sub.to_public(),
+        )
     if sub.plan != "free":
         _audit(request, "payment.create_skipped", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="ok", actor="user", metadata={"reason": "already_active", "plan": sub.plan})
         return PaymentCreateResponse(
