@@ -14,7 +14,7 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -1544,55 +1544,19 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
     )
 
 
-def _review_login_error_response() -> HTMLResponse:
-    return HTMLResponse(
-        status_code=404,
-        content="""<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>Ссылка для аудита недействительна</title>
-    <style>
-      body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#eef4fb;color:#17223a}
-      main{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-      article{max-width:560px;background:#fff;border:1px solid #d9e3f0;border-radius:12px;padding:28px;box-shadow:0 18px 48px rgba(36,55,83,.12)}
-      h1{margin:0 0 12px;font-size:28px;line-height:1.15}
-      p{margin:0;color:#65728a;font-size:18px;line-height:1.5}
-      a{display:inline-block;margin-top:20px;color:#226fd1;font-weight:800;text-decoration:none}
-    </style>
-  </head>
-  <body>
-    <main>
-      <article>
-        <h1>Ссылка для аудита недействительна или истекла</h1>
-        <p>Попросите владельца TemichevVet выдать новую временную ссылку для проверки.</p>
-        <a href="/">На главную</a>
-      </article>
-    </main>
-  </body>
-</html>""",
-        headers={"Cache-Control": "no-store"},
-    )
-
-
 @app.get("/review-login", include_in_schema=False)
-def review_login(request: Request, token: str = Query(default="")):
+def review_login(request: Request, token: str = Query(min_length=24, max_length=256)) -> RedirectResponse:
     raw_token = token.strip()
-    if len(raw_token) < 24 or len(raw_token) > 256:
-        _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "invalid_format"})
-        return _review_login_error_response()
     token_hash = hash_value(raw_token, settings.session_secret)
     review_token = db.get_active_review_login_token(settings.database_path, token_hash=token_hash)
     if not review_token:
         _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "invalid_or_expired"})
-        return _review_login_error_response()
+        raise HTTPException(status_code=404, detail="review_token_not_found")
 
     email = _normalize_email(str(review_token.get("email") or ""))
     if email != REVIEW_ACCOUNT_EMAIL:
         _audit(request, "review_login.denied", status="warning", actor="system", metadata={"reason": "wrong_account"})
-        return _review_login_error_response()
+        raise HTTPException(status_code=403, detail="review_account_forbidden")
 
     expires_at = str(review_token["expires_at"])
     expires_dt = _parse_iso_dt(expires_at)
@@ -1600,8 +1564,7 @@ def review_login(request: Request, token: str = Query(default="")):
     if expires_dt:
         seconds_left = int((expires_dt - utc_now()).total_seconds())
         if seconds_left <= 0:
-            _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "expired"})
-            return _review_login_error_response()
+            raise HTTPException(status_code=404, detail="review_token_expired")
         max_age = max(60, min(REVIEW_SESSION_MAX_AGE_SECONDS, seconds_left))
 
     user = _ensure_review_account(period_end=expires_at)
@@ -1615,7 +1578,7 @@ def review_login(request: Request, token: str = Query(default="")):
     db.mark_review_login_token_used(settings.database_path, token_hash=token_hash)
     _audit(request, "review_login.success", user_id=int(user["id"]), provider="review", status="ok", actor="user")
 
-    response = RedirectResponse(url="/app", status_code=303)
+    response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         USER_SESSION_COOKIE,
         session_token,
@@ -1633,14 +1596,6 @@ def review_login(request: Request, token: str = Query(default="")):
 @app.get("/")
 @app.head("/", include_in_schema=False)
 def index() -> FileResponse:
-    return FileResponse(WEB_ROOT / "index.html")
-
-
-@app.get("/app", include_in_schema=False)
-@app.head("/app", include_in_schema=False)
-@app.get("/cabinet", include_in_schema=False)
-@app.head("/cabinet", include_in_schema=False)
-def cabinet_index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
 
 

@@ -23,9 +23,8 @@ let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 
 const authView = document.querySelector("#authView");
-let dashboardView = document.querySelector("#dashboardView");
+const dashboardView = document.querySelector("#dashboardView");
 const adminView = document.querySelector("#adminView");
-let dashboardMarkupReady = Boolean(dashboardView);
 let adminLoginPanel = null;
 let adminDashboardPanel = null;
 let adminLoginForm = null;
@@ -53,9 +52,9 @@ const emailHint = document.querySelector("#emailHint");
 const messengerHint = document.querySelector("#messengerHint");
 const telegramBtn = document.querySelector("#telegramBtn");
 const maxBtn = document.querySelector("#maxBtn");
-let logoutBtn = document.querySelector("#logoutBtn");
+const logoutBtn = document.querySelector("#logoutBtn");
 const installBtn = document.querySelector("#installBtn");
-let workspace = document.querySelector("#workspace");
+const workspace = document.querySelector("#workspace");
 const privacyConsent = document.querySelector("#privacyConsent");
 const legalModal = document.querySelector("#legalModal");
 const legalModalTitle = document.querySelector("#legalModalTitle");
@@ -93,77 +92,13 @@ const periodicityOptions = [
   ["yearly", "Раз в год"]
 ];
 
-function ensureDashboardMarkup() {
-  if (dashboardMarkupReady && dashboardView && workspace && logoutBtn) return;
-  if (!dashboardView) {
-    const section = document.createElement("section");
-    section.className = "dashboard-view";
-    section.id = "dashboardView";
-    section.hidden = true;
-    section.innerHTML = `
-      <div class="dashboard-head">
-        <div>
-          <p class="section-label">Личный кабинет</p>
-          <h1>Выберите действие</h1>
-          <p>Карточки питомцев, история, напоминания, питание, подписка и подключённые способы входа.</p>
-        </div>
-        <button class="secondary-button compact" id="logoutBtn" type="button">Выйти</button>
-      </div>
-
-      <div class="review-audit-status" id="reviewAuditStatus" hidden></div>
-
-      <div class="action-grid">
-        <button data-action="triage" type="button"><span>🩺</span><strong>Разобрать жалобу</strong></button>
-        <button data-action="history" type="button"><span>📜</span><strong>История здоровья</strong></button>
-        <button data-action="observations" type="button"><span>📊</span><strong>Наблюдения</strong></button>
-        <button data-action="pets" type="button"><span>🐾</span><strong>Мои питомцы</strong></button>
-        <button data-action="nutrition" type="button"><span>🍽️</span><strong>Питание</strong></button>
-        <button data-action="reminders" type="button"><span>⏰</span><strong>Напоминания</strong></button>
-        <button data-action="subscription" type="button"><span>💳</span><strong>Подписка</strong></button>
-        <button data-action="login-methods" type="button"><span>🔐</span><strong>Способы входа</strong></button>
-        <button data-action="feedback" type="button"><span>✉️</span><strong>Обратная связь</strong></button>
-      </div>
-
-      <div class="secondary-menu-row">
-        <button data-action="care" type="button">🧴 Уход и привычки</button>
-        <button data-action="faq" type="button">❓ Вопросы и ответы</button>
-      </div>
-
-      <div class="workspace" id="workspace">
-        <div class="workspace-head">
-          <div>
-            <h2>Личный кабинет готов</h2>
-            <p>Выберите действие выше.</p>
-          </div>
-        </div>
-      </div>
-    `;
-    const main = document.querySelector("main");
-    if (main && adminView) {
-      main.insertBefore(section, adminView);
-    } else {
-      main?.append(section);
-    }
-  }
-  dashboardView = document.querySelector("#dashboardView");
-  logoutBtn = document.querySelector("#logoutBtn");
-  workspace = document.querySelector("#workspace");
-  logoutBtn?.removeEventListener("click", logoutUser);
-  logoutBtn?.addEventListener("click", logoutUser);
-  dashboardMarkupReady = Boolean(dashboardView && workspace);
-}
-
 function setAuthMode(isAuthed) {
-  if (isAuthed) ensureDashboardMarkup();
   authView.hidden = isAuthed;
-  if (dashboardView) dashboardView.hidden = !isAuthed;
+  dashboardView.hidden = !isAuthed;
   if (adminView) adminView.hidden = true;
   document.body.classList.toggle("is-authed", Boolean(isAuthed));
   document.body.classList.remove("is-admin");
-  if (isAuthed) {
-    updateReviewAuditStatus();
-    closeAuthDialog();
-  }
+  if (isAuthed) closeAuthDialog();
 }
 
 function setAdminMode(isAuthed) {
@@ -590,8 +525,6 @@ function observationTypeLabel(value) {
 }
 
 function setWorkspace(html, options = {}) {
-  if (!workspace) ensureDashboardMarkup();
-  if (!workspace) return;
   workspace.innerHTML = html;
   if (options.scroll !== false) {
     workspace.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1049,7 +982,6 @@ async function refreshAccountState() {
   state.user = data.user;
   state.externalAccounts = data.external_accounts || [];
   state.subscription = data.subscription || null;
-  updateReviewAuditStatus();
   return data;
 }
 
@@ -1088,27 +1020,6 @@ function connectedProviderLabels() {
   if (isProviderConnected("telegram")) labels.push("Telegram");
   if (isProviderConnected("max")) labels.push("MAX");
   return labels.length ? labels.join(", ") : "не подключены";
-}
-
-function isReviewAccount() {
-  return String(state.user?.email || "").toLowerCase() === "chatgpt-review@temichevvet.ru";
-}
-
-function updateReviewAuditStatus() {
-  const element = document.querySelector("#reviewAuditStatus");
-  if (!element) return;
-  if (!isReviewAccount()) {
-    element.hidden = true;
-    element.textContent = "";
-    return;
-  }
-  const plusUntil = state.subscription?.period_end ? formatDateTime(state.subscription.period_end) : "—";
-  element.hidden = false;
-  element.innerHTML = `
-    <strong>Тестовый аудит:</strong>
-    ${escapeHtml(state.user.email)}, Plus до ${escapeHtml(plusUntil)}.
-    Реальные платежи, удаление аккаунта, смена email и доступ к данным клиентов отключены.
-  `;
 }
 
 function renderHomeGuide(hasPets) {
@@ -2597,7 +2508,7 @@ cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary")
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
 
-async function logoutUser() {
+logoutBtn.addEventListener("click", async () => {
   if (state.token) {
     try {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
@@ -2615,9 +2526,7 @@ async function logoutUser() {
   state.externalAccounts = [];
   state.subscription = null;
   setAuthMode(false);
-}
-
-logoutBtn?.addEventListener("click", logoutUser);
+});
 
 window.addEventListener("focus", () => {
   if (!state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);

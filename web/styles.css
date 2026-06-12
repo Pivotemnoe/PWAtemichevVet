@@ -108,20 +108,6 @@ main {
   gap: 18px;
 }
 
-.review-audit-status {
-  border: 1px solid #a7d9bb;
-  background: #edf9f1;
-  color: #1f5b36;
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-weight: 750;
-  line-height: 1.45;
-}
-
-.review-audit-status strong {
-  color: #17472b;
-}
-
 .intro-panel,
 .panel,
 .workspace {

@@ -9,7 +9,7 @@
     <link rel="icon" href="/static/assets/app-icon-192.png?v=20260612-review-login-1" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260612-review-login-1" />
     <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260612-review-login-1" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260612-review-login-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260611-ui-audit-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -256,6 +256,43 @@
           </div>
         </section>
 
+        <section class="dashboard-view" id="dashboardView" hidden>
+          <div class="dashboard-head">
+            <div>
+              <p class="section-label">Личный кабинет</p>
+              <h1>Выберите действие</h1>
+            </div>
+            <button class="secondary-button" id="logoutBtn" type="button">Выйти</button>
+          </div>
+
+          <div class="action-grid">
+            <button class="action-tile" data-action="triage" type="button">
+              <span class="tile-icon">🩺</span>
+              <span>Проверить симптомы</span>
+            </button>
+            <button class="action-tile" data-action="pets" type="button">
+              <span class="tile-icon">🐾</span>
+              <span>Мои питомцы</span>
+            </button>
+            <button class="action-tile" data-action="reminders" type="button">
+              <span class="tile-icon">⏰</span>
+              <span>Напоминания</span>
+            </button>
+            <button class="action-tile" data-action="history" type="button">
+              <span class="tile-icon">📜</span>
+              <span>История здоровья</span>
+            </button>
+          </div>
+          <div class="secondary-menu-row">
+            <button class="secondary-button" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
+          </div>
+
+          <div class="workspace" id="workspace">
+            <h2>Личный кабинет готов</h2>
+            <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
+          </div>
+        </section>
+
         <section class="admin-view" id="adminView" hidden></section>
       </main>
 
@@ -301,6 +338,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260612-review-login-2" type="module"></script>
+    <script src="/static/app.js?v=20260612-review-login-1" type="module"></script>
   </body>
 </html>
