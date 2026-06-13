@@ -22,6 +22,7 @@ os.environ.update(
         "DEV_AUTH_CODE_LOG": "1",
         "ADMIN_API_SECRET": "admin-test-secret",
         "MONITORING_API_SECRET": "monitoring-test-secret",
+        "CORE_API_SECRET": "core-test-secret",
         "YOOKASSA_SHOP_ID": "test-shop",
         "YOOKASSA_SECRET_KEY": "test-secret",
         "YOOKASSA_RETURN_URL": "http://127.0.0.1:8080/?payment=plus",
@@ -174,6 +175,21 @@ class ApiTests(unittest.TestCase):
 
         events = db.list_security_audit_events(api.settings.database_path, event_type="payment.succeeded")
         self.assertGreaterEqual(len(events), 1)
+
+    def test_core_api_secret_required(self) -> None:
+        with self.assertRaises(HTTPException) as missing_exc:
+            api._require_core_api_secret()
+        self.assertEqual(missing_exc.exception.status_code, 401)
+
+        with self.assertRaises(HTTPException) as invalid_header_exc:
+            api._require_core_api_secret("wrong")
+        self.assertEqual(invalid_header_exc.exception.status_code, 401)
+
+        with self.assertRaises(HTTPException) as invalid_secret_exc:
+            api._require_core_api_secret("Bearer wrong-secret")
+        self.assertEqual(invalid_secret_exc.exception.status_code, 403)
+
+        self.assertIsNone(api._require_core_api_secret("Bearer core-test-secret"))
 
     def test_payment_status_owner_only(self) -> None:
         user_a, _ = login("payment-owner-a@example.com")
