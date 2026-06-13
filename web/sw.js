@@ -1,14 +1,14 @@
-const CACHE_NAME = "temichevvet-sw-network-1";
+const CACHE_NAME = "temichevvet-errorcopy-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260613-sw-network-1",
-  "/static/app.js?v=20260613-sw-network-1",
-  "/static/manifest.webmanifest?v=20260613-sw-network-1",
-  "/static/assets/app-icon-192.png?v=20260613-sw-network-1",
-  "/static/assets/app-icon-512.png?v=20260613-sw-network-1",
-  "/static/assets/apple-touch-icon.png?v=20260613-sw-network-1",
-  "/apple-touch-icon.png?v=20260613-sw-network-1",
-  "/apple-touch-icon-precomposed.png?v=20260613-sw-network-1",
+  "/static/styles.css?v=20260613-errorcopy-1",
+  "/static/app.js?v=20260613-errorcopy-1",
+  "/static/manifest.webmanifest?v=20260613-errorcopy-1",
+  "/static/assets/app-icon-192.png?v=20260613-errorcopy-1",
+  "/static/assets/app-icon-512.png?v=20260613-errorcopy-1",
+  "/static/assets/apple-touch-icon.png?v=20260613-errorcopy-1",
+  "/apple-touch-icon.png?v=20260613-errorcopy-1",
+  "/apple-touch-icon-precomposed.png?v=20260613-errorcopy-1",
   "/static/assets/logo_temichevvet.jpg",
   "/static/assets/hero_pets.jpg",
   "/static/assets/subscription_banner.jpg",

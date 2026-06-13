@@ -487,7 +487,7 @@ function setCookieConsent(value) {
   localStorage.setItem("tvv_cookie_consent", JSON.stringify({
     value,
     accepted_at: new Date().toISOString(),
-    version: "20260613-sw-network-1"
+    version: "20260613-errorcopy-1"
   }));
   cookieBanner.hidden = true;
   if (value === "all") loadMetrika();
