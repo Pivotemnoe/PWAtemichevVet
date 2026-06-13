@@ -92,7 +92,7 @@ Production uses `POST /api/webhooks/max` behind HTTPS and requires `MAX_WEBHOOK_
 
 ## PWA Push Follow-Ups
 
-PWA can show browser notifications after a health check, similar to Telegram follow-up reminders. Push delivery is disabled until VAPID keys are configured:
+PWA can show browser notifications after a health check, similar to Telegram follow-up reminders. Push delivery requires VAPID keys:
 
 ```text
 VAPID_PUBLIC_KEY=
@@ -110,6 +110,8 @@ curl -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=50" 
 ```
 
 Run it from cron or a systemd timer. If VAPID keys are absent, the user interface explains that notifications are still being prepared and regular app logic continues to work.
+
+Production uses the templates in `infra/systemd/` and the helper script `scripts/send_pwa_followups.sh`.
 
 ## GitHub
 
@@ -135,7 +137,6 @@ git push -u origin main
 
 ## Next Steps
 
-1. Generate and configure VAPID keys for PWA push notifications.
-2. Add the push follow-up sender to cron or a systemd timer.
-3. Add backups and monitoring for the PWA SQLite database.
-4. Prepare PostgreSQL migration before active growth.
+1. Keep backup and monitoring checks for the PWA SQLite database.
+2. Prepare PostgreSQL migration before active growth.
+3. Add CI coverage for payment mock flows and cross-account access checks.

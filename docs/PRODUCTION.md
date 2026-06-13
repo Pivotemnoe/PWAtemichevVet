@@ -51,6 +51,15 @@ curl -sS -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=
 
 Use a timer every 10-15 minutes after `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are configured in `/opt/temichevvet/pwa/.env`.
 
+Installed production units:
+
+```text
+temichevvet_pwa_followups.service
+temichevvet_pwa_followups.timer
+```
+
+The timer runs every 10 minutes. The service reads `MONITORING_API_SECRET` from `/opt/temichevvet/pwa/.env` and calls the internal endpoint on `127.0.0.1`, so the secret is not exposed in the unit file.
+
 ## MAX Webhook
 
 MAX Bot API subscription points to:

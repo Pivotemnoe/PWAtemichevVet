@@ -81,6 +81,14 @@ curl -sS -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=
 
 Endpoint не раскрывает медицинские тексты в audit-журнал. В журнал попадает только служебный итог: сколько follow-up найдено, отправлено и пропущено.
 
+Production timer:
+
+```bash
+systemctl list-timers --all | grep temichevvet_pwa_followups
+systemctl status temichevvet_pwa_followups.timer
+journalctl -u temichevvet_pwa_followups.service -n 50 --no-pager
+```
+
 ## Server Logs
 
 На сервере:

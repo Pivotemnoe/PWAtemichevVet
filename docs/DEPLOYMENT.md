@@ -50,7 +50,7 @@ The app listens on port `8080` by default.
 - Configure VAPID keys before showing PWA push notifications as enabled.
 - Verify security headers on `/` and `Cache-Control: no-store` on `/api/*`.
 - Verify rate limits for email code, auth status, payment, feedback, triage and account data endpoints.
-- Add a cron/systemd timer for `POST /api/internal/push/followups/send` if PWA follow-up notifications are enabled.
+- Add the systemd timer from `infra/systemd/` for `POST /api/internal/push/followups/send` if PWA follow-up notifications are enabled.
 - Back up the SQLite database or switch to Postgres before active marketing traffic.
 - Add monitoring for 5xx errors and failed auth attempts.
 

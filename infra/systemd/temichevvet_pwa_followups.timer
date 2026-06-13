@@ -1,0 +1,11 @@
+[Unit]
+Description=Run TemichevVet PWA follow-up push sender
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+Unit=temichevvet_pwa_followups.service
+
+[Install]
+WantedBy=timers.target
