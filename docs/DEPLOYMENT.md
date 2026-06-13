@@ -29,6 +29,7 @@ Copy `.env.example` to `.env` and set values:
 - `MAX_BOT_USERNAME`, `MAX_BOT_TOKEN`: MAX login provider after moderation.
 - `MAX_API_BASE_URL`: MAX Bot API base URL. Default: `https://platform-api.max.ru`.
 - `MAX_WEBHOOK_SECRET`: secret checked by `POST /api/webhooks/max` in production.
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`: optional PWA push notification keys for browser follow-up reminders.
 
 ## Docker
 
@@ -46,8 +47,10 @@ The app listens on port `8080` by default.
 - Use a non-default `SESSION_SECRET` of at least 32 characters.
 - Configure real SMTP before public email login.
 - Configure MAX webhook after the PWA is available over HTTPS.
+- Configure VAPID keys before showing PWA push notifications as enabled.
 - Verify security headers on `/` and `Cache-Control: no-store` on `/api/*`.
 - Verify rate limits for email code, auth status, payment, feedback, triage and account data endpoints.
+- Add a cron/systemd timer for `POST /api/internal/push/followups/send` if PWA follow-up notifications are enabled.
 - Back up the SQLite database or switch to Postgres before active marketing traffic.
 - Add monitoring for 5xx errors and failed auth attempts.
 

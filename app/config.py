@@ -49,6 +49,9 @@ class Settings:
     yookassa_receipt_email: str
     yookassa_tax_system_code: str
     yookassa_vat_code: str
+    vapid_public_key: str
+    vapid_private_key: str
+    vapid_subject: str
 
 
 def get_settings() -> Settings:
@@ -84,4 +87,7 @@ def get_settings() -> Settings:
         yookassa_receipt_email=os.getenv("YOOKASSA_RECEIPT_EMAIL", "").strip(),
         yookassa_tax_system_code=os.getenv("YOOKASSA_TAX_SYSTEM_CODE", "").strip(),
         yookassa_vat_code=os.getenv("YOOKASSA_VAT_CODE", "1").strip() or "1",
+        vapid_public_key=os.getenv("VAPID_PUBLIC_KEY", "").strip(),
+        vapid_private_key=os.getenv("VAPID_PRIVATE_KEY", "").strip(),
+        vapid_subject=os.getenv("VAPID_SUBJECT", "mailto:support@temichevvet.ru").strip(),
     )

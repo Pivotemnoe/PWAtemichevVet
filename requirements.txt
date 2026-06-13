@@ -5,3 +5,4 @@ python-dotenv==1.1.1
 email-validator==2.2.0
 certifi>=2025.11.12
 openai>=1.93.0
+pywebpush>=2.0.0

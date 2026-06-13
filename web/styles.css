@@ -108,6 +108,10 @@ main {
   gap: 18px;
 }
 
+.install-section {
+  scroll-margin-top: 132px;
+}
+
 .intro-panel,
 .panel,
 .workspace {
@@ -146,6 +150,7 @@ h1 {
   font-size: 32px;
   line-height: 1.18;
   margin-bottom: 10px;
+  overflow-wrap: anywhere;
 }
 
 h2 {
@@ -162,10 +167,11 @@ p {
 .lead {
   font-size: 18px;
   color: #34425a;
+  overflow-wrap: anywhere;
 }
 
 .product-hero {
-  grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
+  grid-template-columns: 1fr;
   gap: 30px 34px;
   align-items: center;
 }
@@ -202,22 +208,38 @@ p {
 }
 
 .hero-copy {
-  text-align: left;
+  text-align: center;
+  min-width: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .hero-copy .intro-logo {
   margin: 0 0 12px;
 }
 
+.hero-copy h1,
+.hero-copy .lead,
+.hero-copy .section-label {
+  max-width: min(100%, calc(100vw - 64px));
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .hero-media {
   display: grid;
   align-items: center;
   justify-items: stretch;
+  min-width: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .hero-media img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   max-height: 390px;
   object-fit: contain;
   object-position: center;
@@ -231,6 +253,7 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  justify-content: center;
   margin: 18px 0 4px;
 }
 
@@ -289,6 +312,9 @@ p {
 .trust-row span {
   display: inline-flex;
   align-items: center;
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 100%;
   min-height: 34px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -297,6 +323,7 @@ p {
   color: #34425a;
   font-size: 14px;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .content-section {
@@ -331,7 +358,8 @@ p {
 }
 
 .feature-card-grid,
-.channel-grid {
+.channel-grid,
+.install-grid {
   display: grid;
   gap: 12px;
 }
@@ -344,8 +372,13 @@ p {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.install-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .feature-card,
-.channel-card {
+.channel-card,
+.install-card {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -357,12 +390,14 @@ p {
 }
 
 .feature-card strong,
-.channel-card strong {
+.channel-card strong,
+.install-card strong {
   font-size: 17px;
 }
 
 .feature-card p,
-.channel-card p {
+.channel-card p,
+.install-card p {
   margin-bottom: 0;
 }
 
@@ -484,7 +519,7 @@ p {
 .auth-dialog {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 35;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -812,10 +847,22 @@ textarea:focus {
   font-weight: 900;
 }
 
-.summary-card .status-badge.connected {
+.status-badge.connected {
   color: var(--green);
   border-color: #b9dfc9;
   background: #effaf4;
+}
+
+.status-badge.neutral {
+  color: var(--muted);
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.status-badge.warning {
+  color: #8a5a00;
+  border-color: #f1d28b;
+  background: #fff7df;
 }
 
 .guide-panel {
@@ -861,6 +908,15 @@ textarea:focus {
 .guide-step:hover {
   border-color: var(--blue);
   background: #f1f8ff;
+}
+
+.static-step {
+  cursor: default;
+}
+
+.static-step:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
 }
 
 .guide-step strong {
@@ -1222,6 +1278,39 @@ textarea:focus {
   padding: 14px;
 }
 
+.triage-answer {
+  display: grid;
+  gap: 10px;
+}
+
+.triage-answer-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.triage-answer-card h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.triage-answer-card p {
+  margin: 0;
+  color: #34425a;
+}
+
+.result-box.danger .triage-answer-card {
+  border-color: #f2b8b5;
+  background: #fffafa;
+}
+
+.triage-result-actions {
+  margin-top: 12px;
+}
+
 .result-box pre {
   margin: 0;
   white-space: pre-wrap;
@@ -1294,7 +1383,7 @@ textarea:focus {
 .legal-modal {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 50;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -1373,7 +1462,7 @@ textarea:focus {
   left: 16px;
   right: 16px;
   bottom: 16px;
-  z-index: 25;
+  z-index: 20;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
@@ -1496,7 +1585,11 @@ textarea:focus {
   color: var(--green);
 }
 
-.admin-status.warn strong {
+.admin-status.off strong {
+  color: #8a5a00;
+}
+
+.admin-status.error strong {
   color: #b42318;
 }
 
@@ -1568,6 +1661,39 @@ textarea:focus {
 
 .admin-table tr:last-child td {
   border-bottom: 0;
+}
+
+@media (min-width: 1120px) {
+  .product-hero {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  }
+
+  .hero-copy {
+    text-align: left;
+    max-width: none;
+  }
+
+  .hero-media {
+    max-width: none;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .product-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-copy {
+    text-align: center;
+  }
+
+  .hero-actions {
+    justify-content: center;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1646,6 +1772,7 @@ textarea:focus {
   .service-flow,
   .pricing-grid,
   .channel-grid,
+  .install-grid,
   .auth-grid,
   .summary-grid,
   .admin-summary,
@@ -1671,7 +1798,8 @@ textarea:focus {
 
   .feature-card,
   .pricing-card,
-  .channel-card {
+  .channel-card,
+  .install-card {
     min-height: auto;
   }
 

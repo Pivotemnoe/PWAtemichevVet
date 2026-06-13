@@ -32,6 +32,7 @@ Endpoint показывает:
 - доступность SQLite;
 - настроены ли email, Telegram/MAX login, YooKassa, LLM и Core API;
 - количество 5xx, ошибок YooKassa, LLM и sync за 1 час и 24 часа.
+- PWA push-настройки проверяются отдельно через `GET /api/push/config` и отправку закрытым endpoint ниже.
 
 Если `MONITORING_API_SECRET` не задан, endpoint возвращает `503 monitoring_api_not_configured`.
 
@@ -61,6 +62,24 @@ user_id=123
 - `events_1h.payment_errors > 0` после запуска рекламы.
 - `events_1h.llm_errors > 0`, если пользователи жалуются на разборы.
 - `events_1h.sync_errors > 0`, если Telegram/PWA показывают разные данные.
+- `POST /api/internal/push/followups/send` возвращает `sent=0` при наличии подписанных пользователей и ожидаемых follow-up.
+
+## PWA Push Follow-Ups
+
+Проверить публичную конфигурацию:
+
+```bash
+curl -sS https://temichevvet.ru/api/push/config
+```
+
+Отправить накопленные follow-up уведомления:
+
+```bash
+curl -sS -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=50" \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET"
+```
+
+Endpoint не раскрывает медицинские тексты в audit-журнал. В журнал попадает только служебный итог: сколько follow-up найдено, отправлено и пропущено.
 
 ## Server Logs
 

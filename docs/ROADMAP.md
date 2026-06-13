@@ -57,8 +57,8 @@
 ## P2: Development And Growth
 
 - Keep SQLite for MVP, but prepare PostgreSQL before scaling.
-- Add richer admin UI for `security_audit_events` after the first traffic test.
+- Richer admin UI for `security_audit_events` is in place: the dashboard groups recent warnings/errors and explains them in human-readable language.
 - Add real external uptime provider for `https://temichevvet.ru/api/health`.
 - Add alert rules for 5xx, YooKassa errors, LLM failures and Telegram sync failures.
 - Add more API regression tests as new PWA scenarios move from Telegram into the web app.
-- Do not expose Telegram/MAX sync internals to the user until the linking flow is stable.
+- Show only a simple user-facing sync status: connected channels, last check and a short readable warning. Keep technical Telegram/MAX sync internals in admin logs.

@@ -42,6 +42,15 @@ curl -sS "https://temichevvet.ru/api/admin/security-audit?limit=50" \
   -H "X-Temichevvet-Admin-Secret: $ADMIN_API_SECRET"
 ```
 
+PWA follow-up push:
+
+```bash
+curl -sS -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=50" \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET"
+```
+
+Use a timer every 10-15 minutes after `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are configured in `/opt/temichevvet/pwa/.env`.
+
 ## MAX Webhook
 
 MAX Bot API subscription points to:

@@ -38,6 +38,7 @@ from app.payments.yookassa import (
     payment_status as yookassa_payment_status,
     validate_plus_payment as validate_yookassa_plus_payment,
 )
+from app.push import send_web_push
 from app.security import (
     constant_time_equal,
     expires_in,
@@ -107,6 +108,7 @@ RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = 
     ("payment", {"GET", "POST"}, ("/api/payments",), 60, 3600),
     ("feedback", {"POST"}, ("/api/feedback",), 10, 3600),
     ("triage", {"POST"}, ("/api/triage",), 30, 3600),
+    ("push", {"POST"}, ("/api/push",), 30, 3600),
     ("account_export", {"GET"}, ("/api/account/export",), 5, 3600),
     ("account_deletion", {"POST"}, ("/api/account/deletion-request",), 3, 86400),
     ("account_sessions", {"POST"}, ("/api/account/sessions/revoke-all", "/api/auth/logout"), 20, 3600),
@@ -385,6 +387,20 @@ class DataDeletionRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=500)
 
 
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str = Field(min_length=10, max_length=500)
+    auth: str = Field(min_length=10, max_length=500)
+
+
+class PushSubscribePayload(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=2000)
+    keys: PushSubscriptionKeys
+
+
+class PushUnsubscribePayload(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=2000)
+
+
 class FollowupAnswerPayload(BaseModel):
     answer: str = Field(min_length=2, max_length=20)
 
@@ -578,6 +594,17 @@ def _email_delivery_enabled() -> bool:
         and settings.smtp_password
         and settings.smtp_from_email
     )
+
+
+def _push_delivery_enabled() -> bool:
+    return bool(settings.vapid_public_key and settings.vapid_private_key)
+
+
+def _mask_endpoint(endpoint: str) -> str:
+    text = str(endpoint or "")
+    if len(text) <= 32:
+        return text
+    return f"{text[:18]}…{text[-12:]}"
 
 
 def _parse_iso_dt(value: str | None):
@@ -1275,6 +1302,16 @@ def _admin_dashboard_payload() -> dict[str, Any]:
                 "SELECT COUNT(*) FROM security_audit_events WHERE created_at >= ? AND status = 'error'",
                 (since_24h,),
             ),
+            "security_warnings_24h": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM security_audit_events WHERE created_at >= ? AND status = 'warning'",
+                (since_24h,),
+            ),
+            "security_events_24h": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM security_audit_events WHERE created_at >= ? AND status IN ('warning', 'error')",
+                (since_24h,),
+            ),
             "paid_payments_30d": _admin_scalar(
                 conn,
                 "SELECT COUNT(*) FROM payments WHERE created_at >= ? AND status IN ('succeeded', 'paid')",
@@ -1362,6 +1399,18 @@ def _admin_dashboard_payload() -> dict[str, Any]:
             LIMIT 30
             """,
         )
+        audit_breakdown_24h = _admin_rows(
+            conn,
+            """
+            SELECT event_type, status, COUNT(*) AS count, MAX(created_at) AS last_at
+            FROM security_audit_events
+            WHERE created_at >= ? AND status IN ('warning', 'error')
+            GROUP BY event_type, status
+            ORDER BY count DESC, last_at DESC
+            LIMIT 40
+            """,
+            (since_24h,),
+        )
         recent_audit = db.list_security_audit_events(settings.database_path, limit=80)
 
     return {
@@ -1373,6 +1422,7 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         "recent_users": recent_users,
         "recent_triage": recent_triage,
         "recent_feedback": recent_feedback,
+        "audit_breakdown_24h": audit_breakdown_24h,
         "recent_audit": recent_audit,
     }
 
@@ -2214,6 +2264,94 @@ def me(user: dict = Depends(current_user)) -> dict:
     }
 
 
+@app.get("/api/push/config")
+def push_config() -> dict:
+    enabled = _push_delivery_enabled()
+    return {
+        "enabled": enabled,
+        "public_key": settings.vapid_public_key if enabled else "",
+        "message": (
+            "PWA-уведомления можно подключить в этом браузере."
+            if enabled
+            else "PWA-уведомления готовятся: на сервере ещё не настроены VAPID-ключи."
+        ),
+    }
+
+
+@app.get("/api/push/subscriptions")
+def push_subscriptions(user: dict = Depends(current_user)) -> dict:
+    items = db.list_push_subscriptions(settings.database_path, user_id=int(user["id"]))
+    return {
+        "enabled": _push_delivery_enabled(),
+        "count": len(items),
+        "items": [
+            {
+                "id": int(item["id"]),
+                "endpoint": _mask_endpoint(str(item.get("endpoint") or "")),
+                "user_agent": item.get("user_agent"),
+                "created_at": item.get("created_at"),
+                "updated_at": item.get("updated_at"),
+            }
+            for item in items
+        ],
+    }
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(
+    payload: PushSubscribePayload,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict:
+    if not _push_delivery_enabled():
+        _audit(request, "push.subscribe_failed", user_id=int(user["id"]), status="warning", actor="user", metadata={"reason": "not_configured"})
+        raise HTTPException(status_code=503, detail="push_not_configured")
+    item = db.upsert_push_subscription(
+        settings.database_path,
+        user_id=int(user["id"]),
+        endpoint=payload.endpoint.strip(),
+        p256dh=payload.keys.p256dh.strip(),
+        auth=payload.keys.auth.strip(),
+        user_agent=request.headers.get("user-agent"),
+    )
+    _audit(request, "push.subscribe", user_id=int(user["id"]), status="ok", actor="user", entity_type="push_subscription", entity_id=str(item.get("id") or ""))
+    return {
+        "ok": True,
+        "message": "Уведомления подключены для этого устройства.",
+        "subscription": {
+            "id": int(item["id"]),
+            "endpoint": _mask_endpoint(str(item.get("endpoint") or "")),
+            "updated_at": item.get("updated_at"),
+        },
+    }
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(
+    payload: PushUnsubscribePayload,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict:
+    revoked = db.revoke_push_subscription(
+        settings.database_path,
+        user_id=int(user["id"]),
+        endpoint=payload.endpoint.strip(),
+    )
+    _audit(
+        request,
+        "push.unsubscribe",
+        user_id=int(user["id"]),
+        status="ok" if revoked else "warning",
+        actor="user",
+        metadata={"revoked": revoked},
+    )
+    return {
+        "ok": True,
+        "revoked": revoked,
+        "message": "Уведомления отключены для этого устройства." if revoked else "Активная подписка для этого устройства не найдена.",
+    }
+
+
 @app.post("/api/auth/logout")
 def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> JSONResponse:
     token_hash = hash_value(token, settings.session_secret)
@@ -2704,6 +2842,82 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, request: R
         "retry": "Откройте новый разбор и добавьте свежие симптомы. Это будет отдельная проверка состояния.",
     }
     return {"ok": True, "message": messages[answer]}
+
+
+@app.post("/api/internal/push/followups/send")
+def send_due_followup_pushes(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    _: None = Depends(_require_monitoring_api_secret),
+) -> dict:
+    followups = db.list_due_triage_followups_for_push(settings.database_path, limit=limit)
+    sent = 0
+    failed = 0
+    skipped = 0
+    processed_followups = 0
+    for followup in followups:
+        subscriptions = db.list_push_subscriptions_for_delivery(
+            settings.database_path,
+            user_id=int(followup["user_id"]),
+        )
+        if not subscriptions:
+            skipped += 1
+            continue
+
+        pet_title = "питомцу"
+        if followup.get("pet_name"):
+            pet_title = f"{followup.get('pet_type') or 'питомцу'} {followup.get('pet_name')}"
+        payload = {
+            "title": "TemichevVet: проверьте состояние",
+            "body": f"Вы делали разбор по {pet_title}. Как сейчас самочувствие?",
+            "url": "/",
+        }
+        sent_for_followup = 0
+        last_error = ""
+        for subscription in subscriptions:
+            result = send_web_push(settings, subscription=subscription, payload=payload)
+            if result.get("sent"):
+                sent += 1
+                sent_for_followup += 1
+            else:
+                failed += 1
+                last_error = str(result.get("reason") or "unknown")
+        if sent_for_followup:
+            processed_followups += 1
+            db.mark_triage_followup_push_result(
+                settings.database_path,
+                followup_id=int(followup["id"]),
+                sent=True,
+            )
+        elif last_error:
+            db.mark_triage_followup_push_result(
+                settings.database_path,
+                followup_id=int(followup["id"]),
+                sent=False,
+                error=last_error,
+            )
+
+    _audit(
+        request,
+        "push.followups_send",
+        status="ok" if failed == 0 else "warning",
+        actor="system",
+        metadata={
+            "followups": len(followups),
+            "processed_followups": processed_followups,
+            "sent": sent,
+            "failed": failed,
+            "skipped": skipped,
+        },
+    )
+    return {
+        "ok": True,
+        "followups": len(followups),
+        "processed_followups": processed_followups,
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+    }
 
 
 @app.post("/api/triage")

@@ -11,6 +11,7 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - Email one-time-code login.
 - Telegram deep-link login bridge to the working bot.
 - MAX deep-link login with webhook and local polling support.
+- Optional PWA push notifications for follow-up reminders after health checks.
 - Personal cabinet: pets, pet cards, history, observations, weight, reminders, food checks, feedback.
 - SQLite schema for web users, auth challenges, sessions, external account links, pets, reminders, history, and observations.
 - Production deployment notes for VPS + nginx.
@@ -89,6 +90,27 @@ For local development without a public HTTPS webhook, run polling in a second te
 
 Production uses `POST /api/webhooks/max` behind HTTPS and requires `MAX_WEBHOOK_SECRET`.
 
+## PWA Push Follow-Ups
+
+PWA can show browser notifications after a health check, similar to Telegram follow-up reminders. Push delivery is disabled until VAPID keys are configured:
+
+```text
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:support@temichevvet.ru
+```
+
+Users enable notifications in `Способы входа`. On iPhone this normally works after the site is added to the Home Screen as a PWA.
+
+Delivery is started by a closed internal endpoint:
+
+```bash
+curl -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=50" \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET"
+```
+
+Run it from cron or a systemd timer. If VAPID keys are absent, the user interface explains that notifications are still being prepared and regular app logic continues to work.
+
 ## GitHub
 
 Repository:
@@ -113,8 +135,7 @@ git push -u origin main
 
 ## Next Steps
 
-1. Add SMTP provider for production email login.
-2. Move Plus/YooKassa payment flow from Telegram bot into PWA with server-side validation.
-3. Finish web payment activation so a Plus purchase inside PWA also mirrors to the linked Telegram account.
-4. Add backups and monitoring for the PWA SQLite database.
-5. Prepare PostgreSQL migration before active growth.
+1. Generate and configure VAPID keys for PWA push notifications.
+2. Add the push follow-up sender to cron or a systemd timer.
+3. Add backups and monitoring for the PWA SQLite database.
+4. Prepare PostgreSQL migration before active growth.

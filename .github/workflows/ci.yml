@@ -37,4 +37,5 @@ jobs:
       - name: Frontend syntax checks
         run: |
           node --check web/app.js
+          node --check web/sw.js
           python -m json.tool web/manifest.webmanifest >/dev/null

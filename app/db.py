@@ -379,6 +379,31 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_followups_user ON triage_followups(user_id, status, scheduled_at)")
+        _ensure_column(cur, "triage_followups", "push_notified_at", "TEXT")
+        _ensure_column(cur, "triage_followups", "push_last_error", "TEXT")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                user_agent TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                revoked_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+            ON push_subscriptions(user_id, revoked_at)
+            """
+        )
 
         cur.execute(
             """
@@ -584,6 +609,141 @@ def count_security_audit_events_since(
             tuple(params),
         ).fetchone()
         return int((row or (0,))[0] or 0)
+
+
+def upsert_push_subscription(
+    db_path: Path,
+    *,
+    user_id: int,
+    endpoint: str,
+    p256dh: str,
+    auth: str,
+    user_agent: str | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO push_subscriptions (
+                user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at, revoked_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                user_id = excluded.user_id,
+                p256dh = excluded.p256dh,
+                auth = excluded.auth,
+                user_agent = excluded.user_agent,
+                updated_at = excluded.updated_at,
+                revoked_at = NULL
+            """,
+            (
+                int(user_id),
+                endpoint[:2000],
+                p256dh[:500],
+                auth[:500],
+                user_agent[:500] if user_agent else None,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM push_subscriptions WHERE endpoint = ?", (endpoint[:2000],)).fetchone()
+    item = row_to_dict(row)
+    if not item:
+        raise RuntimeError("push_subscription_not_created")
+    return item
+
+
+def revoke_push_subscription(db_path: Path, *, user_id: int, endpoint: str) -> bool:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        cur = conn.execute(
+            """
+            UPDATE push_subscriptions
+            SET revoked_at = ?, updated_at = ?
+            WHERE user_id = ? AND endpoint = ? AND revoked_at IS NULL
+            """,
+            (now, now, int(user_id), endpoint[:2000]),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
+
+
+def list_push_subscriptions(db_path: Path, *, user_id: int) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, endpoint, user_agent, created_at, updated_at
+            FROM push_subscriptions
+            WHERE user_id = ? AND revoked_at IS NULL
+            ORDER BY updated_at DESC
+            """,
+            (int(user_id),),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def list_push_subscriptions_for_delivery(db_path: Path, *, user_id: int) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at
+            FROM push_subscriptions
+            WHERE user_id = ? AND revoked_at IS NULL
+            ORDER BY updated_at DESC
+            """,
+            (int(user_id),),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def list_due_triage_followups_for_push(db_path: Path, *, limit: int = 50) -> list[dict[str, Any]]:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT f.*, p.pet_name, p.pet_type
+            FROM triage_followups f
+            LEFT JOIN pets p ON p.id = f.pet_id
+            WHERE f.status = 'scheduled'
+              AND f.scheduled_at <= ?
+              AND f.push_notified_at IS NULL
+            ORDER BY f.scheduled_at ASC, f.id ASC
+            LIMIT ?
+            """,
+            (now, int(limit)),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def mark_triage_followup_push_result(
+    db_path: Path,
+    *,
+    followup_id: int,
+    sent: bool,
+    error: str | None = None,
+) -> None:
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        if sent:
+            conn.execute(
+                """
+                UPDATE triage_followups
+                SET push_notified_at = ?, push_last_error = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (now, now, int(followup_id)),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE triage_followups
+                SET push_last_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ((error or "unknown")[:240], now, int(followup_id)),
+            )
+        conn.commit()
 
 
 def _payment_public(row: sqlite3.Row | None) -> dict[str, Any] | None:

@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1476d4" />
     <title>TemichevVet</title>
-    <link rel="manifest" href="/static/manifest.webmanifest" />
-    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260612-review-login-1" type="image/png" sizes="192x192" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260612-review-login-1" />
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260612-review-login-1" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260611-ui-audit-1" />
+    <link rel="manifest" href="/static/manifest.webmanifest?v=20260613-sw-network-1" />
+    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260613-sw-network-1" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260613-sw-network-1" />
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260613-sw-network-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260613-sw-network-1" />
   </head>
   <body>
     <div class="app-shell">
@@ -40,17 +40,18 @@
               <p class="section-label">Сервис для владельцев собак и кошек</p>
               <h1>TemichevVet — быстрый помощник, когда питомцу плохо</h1>
               <p class="lead">
-                Опишите симптомы питомца простыми словами — сервис поможет оценить срочность
-                ситуации, сохранить проверку в истории и понять, что делать дальше.
+                Опишите симптомы питомца простыми словами. Сервис поможет понять срочность,
+                сохранить проверку в истории и подготовиться к разговору с ветеринарным врачом.
               </p>
               <div class="hero-actions">
                 <button class="primary-link" id="openAuthBtn" type="button">Проверить симптомы</button>
                 <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-версию</a>
+                <a class="secondary-link" href="#installTitle">Как установить приложение</a>
               </div>
               <div class="trust-row" aria-label="Ключевые преимущества сервиса">
-                <span>25 лет ветеринарного опыта в основе логики</span>
+                <span>25+ лет ветеринарной практики</span>
+                <span>Константин Темичев, канд. вет. наук</span>
                 <span>Для собак и кошек</span>
-                <span>Сайт, PWA, Telegram и MAX</span>
               </div>
               <p class="care-note">
                 Важно: TemichevVet не ставит диагноз и не назначает лечение. Он помогает быстрее
@@ -58,7 +59,7 @@
               </p>
             </div>
             <div class="hero-media">
-              <img src="/static/assets/triage_banner.jpg" alt="Проверка срочности состояния питомца" />
+              <img src="/static/assets/hero_pets.jpg" alt="TemichevVet для собак и кошек" />
             </div>
           </div>
 
@@ -68,10 +69,12 @@
               <h2 id="serviceSummaryTitle">Личный кабинет здоровья питомца и быстрые проверки в одном месте</h2>
             </div>
             <p>
-              TemichevVet помогает владельцу не теряться, когда с собакой или кошкой что-то происходит:
-              фиксирует симптомы, показывает уровень срочности, сохраняет историю по каждому питомцу
-              и напоминает о важных процедурах. Логика сервиса собрана на базе практического
-              ветеринарного опыта и адаптирована под понятный язык владельца.
+              TemichevVet помогает владельцу не теряться, когда с собакой или кошкой что-то
+              происходит. В основе логики сервиса — практический ветеринарный опыт Темичева
+              Константина Валерьевича: кандидата ветеринарных наук, автора клинических методик
+              и руководителя ветеринарных клиник TemichevVet. Сервис не заменяет врача, но
+              помогает быстрее понять, когда можно наблюдать, когда нужна консультация, а когда
+              нельзя откладывать визит в клинику.
             </p>
           </section>
 
@@ -186,6 +189,28 @@
             </div>
           </section>
 
+          <section class="content-section install-section" id="installApp" aria-labelledby="installTitle">
+            <div class="section-head">
+              <p class="section-label">Как пользоваться как приложением</p>
+              <h2 id="installTitle">TemichevVet можно открыть как обычный сайт или установить на экран</h2>
+              <p>Установка не обязательна, но так сервис будет под рукой рядом с другими приложениями. Аккаунт остаётся тем же: сайт, PWA, Telegram и MAX связаны через один личный кабинет.</p>
+            </div>
+            <div class="install-grid">
+              <article class="install-card">
+                <strong>iPhone / Safari</strong>
+                <p>Откройте temichevvet.ru, нажмите «Поделиться», выберите «На экран Домой» и подтвердите добавление.</p>
+              </article>
+              <article class="install-card">
+                <strong>Android / Chrome</strong>
+                <p>Откройте сайт, нажмите меню браузера и выберите «Установить приложение» или «Добавить на главный экран».</p>
+              </article>
+              <article class="install-card">
+                <strong>Ноутбук или компьютер</strong>
+                <p>В Chrome или Edge нажмите значок установки в адресной строке. Если значка нет, сервис всё равно работает как сайт.</p>
+              </article>
+            </div>
+          </section>
+
           <section class="content-section safety-section" aria-labelledby="safetyTitle">
             <div>
               <p class="section-label">Медицинская безопасность</p>
@@ -234,7 +259,7 @@
                       <span>Код</span>
                       <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
                     </label>
-                    <button class="secondary-button" id="verifyCodeBtn" type="button">Войти</button>
+                    <button class="secondary-button" id="verifyCodeBtn" type="submit">Войти</button>
                   </div>
                   <p class="hint" id="emailHint">Код действует 10 минут.</p>
                 </form>
@@ -256,44 +281,64 @@
           </div>
         </section>
 
-        <section class="dashboard-view" id="dashboardView" hidden>
-          <div class="dashboard-head">
-            <div>
-              <p class="section-label">Личный кабинет</p>
-              <h1>Выберите действие</h1>
+        <template id="dashboardTemplate">
+          <section class="dashboard-view" id="dashboardView" hidden>
+            <div class="dashboard-head">
+              <div>
+                <p class="section-label">Личный кабинет</p>
+                <h1>Выберите действие</h1>
+              </div>
+              <button class="secondary-button" id="logoutBtn" type="button">Выйти</button>
             </div>
-            <button class="secondary-button" id="logoutBtn" type="button">Выйти</button>
-          </div>
 
-          <div class="action-grid">
-            <button class="action-tile" data-action="triage" type="button">
-              <span class="tile-icon">🩺</span>
-              <span>Проверить симптомы</span>
-            </button>
-            <button class="action-tile" data-action="pets" type="button">
-              <span class="tile-icon">🐾</span>
-              <span>Мои питомцы</span>
-            </button>
-            <button class="action-tile" data-action="reminders" type="button">
-              <span class="tile-icon">⏰</span>
-              <span>Напоминания</span>
-            </button>
-            <button class="action-tile" data-action="history" type="button">
-              <span class="tile-icon">📜</span>
-              <span>История здоровья</span>
-            </button>
-          </div>
-          <div class="secondary-menu-row">
-            <button class="secondary-button" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
-          </div>
+            <div class="action-grid">
+              <button class="action-tile" data-action="triage" type="button">
+                <span class="tile-icon">🩺</span>
+                <span>Проверить симптомы</span>
+              </button>
+              <button class="action-tile" data-action="pets" type="button">
+                <span class="tile-icon">🐾</span>
+                <span>Мои питомцы</span>
+              </button>
+              <button class="action-tile" data-action="reminders" type="button">
+                <span class="tile-icon">⏰</span>
+                <span>Напоминания</span>
+              </button>
+              <button class="action-tile" data-action="history" type="button">
+                <span class="tile-icon">📜</span>
+                <span>История здоровья</span>
+              </button>
+              <button class="action-tile" data-action="food" type="button">
+                <span class="tile-icon">🍽️</span>
+                <span>Питание</span>
+              </button>
+              <button class="action-tile" data-action="care" type="button">
+                <span class="tile-icon">🧴</span>
+                <span>Уход и привычки</span>
+              </button>
+              <button class="action-tile" data-action="faq" type="button">
+                <span class="tile-icon">❓</span>
+                <span>Вопросы и ответы</span>
+              </button>
+              <button class="action-tile" data-action="subscription" type="button">
+                <span class="tile-icon">💳</span>
+                <span>Подписка</span>
+              </button>
+            </div>
+            <div class="secondary-menu-row">
+              <button class="secondary-button" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
+            </div>
 
-          <div class="workspace" id="workspace">
-            <h2>Личный кабинет готов</h2>
-            <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
-          </div>
-        </section>
+            <div class="workspace" id="workspace">
+              <h2>Личный кабинет готов</h2>
+              <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
+            </div>
+          </section>
+        </template>
 
-        <section class="admin-view" id="adminView" hidden></section>
+        <template id="adminTemplate">
+          <section class="admin-view" id="adminView" hidden></section>
+        </template>
       </main>
 
       <footer class="legal-footer">
@@ -338,6 +383,6 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260612-review-login-1" type="module"></script>
+    <script src="/static/app.js?v=20260613-sw-network-1" type="module"></script>
   </body>
 </html>

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import timedelta
 from pathlib import Path
 
 
@@ -91,6 +92,16 @@ class ApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(audit_items), 1)
         self.assertEqual(audit_items[0]["provider"], "email")
 
+    def test_me_includes_sync_status_for_cabinet(self) -> None:
+        user, _ = login("sync-status@example.com")
+        profile = api.me(user=user)
+
+        self.assertIn("telegram_profile_sync", profile)
+        self.assertEqual(profile["telegram_profile_sync"]["synced"], False)
+        self.assertEqual(profile["telegram_profile_sync"]["reason"], "test_disabled")
+        self.assertIn("external_accounts", profile)
+        self.assertIn("subscription", profile)
+
     def test_pet_and_reminder_ownership(self) -> None:
         user_a, _ = login("pet-owner-a@example.com")
         user_b, _ = login("pet-owner-b@example.com")
@@ -164,13 +175,111 @@ class ApiTests(unittest.TestCase):
         events = db.list_security_audit_events(api.settings.database_path, event_type="payment.succeeded")
         self.assertGreaterEqual(len(events), 1)
 
+    def test_payment_status_owner_only(self) -> None:
+        user_a, _ = login("payment-owner-a@example.com")
+        user_b, _ = login("payment-owner-b@example.com")
+        db.create_payment_record(
+            api.settings.database_path,
+            user_id=int(user_a["id"]),
+            provider=api.YOOKASSA_PROVIDER,
+            provider_payment_id="pay_private_owner_a",
+            amount_rub=200,
+            status="pending",
+            plan_code="plus",
+            confirmation_url="https://yookassa.test/pay/private-owner-a",
+            idempotence_key="payment-owner-a",
+            raw_payload={"id": "pay_private_owner_a"},
+        )
+
+        with self.assertRaises(HTTPException) as payment_exc:
+            api.payment_status("pay_private_owner_a", user=user_b)
+        self.assertEqual(payment_exc.exception.status_code, 404)
+
+        denied = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="payment.ownership_denied",
+            status="warning",
+        )
+        self.assertGreaterEqual(len(denied), 1)
+
     def test_closed_monitoring_and_audit_helpers(self) -> None:
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="payment.ownership_denied",
+            status="warning",
+            actor="test",
+            provider="yookassa",
+        )
+
         status = api.monitoring_status()
         self.assertEqual(status["ok"], True)
         self.assertIn("events_1h", status)
 
         audit = api.admin_security_audit(limit=10)
         self.assertIn("items", audit)
+
+        dashboard = api._admin_dashboard_payload()
+        self.assertGreaterEqual(dashboard["overview"]["security_warnings_24h"], 1)
+        self.assertGreaterEqual(dashboard["overview"]["security_events_24h"], 1)
+        breakdown = dashboard["audit_breakdown_24h"]
+        self.assertTrue(
+            any(
+                row["event_type"] == "payment.ownership_denied"
+                and row["status"] == "warning"
+                and row["count"] >= 1
+                for row in breakdown
+            )
+        )
+
+    def test_push_config_and_subscribe_guard(self) -> None:
+        user, _ = login("push-owner@example.com")
+        config = api.push_config()
+        self.assertEqual(config["enabled"], False)
+        self.assertEqual(config["public_key"], "")
+
+        with self.assertRaises(HTTPException) as push_exc:
+            api.push_subscribe(
+                api.PushSubscribePayload(
+                    endpoint="https://push.example.test/subscription/1",
+                    keys=api.PushSubscriptionKeys(p256dh="p" * 88, auth="a" * 24),
+                ),
+                request("/api/push/subscribe"),
+                user=user,
+            )
+        self.assertEqual(push_exc.exception.status_code, 503)
+
+        events = db.list_security_audit_events(api.settings.database_path, event_type="push.subscribe_failed")
+        self.assertGreaterEqual(len(events), 1)
+
+    def test_due_followup_push_sender_skips_without_subscription(self) -> None:
+        user, _ = login("push-followup-owner@example.com")
+        triage = db.create_triage_log(
+            api.settings.database_path,
+            owner_id=int(user["id"]),
+            pet_id=None,
+            complaint_text="тестовый разбор",
+            response_text="тестовый ответ",
+            urgency_level="yellow",
+        )
+        self.assertIsNotNone(triage)
+        followup = db.add_triage_followup(
+            api.settings.database_path,
+            owner_id=int(user["id"]),
+            triage_id=int(triage["id"]),
+            pet_id=None,
+            urgency_level="yellow",
+            scenario="basic",
+            scheduled_at=(api.utc_now() - timedelta(minutes=1)).isoformat(),
+        )
+        self.assertIsNotNone(followup)
+
+        result = api.send_due_followup_pushes(
+            request("/api/internal/push/followups/send"),
+            limit=10,
+            _=None,
+        )
+        self.assertEqual(result["sent"], 0)
+        self.assertGreaterEqual(result["skipped"], 1)
 
 
 if __name__ == "__main__":

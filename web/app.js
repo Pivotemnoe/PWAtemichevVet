@@ -9,11 +9,14 @@ const state = {
   telegramPollTimer: null,
   maxPollTimer: null,
   lastPlusPaymentId: localStorage.getItem("tvv_last_plus_payment_id") || "",
+  pushConfig: null,
   user: null,
   externalAccounts: [],
   subscription: null,
   pets: [],
-  currentPetId: null
+  currentPetId: null,
+  telegramProfileSync: null,
+  lastSyncCheckAt: ""
 };
 
 const LEGAL_UPDATED_AT = "5 июня 2026";
@@ -21,10 +24,17 @@ const OPERATOR_EMAIL = "support@temichevvet.ru";
 const METRIKA_ID = 109726654;
 let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
+const startupAction = (() => {
+  const action = new URLSearchParams(window.location.search).get("action") || "";
+  return ["triage", "pets", "reminders"].includes(action) ? action : "";
+})();
 
 const authView = document.querySelector("#authView");
-const dashboardView = document.querySelector("#dashboardView");
-const adminView = document.querySelector("#adminView");
+const mainView = document.querySelector("main");
+const dashboardTemplate = document.querySelector("#dashboardTemplate");
+const adminTemplate = document.querySelector("#adminTemplate");
+let dashboardView = document.querySelector("#dashboardView");
+let adminView = document.querySelector("#adminView");
 let adminLoginPanel = null;
 let adminDashboardPanel = null;
 let adminLoginForm = null;
@@ -52,9 +62,9 @@ const emailHint = document.querySelector("#emailHint");
 const messengerHint = document.querySelector("#messengerHint");
 const telegramBtn = document.querySelector("#telegramBtn");
 const maxBtn = document.querySelector("#maxBtn");
-const logoutBtn = document.querySelector("#logoutBtn");
+let logoutBtn = document.querySelector("#logoutBtn");
 const installBtn = document.querySelector("#installBtn");
-const workspace = document.querySelector("#workspace");
+let workspace = document.querySelector("#workspace");
 const privacyConsent = document.querySelector("#privacyConsent");
 const legalModal = document.querySelector("#legalModal");
 const legalModalTitle = document.querySelector("#legalModalTitle");
@@ -92,16 +102,50 @@ const periodicityOptions = [
   ["yearly", "Раз в год"]
 ];
 
+function ensureDashboardView() {
+  if (dashboardView && document.body.contains(dashboardView)) return dashboardView;
+  const dashboardNode = dashboardTemplate?.content?.firstElementChild?.cloneNode(true);
+  if (!dashboardNode || !mainView) return null;
+  mainView.append(dashboardNode);
+  dashboardView = document.querySelector("#dashboardView");
+  logoutBtn = document.querySelector("#logoutBtn");
+  workspace = document.querySelector("#workspace");
+  logoutBtn?.addEventListener("click", performLogout);
+  return dashboardView;
+}
+
+function removeDashboardView() {
+  if (dashboardView && document.body.contains(dashboardView)) dashboardView.remove();
+  dashboardView = null;
+  logoutBtn = null;
+  workspace = null;
+}
+
+function ensureAdminView() {
+  if (adminView && document.body.contains(adminView)) return adminView;
+  const adminNode = adminTemplate?.content?.firstElementChild?.cloneNode(true);
+  if (!adminNode || !mainView) return null;
+  mainView.append(adminNode);
+  adminView = document.querySelector("#adminView");
+  adminMarkupReady = false;
+  return adminView;
+}
+
 function setAuthMode(isAuthed) {
+  if (isAuthed) {
+    ensureDashboardView();
+  }
   authView.hidden = isAuthed;
-  dashboardView.hidden = !isAuthed;
+  if (dashboardView) dashboardView.hidden = !isAuthed;
   if (adminView) adminView.hidden = true;
   document.body.classList.toggle("is-authed", Boolean(isAuthed));
   document.body.classList.remove("is-admin");
   if (isAuthed) closeAuthDialog();
+  if (!isAuthed) removeDashboardView();
 }
 
 function setAdminMode(isAuthed) {
+  ensureAdminView();
   ensureAdminMarkup();
   if (authView) authView.hidden = true;
   if (dashboardView) dashboardView.hidden = true;
@@ -121,6 +165,24 @@ function closeAuthDialog() {
   if (authDialog) authDialog.hidden = true;
 }
 
+async function performLogout() {
+  if (state.token) {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Local logout still needs to happen even if the session is already expired.
+    }
+  }
+  stopTelegramPolling();
+  clearTelegramLogin();
+  stopMaxPolling();
+  clearMaxLogin();
+  localStorage.removeItem("tvv_token");
+  state.token = "";
+  clearAccountState();
+  setAuthMode(false);
+}
+
 function readableError(message) {
   const text = String(message || "");
   const messages = {
@@ -136,6 +198,9 @@ function readableError(message) {
     payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
     payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
     payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку.",
+    push_not_configured: "PWA-уведомления ещё не настроены на сервере.",
+    push_unsupported: "Этот браузер не поддерживает PWA-уведомления.",
+    push_permission_denied: "Браузер не дал разрешение на уведомления.",
     rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
     invalid_deletion_confirmation: "Для запроса удаления нужно ввести слово УДАЛИТЬ."
   };
@@ -422,7 +487,7 @@ function setCookieConsent(value) {
   localStorage.setItem("tvv_cookie_consent", JSON.stringify({
     value,
     accepted_at: new Date().toISOString(),
-    version: "20260608-admin-metrika-1"
+    version: "20260613-sw-network-1"
   }));
   cookieBanner.hidden = true;
   if (value === "all") loadMetrika();
@@ -525,6 +590,8 @@ function observationTypeLabel(value) {
 }
 
 function setWorkspace(html, options = {}) {
+  ensureDashboardView();
+  if (!workspace) return;
   workspace.innerHTML = html;
   if (options.scroll !== false) {
     workspace.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -740,6 +807,147 @@ function adminCell(value) {
   return escapeHtml(value === null || value === undefined || value === "" ? "—" : value);
 }
 
+function adminStatusLabel(status) {
+  const labels = {
+    ok: "OK",
+    warning: "Внимание",
+    error: "Ошибка"
+  };
+  return labels[status] || status || "—";
+}
+
+function adminIntegrationStatusLabel(key, ok) {
+  if (ok) return "Работает";
+  if (key === "database") return "Проблема";
+  return "Не подключено";
+}
+
+function adminIntegrationStatusClass(key, ok) {
+  if (ok) return "ok";
+  if (key === "database") return "error";
+  return "off";
+}
+
+function adminAuditEventInfo(eventType) {
+  const exact = {
+    "access.ownership_denied": {
+      title: "Попытка открыть чужие данные",
+      help: "Система заблокировала доступ к чужому питомцу, напоминанию, платежу или истории."
+    },
+    "admin.login_failed": {
+      title: "Неверный вход в админку",
+      help: "Кто-то ввёл неправильный логин или пароль администратора."
+    },
+    "admin.login_disabled": {
+      title: "Админка не настроена",
+      help: "На сервере нет хэша пароля администратора."
+    },
+    "auth.login_failed": {
+      title: "Неверный код входа",
+      help: "Пользователь ввёл неверный или истёкший одноразовый код."
+    },
+    "auth.email_code_failed": {
+      title: "Код email не создан",
+      help: "Email-вход не настроен или письмо с кодом не удалось отправить."
+    },
+    "auth.email_code_rate_limited": {
+      title: "Слишком много попыток входа",
+      help: "Сработал лимит отправки кодов на email. Это защищает от спама и перебора."
+    },
+    "auth.email_verify_failed": {
+      title: "Неверный email-код",
+      help: "Пользователь ввёл неправильный код, код истёк или превышено число попыток."
+    },
+    "auth.provider_start_failed": {
+      title: "Мессенджер-вход не стартовал",
+      help: "Telegram или MAX не настроен на сервере либо не хватает обязательного секрета."
+    },
+    "account.provider_link_start_failed": {
+      title: "Привязка мессенджера не стартовала",
+      help: "Пользователь хотел подключить Telegram/MAX к кабинету, но интеграция не настроена."
+    },
+    "account.provider_link_blocked": {
+      title: "Привязка заблокирована",
+      help: "Система не дала подключить мессенджер к временной или неподходящей учётной записи."
+    },
+    "auth.email_send_failed": {
+      title: "Email не отправился",
+      help: "SMTP не принял письмо или временно недоступен."
+    },
+    "payment.ownership_denied": {
+      title: "Чужой платёж заблокирован",
+      help: "Пользователь попытался проверить платёж, который принадлежит другому аккаунту."
+    },
+    "payment.create_failed": {
+      title: "Платёж не создан",
+      help: "YooKassa не создала платёж или не настроены платёжные ключи."
+    },
+    "payment.provider_error": {
+      title: "Ошибка YooKassa",
+      help: "Платёжный провайдер вернул ошибку при создании или проверке платежа."
+    },
+    "payment.validation_failed": {
+      title: "Платёж не прошёл проверку",
+      help: "Сумма, валюта, владелец или metadata платежа не совпали с ожидаемыми."
+    },
+    "payment.webhook_unknown": {
+      title: "Webhook по неизвестному платежу",
+      help: "YooKassa прислала событие по платежу, которого нет в локальной базе."
+    },
+    "payment.webhook_failed": {
+      title: "Webhook платежа не обработан",
+      help: "Событие YooKassa пришло, но сервер не смог безопасно подтвердить или активировать оплату."
+    },
+    "llm.error": {
+      title: "Ошибка LLM",
+      help: "Не удалось получить разбор состояния от модели или шлюза."
+    },
+    "sync.error": {
+      title: "Ошибка синхронизации",
+      help: "Не прошёл обмен данными между Telegram-ботом, Core API или PWA."
+    },
+    "push.subscribe_failed": {
+      title: "Push не подключён",
+      help: "Пользователь попытался включить PWA-уведомления, но VAPID ещё не настроен."
+    },
+    "review_login.denied": {
+      title: "Review-ссылка не принята",
+      help: "Временная ссылка аудита недействительна, истекла или относится не к review-аккаунту."
+    }
+  };
+  if (exact[eventType]) return exact[eventType];
+  const prefixRules = [
+    ["auth.", "Вход пользователя", "Событие авторизации: email, Telegram, MAX или сессия."],
+    ["account.", "Аккаунт пользователя", "Привязка входов, выход из сессий, экспорт или запрос удаления данных."],
+    ["admin.", "Админка", "Событие входа, выхода, смены пароля или просмотра админки."],
+    ["payment.", "Оплата", "Событие создания, проверки, ошибки или успешной оплаты."],
+    ["subscription.", "Подписка", "Изменение тарифа или лимитов пользователя."],
+    ["llm.", "LLM-разбор", "Событие проверки симптомов через модель или LLM-шлюз."],
+    ["sync.", "Синхронизация", "Обмен данными между PWA, Telegram-ботом и Core API."],
+    ["push.", "PWA-уведомления", "Подписка, отправка или ошибка push-напоминаний."],
+    ["http.", "API/сервер", "Техническое событие HTTP-запроса или серверной ошибки."]
+  ];
+  const match = prefixRules.find(([prefix]) => String(eventType || "").startsWith(prefix));
+  if (match) return { title: match[1], help: match[2] };
+  return {
+    title: eventType || "Неизвестное событие",
+    help: "Техническое событие. Если повторяется часто, нужно смотреть время, канал и соседние события."
+  };
+}
+
+function renderAuditEventCell(row) {
+  const info = adminAuditEventInfo(row.event_type);
+  return `
+    <strong>${escapeHtml(info.title)}</strong>
+    <small>${escapeHtml(row.event_type || "")}</small>
+  `;
+}
+
+function renderAuditHelpCell(row) {
+  const info = adminAuditEventInfo(row.event_type);
+  return escapeHtml(info.help);
+}
+
 function renderAdminMetric(label, value, hint = "") {
   return `
     <div class="summary-card admin-metric">
@@ -781,11 +989,11 @@ function renderAdminDashboard(data, system = null) {
   const statusItems = [
     ["database", "База", system?.checks?.database?.ok],
     ["email_configured", "Email", checks.email_configured],
-    ["telegram_login_configured", "Telegram login", checks.telegram_login_configured],
-    ["max_login_configured", "MAX login", checks.max_login_configured],
+    ["telegram_login_configured", "Telegram-вход", checks.telegram_login_configured],
+    ["max_login_configured", "MAX-вход", checks.max_login_configured],
     ["yookassa_configured", "YooKassa", checks.yookassa_configured],
-    ["llm_configured", "LLM", checks.llm_configured],
-    ["core_api_configured", "Core API", checks.core_api_configured]
+    ["llm_configured", "LLM-разбор", checks.llm_configured],
+    ["core_api_configured", "Core API синхронизации", checks.core_api_configured]
   ];
   adminContent.innerHTML = `
     <div class="admin-generated">Обновлено: ${formatDateTime(data.generated_at)}</div>
@@ -797,15 +1005,15 @@ function renderAdminDashboard(data, system = null) {
       ${renderAdminMetric("Проверок за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
-      ${renderAdminMetric("Событий с ошибкой 24ч", overview.security_errors_24h, "Счётчик журнала: технические сбои, ошибки входа и защиты доступа.")}
+      ${renderAdminMetric("Событий защиты 24ч", overview.security_events_24h, `${overview.security_warnings_24h || 0} предупреждений / ${overview.security_errors_24h || 0} ошибок`)}
     </div>
     <section class="admin-section">
       <h2>Системный статус</h2>
-      <p class="admin-explain">Если где-то «Нет», значит сервис не видит нужную настройку на сервере или интеграция временно недоступна. Это влияет только на указанную функцию.</p>
+      <p class="admin-explain">Статусы ниже показывают, какие интеграции подключены именно на этом сервере. «Не подключено» не означает взлом или потерю данных: функция просто не будет доступна, пока не добавлены нужные ключи или секреты. Критично только если «Проблема» у базы.</p>
       <div class="admin-status-grid">
         ${statusItems.map(([key, label, ok]) => `
-          <div class="admin-status ${ok ? "ok" : "warn"}">
-            <strong>${ok ? "OK" : "Нет"}</strong>
+          <div class="admin-status ${adminIntegrationStatusClass(key, ok)}">
+            <strong>${adminIntegrationStatusLabel(key, ok)}</strong>
             <span>${escapeHtml(label)}</span>
             <small>${escapeHtml(statusHelp[key] || "")}</small>
           </div>
@@ -823,6 +1031,13 @@ function renderAdminDashboard(data, system = null) {
         ${renderAdminMetric("Синхронизация за 24ч", events24h.sync_errors ?? "—", "Сбои обмена данными между Telegram-ботом и PWA.")}
       </div>
     </section>
+    ${renderAdminTable("Что произошло за последние 24 часа", data.audit_breakdown_24h || [], [
+      { key: "event_type", label: "Событие", render: renderAuditEventCell },
+      { key: "status", label: "Уровень", render: (row) => adminCell(adminStatusLabel(row.status)) },
+      { key: "count", label: "Сколько раз" },
+      { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
+      { key: "help", label: "Что это значит", render: renderAuditHelpCell }
+    ], "За последние 24 часа предупреждений и ошибок не было.")}
     ${renderAdminTable("Платежи по статусам", data.payments_by_status || [], [
       { key: "status", label: "Статус" },
       { key: "count", label: "Кол-во" },
@@ -865,8 +1080,9 @@ function renderAdminDashboard(data, system = null) {
     ])}
     ${renderAdminTable("Журнал безопасности", data.recent_audit || [], [
       { key: "id", label: "ID" },
-      { key: "event_type", label: "Событие" },
-      { key: "status", label: "Статус" },
+      { key: "event_type", label: "Событие", render: renderAuditEventCell },
+      { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
+      { key: "help", label: "Пояснение", render: renderAuditHelpCell },
       { key: "actor", label: "Кто" },
       { key: "user_id", label: "User" },
       { key: "provider", label: "Канал" },
@@ -901,6 +1117,48 @@ async function bootstrapAdmin() {
   }
 }
 
+function clearStartupAction() {
+  if (!startupAction) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("action");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function renderStartupView() {
+  if (startupAction === "triage") {
+    await renderTriage();
+    clearStartupAction();
+    return;
+  }
+  if (startupAction === "pets") {
+    await renderPets();
+    clearStartupAction();
+    return;
+  }
+  if (startupAction === "reminders") {
+    await renderReminders();
+    clearStartupAction();
+    return;
+  }
+  await renderHome();
+}
+
+function applyAccountState(data) {
+  state.user = data.user || null;
+  state.externalAccounts = data.external_accounts || [];
+  state.subscription = data.subscription || null;
+  state.telegramProfileSync = data.telegram_profile_sync || null;
+  state.lastSyncCheckAt = new Date().toISOString();
+}
+
+function clearAccountState() {
+  state.user = null;
+  state.externalAccounts = [];
+  state.subscription = null;
+  state.telegramProfileSync = null;
+  state.lastSyncCheckAt = "";
+}
+
 async function bootstrap() {
   if (isAdminRoute) {
     await bootstrapAdmin();
@@ -910,21 +1168,17 @@ async function bootstrap() {
   if (!state.token) {
     try {
       const data = await api("/api/me");
-      state.user = data.user;
-      state.externalAccounts = data.external_accounts || [];
-      state.subscription = data.subscription || null;
+      applyAccountState(data);
       setAuthMode(true);
       if (shouldCheckPayment) {
         renderSubscription(`<div class="notice">Вернулись с оплаты. Проверяю статус платежа...</div>`);
         await checkPlusPaymentStatus({ replaceHistory: true });
         return;
       }
-      await renderHome();
+      await renderStartupView();
       return;
     } catch {
-      state.user = null;
-      state.externalAccounts = [];
-      state.subscription = null;
+      clearAccountState();
     }
     setAuthMode(false);
     if (state.telegramLoginState) {
@@ -941,22 +1195,18 @@ async function bootstrap() {
   }
   try {
     const data = await api("/api/me");
-    state.user = data.user;
-    state.externalAccounts = data.external_accounts || [];
-    state.subscription = data.subscription || null;
+    applyAccountState(data);
     setAuthMode(true);
     if (shouldCheckPayment) {
       renderSubscription(`<div class="notice">Вернулись с оплаты. Проверяю статус платежа...</div>`);
       await checkPlusPaymentStatus({ replaceHistory: true });
       return;
     }
-    await renderHome();
+    await renderStartupView();
   } catch {
     localStorage.removeItem("tvv_token");
     state.token = "";
-    state.user = null;
-    state.externalAccounts = [];
-    state.subscription = null;
+    clearAccountState();
     setAuthMode(false);
     if (state.telegramLoginState) {
       openAuthDialog();
@@ -979,10 +1229,46 @@ async function refreshPets() {
 
 async function refreshAccountState() {
   const data = await api("/api/me");
-  state.user = data.user;
-  state.externalAccounts = data.external_accounts || [];
-  state.subscription = data.subscription || null;
+  applyAccountState(data);
   return data;
+}
+
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output;
+}
+
+async function loadPushConfig(force = false) {
+  if (state.pushConfig && !force) return state.pushConfig;
+  try {
+    state.pushConfig = await api("/api/push/config");
+  } catch {
+    state.pushConfig = {
+      enabled: false,
+      public_key: "",
+      message: "Не удалось получить настройки PWA-уведомлений."
+    };
+  }
+  return state.pushConfig;
+}
+
+async function loadPushStatus() {
+  const config = await loadPushConfig();
+  let status = { enabled: Boolean(config.enabled), count: 0, items: [] };
+  try {
+    status = await api("/api/push/subscriptions");
+  } catch {
+    status = { enabled: Boolean(config.enabled), count: 0, items: [] };
+  }
+  return { config, status };
 }
 
 function petOptions(selectedId = "") {
@@ -1027,7 +1313,7 @@ function renderHomeGuide(hasPets) {
     <section class="guide-panel">
       <div class="guide-copy">
         <p class="section-label">С чего начать</p>
-        <h3>Личный кабинет помогает не терять важные детали</h3>
+        <h3>Это ваш личный кабинет здоровья питомца</h3>
         <p>Выберите ближайший шаг. Все события сохраняются в истории, если привязать их к карточке питомца.</p>
       </div>
       <div class="guide-steps">
@@ -1046,6 +1332,80 @@ function renderHomeGuide(hasPets) {
       </div>
     </section>
   `;
+}
+
+function isStandalonePwa() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function renderPwaInstallGuide() {
+  const installed = isStandalonePwa();
+  return `
+    <section class="guide-panel install-guide-panel">
+      <div class="guide-copy">
+        <p class="section-label">Приложение на экране</p>
+        <h3>${installed ? "TemichevVet открыт как приложение" : "Добавьте TemichevVet на экран телефона"}</h3>
+        <p>${installed
+          ? "Можно пользоваться личным кабинетом как обычным приложением: питомцы, история и напоминания останутся в одном аккаунте."
+          : "На iPhone нажмите «Поделиться» → «На экран Домой». На Android откройте меню браузера → «Установить приложение». Это быстрее, чем каждый раз искать сайт."}</p>
+      </div>
+      <div class="guide-steps">
+        <div class="guide-step static-step">
+          <strong>iPhone</strong>
+          <span>Safari → Поделиться → На экран Домой.</span>
+        </div>
+        <div class="guide-step static-step">
+          <strong>Android</strong>
+          <span>Chrome → меню → Установить приложение.</span>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function parseTriageSections(answer) {
+  const text = String(answer || "").trim();
+  if (!text) return [];
+  const matches = [...text.matchAll(/(?:^|\n)\s*(\d+)[).]\s+([^\n:]+):?/g)];
+  if (matches.length < 2) return [{ title: "Разбор состояния", body: text }];
+  return matches.map((match, index) => {
+    const start = match.index + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    return {
+      title: `${match[1]}. ${match[2].trim()}`,
+      body: text.slice(start, end).trim()
+    };
+  });
+}
+
+function formatTriageAnswer(answer) {
+  const sections = parseTriageSections(answer);
+  return `
+    <div class="triage-answer">
+      ${sections.map((section) => `
+        <article class="triage-answer-card">
+          <h3>${escapeHtml(section.title)}</h3>
+          <p>${nl2br(section.body)}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 const historyEventLabels = {
@@ -1188,8 +1548,8 @@ async function renderHome() {
     <div class="visual-strip">
       <img src="/static/assets/logo_temichevvet.jpg" alt="" class="visual-logo" />
       <div>
-        <h3>Что можно делать сейчас</h3>
-        <p>Карточки питомцев, история здоровья и напоминания доступны с телефона и ноутбука по одной ссылке.</p>
+        <h3>Личный кабинет открыт</h3>
+        <p>Карточки питомцев, история здоровья, питание, FAQ и напоминания доступны с телефона и ноутбука по одной ссылке.</p>
       </div>
     </div>
     <div class="summary-grid">
@@ -1219,11 +1579,15 @@ async function renderHome() {
       </div>
     </div>
     ${renderHomeGuide(Boolean(petCount))}
+    ${renderPwaInstallGuide()}
     <div class="next-actions">
       <button class="primary-button" data-action="triage" type="button">🩺 Проверить симптомы</button>
       <button class="secondary-button" data-action="pets" type="button">🐾 Мои питомцы</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
       <button class="secondary-button" data-action="history" type="button">📜 История здоровья</button>
+      <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
+      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
+      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
     </div>
     <div class="secondary-menu-row inline">
       <button class="secondary-button compact" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
@@ -1261,8 +1625,95 @@ function isProviderConnected(provider) {
   return state.externalAccounts.some((account) => account.provider === provider);
 }
 
+function providerAccount(provider) {
+  return state.externalAccounts.find((account) => account.provider === provider) || null;
+}
+
+function telegramSyncReasonText(reason) {
+  const reasons = {
+    telegram_not_linked: "Telegram ещё не подключён к этому кабинету.",
+    telegram_db_not_configured: "Синхронизация Telegram временно недоступна на сервере.",
+    telegram_user_not_found: "Telegram подключён, но профиль бота пока не найден.",
+    sync_error: "Последняя проверка не завершилась. Обычно помогает открыть раздел ещё раз через минуту."
+  };
+  return reasons[reason] || "Если данные в Telegram и кабинете отличаются, откройте этот раздел ещё раз или напишите в поддержку.";
+}
+
+function renderSyncStatusCard() {
+  const telegram = providerAccount("telegram");
+  const max = providerAccount("max");
+  const sync = state.telegramProfileSync || {};
+  const checkedAt = state.lastSyncCheckAt ? formatDateTime(state.lastSyncCheckAt) : "—";
+  const telegramConnected = Boolean(telegram);
+  const maxConnected = Boolean(max);
+  const syncOk = telegramConnected && sync.synced !== false;
+  const statusLabel = !telegramConnected ? "Telegram не подключён" : syncOk ? "Синхронизация штатная" : "Нужна проверка";
+  const statusClass = !telegramConnected ? "neutral" : syncOk ? "connected" : "warning";
+  const detail = !telegramConnected
+    ? "Подключите Telegram, если хотите видеть питомцев, историю и Plus из Telegram-бота в этом кабинете."
+    : syncOk
+      ? "При открытии кабинета сервис проверяет Telegram-данные и подтягивает доступные питомцы, историю, наблюдения и подписку."
+      : telegramSyncReasonText(sync.reason);
+  const imported = syncOk
+    ? [
+        ["Питомцы", sync.pets_imported, sync.pets_linked],
+        ["Напоминания", sync.reminders_imported],
+        ["История", sync.history_imported],
+        ["Наблюдения", sync.observations_imported],
+        ["Вес", sync.measurements_imported]
+      ]
+        .map(([label, importedCount, linkedCount]) => {
+          const total = Number(importedCount || 0) + Number(linkedCount || 0);
+          return total ? `<span>${label}: ${total}</span>` : "";
+        })
+        .filter(Boolean)
+        .join("")
+    : "";
+  return `
+    <div class="profile-card">
+      <h3>Статус синхронизации</h3>
+      <div class="meta-row">
+        <span>Telegram: ${telegramConnected ? "подключён" : "не подключён"}</span>
+        <span>MAX: ${maxConnected ? "подключён" : "не подключён"}</span>
+        <span>Последняя проверка: ${checkedAt}</span>
+      </div>
+      <p><span class="status-badge ${statusClass}">${statusLabel}</span></p>
+      <p>${escapeHtml(detail)}</p>
+      ${imported ? `<div class="meta-row">${imported}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderPushCard(push) {
+  const supported = pushSupported();
+  const enabled = Boolean(push?.config?.enabled);
+  const count = Number(push?.status?.count || 0);
+  const serverMessage = push?.config?.message || "";
+  let statusText = serverMessage || "PWA-уведомления используются для контрольных напоминаний после разбора.";
+  let button = "";
+  if (!supported) {
+    statusText = "Этот браузер не поддерживает PWA-уведомления. На iPhone используйте Safari и установите сайт на экран «Домой».";
+  } else if (!enabled) {
+    button = `<button class="secondary-button compact" type="button" disabled>Готовится</button>`;
+  } else if (count > 0) {
+    statusText = `Подключено устройств: ${count}. Уведомления помогут напомнить о контрольном вопросе после разбора.`;
+    button = `<button class="secondary-button compact" data-action="disable-push" type="button">Отключить на этом устройстве</button>`;
+  } else {
+    statusText = "Можно включить уведомления на этом устройстве: сервис напомнит проверить состояние питомца после разбора.";
+    button = `<button class="secondary-button compact" data-action="enable-push" type="button">Включить уведомления</button>`;
+  }
+  return `
+    <div class="profile-card">
+      <h3>Уведомления PWA</h3>
+      <p>${escapeHtml(statusText)}</p>
+      ${button ? `<div class="inline-actions">${button}</div>` : ""}
+    </div>
+  `;
+}
+
 async function renderAccountLinks() {
   await refreshAccountState();
+  const push = await loadPushStatus();
   const email = state.user?.email || "";
   const telegramConnected = isProviderConnected("telegram");
   const maxConnected = isProviderConnected("max");
@@ -1294,9 +1745,11 @@ async function renderAccountLinks() {
             : `<button class="secondary-button compact" data-link-provider="max" type="button">Подключить MAX</button>`}
         </div>
     </div>
+    ${renderSyncStatusCard()}
     <div class="care-note">
       Мессенджер нужен только для подтверждения личности. После подтверждения вернитесь сюда: сайт сам завершит привязку.
     </div>
+    ${renderPushCard(push)}
     <div class="profile-card">
       <h3>Безопасность и данные</h3>
       <p>Здесь можно завершить активные входы, скачать данные кабинета или оставить запрос на удаление персональных данных.</p>
@@ -1309,6 +1762,48 @@ async function renderAccountLinks() {
     </div>
     <p class="hint" id="accountLinkHint"></p>
   `);
+}
+
+async function enablePushNotifications() {
+  setAccountLinkHint("Проверяю, поддерживает ли браузер уведомления...");
+  if (!pushSupported()) throw new Error("push_unsupported");
+  const config = await loadPushConfig(true);
+  if (!config.enabled || !config.public_key) throw new Error("push_not_configured");
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") throw new Error("push_permission_denied");
+  const registration = await navigator.serviceWorker.ready;
+  let subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(config.public_key)
+    });
+  }
+  await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(subscription.toJSON())
+  });
+  setAccountLinkHint("Уведомления подключены для этого устройства.");
+  setTimeout(renderAccountLinks, 700);
+}
+
+async function disablePushNotifications() {
+  setAccountLinkHint("Отключаю уведомления на этом устройстве...");
+  if (!pushSupported()) throw new Error("push_unsupported");
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    setAccountLinkHint("В этом браузере активная подписка не найдена.");
+    await renderAccountLinks();
+    return;
+  }
+  await api("/api/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint: subscription.endpoint })
+  });
+  await subscription.unsubscribe().catch(() => false);
+  setAccountLinkHint("Уведомления отключены для этого устройства.");
+  setTimeout(renderAccountLinks, 700);
 }
 
 function setAccountLinkHint(content) {
@@ -1807,14 +2302,14 @@ async function renderTriage(prefillPetId = null) {
       <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка не ест второй день, вялая, была рвота после еды" required></textarea></label>
       <button class="primary-button" type="submit">Оценить срочность</button>
     </form>
+    <div id="triageResult"></div>
     <div class="visual-strip compact-visual">
-      <img src="/static/assets/triage_banner.jpg" alt="" />
+      <img src="/static/assets/hero_pets.jpg" alt="" />
       <div>
         <h3>Как работает проверка</h3>
         <p>Сначала срабатывают опасные признаки. Это помогает не ждать ответ сервиса там, где нужна клиника.</p>
       </div>
     </div>
-    <div id="triageResult"></div>
   `);
   document.querySelector("#triageForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1832,12 +2327,16 @@ async function renderTriage(prefillPetId = null) {
       });
       state.subscription = data.subscription || state.subscription;
       resultEl.innerHTML = `
-        <div class="result-box ${data.urgency === "red" ? "danger" : ""}">
-          <pre>${escapeHtml(data.answer)}</pre>
+        <div class="result-box ${data.urgency === "red" ? "danger" : ""}" data-triage-answer="${escapeHtml(data.answer)}">
+          ${formatTriageAnswer(data.answer)}
+          <div class="inline-actions triage-result-actions">
+            <button class="secondary-button compact" data-copy-triage-result type="button">Скопировать для врача</button>
+          </div>
         </div>
         <div class="care-note">
-          Если в ответе есть пункты, которые нужно уточнить, подготовьте их для врача.
-          Можно также добавить эти данные в новую проверку — это будет отдельная оценка срочности и спишет ещё один запрос.
+          Если в ответе есть уточняющие вопросы, не обязательно отвечать здесь сразу.
+          Подготовьте эти данные для ветеринарного врача или добавьте их в новую проверку, если хотите уточнить состояние.
+          Новая проверка будет отдельной оценкой срочности и спишет ещё один запрос.
           ${data.followup ? "Контроль состояния будет показан в кабинете позже; если Telegram подключён, напоминание также уйдёт туда." : ""}
         </div>
         <div class="next-actions">
@@ -2265,27 +2764,7 @@ async function renderGlobalObservations() {
   await renderPetObservations(state.currentPetId || state.pets[0].id);
 }
 
-emailForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!privacyConsent?.checked) {
-    emailHint.textContent = "Перед входом нужно принять соглашение и согласие на обработку персональных данных.";
-    privacyConsent?.focus();
-    return;
-  }
-  emailHint.textContent = "Отправляю код...";
-  try {
-    const data = await api("/api/auth/email/start", {
-      method: "POST",
-      body: JSON.stringify({ email: emailInput.value })
-    });
-    codeRow.hidden = false;
-    emailHint.textContent = data.debug_code ? `Тестовый код: ${data.debug_code}` : data.message;
-  } catch (error) {
-    emailHint.textContent = readableError(error.message);
-  }
-});
-
-verifyCodeBtn.addEventListener("click", async () => {
+async function verifyEmailCode() {
   emailHint.textContent = "Проверяю код...";
   try {
     const data = await api("/api/auth/email/verify", {
@@ -2297,7 +2776,31 @@ verifyCodeBtn.addEventListener("click", async () => {
     await refreshAccountState();
     setAuthMode(true);
     emailHint.textContent = "";
-    await renderHome();
+    await renderStartupView();
+  } catch (error) {
+    emailHint.textContent = readableError(error.message);
+  }
+}
+
+emailForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!privacyConsent?.checked) {
+    emailHint.textContent = "Перед входом нужно принять соглашение и согласие на обработку персональных данных.";
+    privacyConsent?.focus();
+    return;
+  }
+  if (!codeRow.hidden && codeInput.value.trim()) {
+    await verifyEmailCode();
+    return;
+  }
+  emailHint.textContent = "Отправляю код...";
+  try {
+    const data = await api("/api/auth/email/start", {
+      method: "POST",
+      body: JSON.stringify({ email: emailInput.value })
+    });
+    codeRow.hidden = false;
+    emailHint.textContent = data.debug_code ? `Тестовый код: ${data.debug_code}` : data.message;
   } catch (error) {
     emailHint.textContent = readableError(error.message);
   }
@@ -2395,7 +2898,7 @@ async function pollTelegramLogin(loginState, attempt = 0) {
       messengerHint.textContent = "Telegram-вход подтвержден.";
       setAuthMode(true);
       stopTelegramPolling();
-      await renderHome();
+      await renderStartupView();
       return;
     }
     if (data.status === "expired") {
@@ -2477,7 +2980,7 @@ async function pollMaxLogin(loginState, attempt = 0) {
       messengerHint.textContent = "MAX-вход подтвержден.";
       setAuthMode(true);
       stopMaxPolling();
-      await renderHome();
+      await renderStartupView();
       return;
     }
     if (data.status === "expired") {
@@ -2508,25 +3011,7 @@ cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary")
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
 
-logoutBtn.addEventListener("click", async () => {
-  if (state.token) {
-    try {
-      await api("/api/auth/logout", { method: "POST", body: "{}" });
-    } catch {
-      // Local logout still needs to happen even if the session is already expired.
-    }
-  }
-  stopTelegramPolling();
-  clearTelegramLogin();
-  stopMaxPolling();
-  clearMaxLogin();
-  localStorage.removeItem("tvv_token");
-  state.token = "";
-  state.user = null;
-  state.externalAccounts = [];
-  state.subscription = null;
-  setAuthMode(false);
-});
+logoutBtn?.addEventListener("click", performLogout);
 
 window.addEventListener("focus", () => {
   if (!state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);
@@ -2562,8 +3047,19 @@ document.addEventListener("click", async (event) => {
   const deleteReminderButton = event.target.closest("[data-delete-reminder]");
   const linkProviderButton = event.target.closest("[data-link-provider]");
   const followupAnswerButton = event.target.closest("[data-followup-answer]");
+  const copyTriageButton = event.target.closest("[data-copy-triage-result]");
 
   try {
+    if (copyTriageButton) {
+      const resultBox = copyTriageButton.closest("[data-triage-answer]");
+      await copyTextToClipboard(resultBox?.dataset.triageAnswer || "");
+      const originalText = copyTriageButton.textContent;
+      copyTriageButton.textContent = "Скопировано";
+      window.setTimeout(() => {
+        copyTriageButton.textContent = originalText || "Скопировать для врача";
+      }, 1600);
+      return;
+    }
     if (followupAnswerButton) {
       const followupId = Number(followupAnswerButton.dataset.followupId);
       const answer = followupAnswerButton.dataset.followupAnswer;
@@ -2641,13 +3137,15 @@ document.addEventListener("click", async (event) => {
     if (action === "pay-plus") await startPlusPayment();
     if (action === "check-plus-payment") await checkPlusPaymentStatus();
     if (action === "account") await renderAccountLinks();
+    if (action === "enable-push") await enablePushNotifications();
+    if (action === "disable-push") await disablePushNotifications();
     if (action === "export-account-data") await downloadAccountData();
     if (action === "revoke-sessions") await revokeAllSessions();
     if (action === "show-data-deletion") renderDataDeletionPanel();
     if (action === "feedback") renderFeedback();
     if (action === "history") await renderGlobalHistory();
     if (action === "observations") await renderGlobalObservations();
-    if (action === "logout") logoutBtn.click();
+    if (action === "logout") await performLogout();
   } catch (error) {
     showError(`Ошибка: ${readableError(error.message)}`);
   }
