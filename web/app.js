@@ -186,19 +186,19 @@ async function performLogout() {
 function readableError(message) {
   const text = String(message || "");
   const messages = {
-    email_not_configured: "Вход по email подключается. Пока используйте Telegram или MAX для подтверждения входа.",
+    email_not_configured: "Вход по email временно недоступен. Попробуйте позже или используйте Telegram/MAX для подтверждения входа.",
     email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
     email_code_too_many_requests: "Код уже отправлен. Подождите около минуты перед повторной отправкой.",
     email_code_hour_limit: "Слишком много кодов на этот email. Попробуйте позже.",
     invalid_code: "Код не подошёл. Проверьте цифры и попробуйте ещё раз.",
     code_attempts_exceeded: "Слишком много неверных попыток. Запросите новый код.",
     code_expired_or_not_found: "Код истёк. Запросите новый код.",
-    payment_provider_not_configured: "Оплата в веб-кабинете ещё настраивается. Пока используйте оплату в Telegram-версии.",
+    payment_provider_not_configured: "Оплата в веб-кабинете временно недоступна. Попробуйте позже или напишите в поддержку.",
     payment_provider_error: "Платёжный сервис временно не ответил. Попробуйте позже.",
     payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
     payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
     payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку.",
-    push_not_configured: "PWA-уведомления ещё не настроены на сервере.",
+    push_not_configured: "PWA-уведомления временно недоступны. Основные функции кабинета работают без них.",
     push_unsupported: "Этот браузер не поддерживает PWA-уведомления.",
     push_permission_denied: "Браузер не дал разрешение на уведомления.",
     rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
