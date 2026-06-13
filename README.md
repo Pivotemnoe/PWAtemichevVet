@@ -54,7 +54,9 @@ The PWA creates a short-lived login state, opens the Telegram bot with `/start w
 
 This bridge creates a shared identity link. A logged-in PWA user can also connect Telegram to the current account in `Способы входа`, so pet/payment/subscription synchronization has a single owner.
 
-The PWA can reuse Telegram subscription entitlement through the linked Telegram ID. If a paid PWA subscription is later issued to a user with linked Telegram, the PWA mirrors that entitlement to the Telegram `bot.db`. Full pet synchronization is a separate migration step.
+The PWA can reuse Telegram subscription entitlement through the linked Telegram ID. If a paid PWA subscription is later issued to a user with linked Telegram, the PWA mirrors that entitlement to the Telegram `bot.db`.
+
+When Telegram is connected, the server synchronizes core profile data between Telegram and PWA: pet cards, reminders, observations, weight records, pet history and triage logs. This sync is server-side only; the browser never receives access to `bot.db` or synchronization secrets. Some destructive or legacy Telegram-side operations are intentionally best-effort and must be checked through admin sync logs.
 
 ## Email Login
 

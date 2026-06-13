@@ -16,7 +16,8 @@
 - Keep MAX as a login provider for identity confirmation.
 - Build the full MAX bot menus and service scenarios separately from login.
 - Telegram-linked users can reuse Telegram subscription entitlement in PWA.
-- Next: synchronize Telegram bot pets and future PWA payment activations through the linked identity.
+- Telegram-linked users can synchronize core profile data server-side: pet cards, reminders, observations, measurements, history, triage logs and subscription entitlement.
+- Next: monitor sync lag/errors in production and expand regression tests for edge cases such as edits, deletes and duplicate identities.
 
 ## Stage 3: Personal Cabinet
 
