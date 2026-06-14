@@ -191,6 +191,51 @@ class ApiTests(unittest.TestCase):
 
         self.assertIsNone(api._require_core_api_secret("Bearer core-test-secret"))
 
+    def test_duplicate_telegram_identity_merges_email_account_data(self) -> None:
+        telegram_owner, _ = login("telegram-owner@example.com")
+        linked = db.link_external_account(
+            api.settings.database_path,
+            user_id=int(telegram_owner["id"]),
+            provider="telegram",
+            provider_user_id="tg-duplicate-owner",
+            display_name="TG Owner",
+        )
+        self.assertIsNotNone(linked)
+
+        email_user, _ = login("telegram-linking@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="собака", pet_name="Барс", birth_year=2020),
+            user=email_user,
+        )["item"]
+
+        state, _ = api.create_telegram_login_challenge(api.settings, link_user_id=int(email_user["id"]))
+        confirmed = api.confirm_telegram_login(
+            api.settings,
+            state=state,
+            telegram_id="tg-duplicate-owner",
+            display_name="TG Owner",
+        )
+        self.assertEqual(confirmed["handled"], True)
+
+        completed = api.complete_telegram_login(api.settings, state)
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(int(completed["user"]["id"]), int(telegram_owner["id"]))
+
+        moved_pet = db.get_pet(
+            api.settings.database_path,
+            owner_id=int(telegram_owner["id"]),
+            pet_id=int(pet["id"]),
+        )
+        self.assertIsNotNone(moved_pet)
+        self.assertEqual(moved_pet["pet_name"], "Барс")
+
+        old_owner_pet = db.get_pet(
+            api.settings.database_path,
+            owner_id=int(email_user["id"]),
+            pet_id=int(pet["id"]),
+        )
+        self.assertIsNone(old_owner_pet)
+
     def test_payment_status_owner_only(self) -> None:
         user_a, _ = login("payment-owner-a@example.com")
         user_b, _ = login("payment-owner-b@example.com")
