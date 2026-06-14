@@ -30,6 +30,9 @@ os.environ.update(
         "SMTP_USERNAME": "",
         "SMTP_PASSWORD": "",
         "SMTP_FROM_EMAIL": "",
+        "VAPID_PUBLIC_KEY": "",
+        "VAPID_PRIVATE_KEY": "",
+        "VAPID_SUBJECT": "",
     }
 )
 
