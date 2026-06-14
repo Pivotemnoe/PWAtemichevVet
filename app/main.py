@@ -2765,11 +2765,11 @@ def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depend
 
 @app.delete("/api/reminders/{reminder_id}")
 def delete_reminder(reminder_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
-    sync_result = _safe_sync_pwa_reminder_deactivation(user, reminder_id)
-    _enqueue_core_outbound_from_sync(sync_result, (("telegram_reminder_id", "reminders"),))
     if not db.deactivate_reminder(settings.database_path, owner_id=int(user["id"]), reminder_id=reminder_id):
         _audit_ownership_denied(request, user, entity_type="reminder", entity_id=reminder_id)
         raise HTTPException(status_code=404, detail="reminder_not_found")
+    sync_result = _safe_sync_pwa_reminder_deactivation(user, reminder_id)
+    _enqueue_core_outbound_from_sync(sync_result, (("telegram_reminder_id", "reminders"),))
     return {"ok": True}
 
 

@@ -138,6 +138,53 @@ class ApiTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(denied), 2)
 
+    def test_reminder_delete_sync_runs_only_after_owner_check(self) -> None:
+        user_a, _ = login("reminder-sync-owner-a@example.com")
+        user_b, _ = login("reminder-sync-owner-b@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Сима", birth_year=2019),
+            user=user_a,
+        )["item"]
+        reminder = api.add_reminder(
+            api.ReminderPayload(
+                pet_id=int(pet["id"]),
+                reminder_type="checkup",
+                title="Плановый осмотр",
+                due_date="2026-08-01",
+                periodicity="once",
+            ),
+            request("/api/reminders"),
+            user=user_a,
+        )["item"]
+
+        calls: list[tuple[int, int]] = []
+        original_sync = api._safe_sync_pwa_reminder_deactivation
+        original_enqueue = api._enqueue_core_outbound_from_sync
+        api._safe_sync_pwa_reminder_deactivation = lambda user, reminder_id: calls.append(
+            (int(user["id"]), int(reminder_id))
+        ) or {"synced": True}
+        api._enqueue_core_outbound_from_sync = lambda sync_result, mappings: False
+        try:
+            with self.assertRaises(HTTPException) as reminder_exc:
+                api.delete_reminder(
+                    int(reminder["id"]),
+                    request(f"/api/reminders/{reminder['id']}", "DELETE"),
+                    user=user_b,
+                )
+            self.assertEqual(reminder_exc.exception.status_code, 404)
+            self.assertEqual(calls, [])
+
+            result = api.delete_reminder(
+                int(reminder["id"]),
+                request(f"/api/reminders/{reminder['id']}", "DELETE"),
+                user=user_a,
+            )
+            self.assertEqual(result["ok"], True)
+            self.assertEqual(calls, [(int(user_a["id"]), int(reminder["id"]))])
+        finally:
+            api._safe_sync_pwa_reminder_deactivation = original_sync
+            api._enqueue_core_outbound_from_sync = original_enqueue
+
     def test_mock_payment_plus_activation(self) -> None:
         user, _ = login("payer@example.com")
 
