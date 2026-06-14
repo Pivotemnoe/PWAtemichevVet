@@ -236,6 +236,53 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIsNone(old_owner_pet)
 
+    def test_duplicate_max_identity_merges_email_account_data(self) -> None:
+        max_owner, _ = login("max-owner@example.com")
+        linked = db.link_external_account(
+            api.settings.database_path,
+            user_id=int(max_owner["id"]),
+            provider="max",
+            provider_user_id="max-duplicate-owner",
+            display_name="MAX Owner",
+        )
+        self.assertIsNotNone(linked)
+
+        email_user, _ = login("max-linking@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Мия", birth_year=2021),
+            user=email_user,
+        )["item"]
+
+        state, _ = api.create_max_login_challenge(api.settings, link_user_id=int(email_user["id"]))
+        processed = api.process_max_update(
+            api.settings,
+            {
+                "update_type": "bot_started",
+                "payload": state,
+                "user": {"user_id": "max-duplicate-owner", "name": "MAX Owner"},
+            },
+        )
+        self.assertEqual(processed["handled"], True)
+
+        completed = api.complete_max_login(api.settings, state)
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(int(completed["user"]["id"]), int(max_owner["id"]))
+
+        moved_pet = db.get_pet(
+            api.settings.database_path,
+            owner_id=int(max_owner["id"]),
+            pet_id=int(pet["id"]),
+        )
+        self.assertIsNotNone(moved_pet)
+        self.assertEqual(moved_pet["pet_name"], "Мия")
+
+        old_owner_pet = db.get_pet(
+            api.settings.database_path,
+            owner_id=int(email_user["id"]),
+            pet_id=int(pet["id"]),
+        )
+        self.assertIsNone(old_owner_pet)
+
     def test_payment_status_owner_only(self) -> None:
         user_a, _ = login("payment-owner-a@example.com")
         user_b, _ = login("payment-owner-b@example.com")
