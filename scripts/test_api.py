@@ -67,6 +67,7 @@ def disable_external_sync() -> None:
     result = {"synced": False, "reason": "test_disabled"}
     api._safe_sync_telegram_profile_to_pwa = lambda user: result
     api._safe_sync_pwa_pet_to_telegram = lambda user, pet: result
+    api._safe_sync_pwa_pet_deletion_to_telegram = lambda user, pet: result
     api._safe_sync_pwa_reminder_to_telegram = lambda user, reminder: result
     api._safe_sync_pwa_reminder_deactivation = lambda user, reminder_id: result
     api._safe_sync_pwa_observation_to_telegram = lambda user, observation: result
@@ -196,6 +197,7 @@ class ApiTests(unittest.TestCase):
         calls: list[str] = []
         originals = {
             "pet": api._safe_sync_pwa_pet_to_telegram,
+            "pet_delete": api._safe_sync_pwa_pet_deletion_to_telegram,
             "measurement": api._safe_sync_pwa_measurement_to_telegram,
             "observation": api._safe_sync_pwa_observation_to_telegram,
             "reminder": api._safe_sync_pwa_reminder_to_telegram,
@@ -209,6 +211,7 @@ class ApiTests(unittest.TestCase):
             raise AssertionError("LLM must not run for a foreign pet")
 
         api._safe_sync_pwa_pet_to_telegram = lambda user, pet: calls.append("pet") or {"synced": True}
+        api._safe_sync_pwa_pet_deletion_to_telegram = lambda user, pet: calls.append("pet_delete") or {"synced": True}
         api._safe_sync_pwa_measurement_to_telegram = lambda user, measurement: calls.append("measurement") or {"synced": True}
         api._safe_sync_pwa_observation_to_telegram = lambda user, observation: calls.append("observation") or {"synced": True}
         api._safe_sync_pwa_reminder_to_telegram = lambda user, reminder: calls.append("reminder") or {"synced": True}
@@ -250,6 +253,11 @@ class ApiTests(unittest.TestCase):
                         periodicity="once",
                     ),
                     request("/api/reminders"),
+                    user=user_b,
+                ),
+                lambda: api.delete_pet(
+                    int(pet["id"]),
+                    request(f"/api/pets/{pet['id']}", "DELETE"),
                     user=user_b,
                 ),
                 lambda: api.triage(
@@ -296,12 +304,76 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(calls, ["pet", "measurement", "observation", "reminder"])
         finally:
             api._safe_sync_pwa_pet_to_telegram = originals["pet"]
+            api._safe_sync_pwa_pet_deletion_to_telegram = originals["pet_delete"]
             api._safe_sync_pwa_measurement_to_telegram = originals["measurement"]
             api._safe_sync_pwa_observation_to_telegram = originals["observation"]
             api._safe_sync_pwa_reminder_to_telegram = originals["reminder"]
             api._safe_sync_triage_to_telegram = originals["triage"]
             api._enqueue_core_outbound_from_sync = originals["enqueue"]
             api.call_triage_llm = originals["llm"]
+
+    def test_pet_delete_records_tombstone_and_queues_core_delete_after_owner_check(self) -> None:
+        user_a, _ = login("pet-delete-owner-a@example.com")
+        user_b, _ = login("pet-delete-owner-b@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Тиша", birth_year=2017),
+            user=user_a,
+        )["item"]
+        telegram_pet_id = 98765
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute(
+                "UPDATE pets SET external_source = 'telegram', external_id = ? WHERE id = ?",
+                (str(telegram_pet_id), int(pet["id"])),
+            )
+            conn.commit()
+
+        calls: list[tuple[int, int]] = []
+        outbound: list[tuple[str, int, str]] = []
+        original_sync = api._safe_sync_pwa_pet_deletion_to_telegram
+        original_enqueue = api._enqueue_core_outbound_event
+        api._safe_sync_pwa_pet_deletion_to_telegram = lambda user, pet: calls.append(
+            (int(user["id"]), int(pet["id"]))
+        ) or {"synced": True, "telegram_pet_id": int(pet["external_id"])}
+        api._enqueue_core_outbound_event = lambda table_name, row_id, operation="upsert": outbound.append(
+            (table_name, int(row_id), operation)
+        ) or True
+        try:
+            with self.assertRaises(HTTPException) as pet_exc:
+                api.delete_pet(
+                    int(pet["id"]),
+                    request(f"/api/pets/{pet['id']}", "DELETE"),
+                    user=user_b,
+                )
+            self.assertEqual(pet_exc.exception.status_code, 404)
+            self.assertEqual(calls, [])
+            self.assertEqual(outbound, [])
+            self.assertIsNotNone(
+                db.get_pet(api.settings.database_path, owner_id=int(user_a["id"]), pet_id=int(pet["id"]))
+            )
+
+            result = api.delete_pet(
+                int(pet["id"]),
+                request(f"/api/pets/{pet['id']}", "DELETE"),
+                user=user_a,
+            )
+            self.assertEqual(result["ok"], True)
+            self.assertEqual(calls, [(int(user_a["id"]), int(pet["id"]))])
+            self.assertEqual(outbound, [("pets", telegram_pet_id, "delete")])
+            self.assertTrue(
+                db.sync_tombstone_exists(
+                    api.settings.database_path,
+                    owner_id=int(user_a["id"]),
+                    provider="telegram",
+                    entity_type="pet",
+                    external_id=str(telegram_pet_id),
+                )
+            )
+            self.assertIsNone(
+                db.get_pet(api.settings.database_path, owner_id=int(user_a["id"]), pet_id=int(pet["id"]))
+            )
+        finally:
+            api._safe_sync_pwa_pet_deletion_to_telegram = original_sync
+            api._enqueue_core_outbound_event = original_enqueue
 
     def test_successful_pwa_sync_paths_enqueue_core_rows(self) -> None:
         user, _ = login("sync-success-owner@example.com")

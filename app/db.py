@@ -63,6 +63,27 @@ def init_db(db_path: Path) -> None:
         )
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS sync_tombstones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                external_id TEXT NOT NULL,
+                local_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(owner_id, provider, entity_type, external_id),
+                FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_tombstones_lookup
+            ON sync_tombstones(owner_id, provider, entity_type, external_id)
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS auth_challenges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel TEXT NOT NULL,
@@ -1729,6 +1750,67 @@ def delete_pet(db_path: Path, *, owner_id: int, pet_id: int) -> bool:
         deleted = cur.rowcount > 0
         conn.commit()
         return deleted
+
+
+def create_sync_tombstone(
+    db_path: Path,
+    *,
+    owner_id: int,
+    provider: str,
+    entity_type: str,
+    external_id: str,
+    local_id: int | None = None,
+) -> bool:
+    external_id = str(external_id or "").strip()
+    if not external_id:
+        return False
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO sync_tombstones (
+                owner_id, provider, entity_type, external_id, local_id, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(owner_id),
+                str(provider),
+                str(entity_type),
+                external_id,
+                int(local_id) if local_id is not None else None,
+                utc_now_iso(),
+            ),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def sync_tombstone_exists(
+    db_path: Path,
+    *,
+    owner_id: int,
+    provider: str,
+    entity_type: str,
+    external_id: str,
+) -> bool:
+    external_id = str(external_id or "").strip()
+    if not external_id:
+        return False
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM sync_tombstones
+            WHERE owner_id = ?
+              AND provider = ?
+              AND entity_type = ?
+              AND external_id = ?
+            LIMIT 1
+            """,
+            (int(owner_id), str(provider), str(entity_type), external_id),
+        ).fetchone()
+        return row is not None
 
 
 def add_history(

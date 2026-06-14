@@ -150,6 +150,29 @@ def _pwa_external_exists(cur: sqlite3.Cursor, table_name: str, external_id: Any)
     return cur.fetchone() is not None
 
 
+def _pwa_tombstone_exists(
+    cur: sqlite3.Cursor,
+    *,
+    owner_id: int,
+    provider: str,
+    entity_type: str,
+    external_id: Any,
+) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM sync_tombstones
+        WHERE owner_id = ?
+          AND provider = ?
+          AND entity_type = ?
+          AND external_id = ?
+        LIMIT 1
+        """,
+        (int(owner_id), provider, entity_type, _source_id(external_id)),
+    )
+    return cur.fetchone() is not None
+
+
 def _pwa_has_main_pet(cur: sqlite3.Cursor, owner_id: int) -> bool:
     cur.execute("SELECT 1 FROM pets WHERE owner_id = ? AND is_main = 1 LIMIT 1", (int(owner_id),))
     return cur.fetchone() is not None
@@ -263,7 +286,16 @@ def _import_telegram_pets(
     )
     mapping: dict[int, int] = {}
     for bot_pet in bot_cur.fetchall():
-        mapping[int(bot_pet["id"])] = _link_or_insert_pwa_pet(
+        bot_pet_id = int(bot_pet["id"])
+        if _pwa_tombstone_exists(
+            pwa_cur,
+            owner_id=pwa_user_id,
+            provider=TELEGRAM_SOURCE,
+            entity_type="pet",
+            external_id=bot_pet_id,
+        ):
+            continue
+        mapping[bot_pet_id] = _link_or_insert_pwa_pet(
             pwa_cur,
             owner_id=pwa_user_id,
             bot_pet=bot_pet,
@@ -294,6 +326,8 @@ def _import_telegram_reminders(
     )
     for item in bot_cur.fetchall():
         external_id = _source_id(item["id"])
+        if item["pet_id"] is not None and int(item["pet_id"]) not in pet_map:
+            continue
         pet_id = pet_map.get(int(item["pet_id"])) if item["pet_id"] is not None else None
         pwa_cur.execute(
             "SELECT id FROM reminders WHERE external_source = 'telegram' AND external_id = ? LIMIT 1",
@@ -749,6 +783,22 @@ def sync_pwa_pet_to_telegram(settings: Settings, *, pwa_user: dict[str, Any], pe
         bot_conn.commit()
         pwa_conn.commit()
     return {"synced": bool(bot_pet_id), "telegram_pet_id": bot_pet_id}
+
+
+def sync_pwa_pet_deletion_to_telegram(settings: Settings, *, pwa_user: dict[str, Any], pet: dict[str, Any]) -> dict[str, Any]:
+    context = _telegram_context(settings, pwa_user)
+    if context is None:
+        return {"synced": False, "reason": "telegram_not_ready"}
+    bot_path, bot_user_id = context
+    external_id = _source_id(pet.get("external_id")) if pet.get("external_source") == TELEGRAM_SOURCE else ""
+    if not external_id:
+        return {"synced": False, "reason": "not_telegram_backed"}
+    with closing(sqlite3.connect(bot_path)) as bot_conn:
+        bot_cur = bot_conn.cursor()
+        bot_cur.execute("SELECT id FROM pets WHERE id = ? AND owner_id = ? LIMIT 1", (external_id, int(bot_user_id)))
+        if not bot_cur.fetchone():
+            return {"synced": False, "reason": "telegram_pet_not_found"}
+    return {"synced": True, "telegram_pet_id": int(external_id)}
 
 
 def sync_pwa_reminder_to_telegram(

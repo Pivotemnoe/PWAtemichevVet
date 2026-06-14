@@ -54,6 +54,7 @@ from app.telegram_auth import complete_telegram_login, confirm_telegram_login, c
 from app.telegram_sync import (
     sync_pwa_measurement_to_telegram,
     sync_pwa_observation_to_telegram,
+    sync_pwa_pet_deletion_to_telegram,
     sync_pwa_pet_to_telegram,
     sync_pwa_reminder_deactivation,
     sync_pwa_reminder_to_telegram,
@@ -745,6 +746,25 @@ def _safe_sync_pwa_pet_to_telegram(user: dict, pet: dict) -> dict:
             entity_type="pet",
             entity_id=str(pet.get("id") or ""),
             metadata={"operation": "pet_to_telegram", "error": type(exc).__name__},
+        )
+        return {"synced": False, "reason": "sync_error"}
+
+
+def _safe_sync_pwa_pet_deletion_to_telegram(user: dict, pet: dict) -> dict:
+    try:
+        return sync_pwa_pet_deletion_to_telegram(settings, pwa_user=user, pet=pet)
+    except Exception as exc:
+        logger.warning("PWA pet Telegram deletion sync failed: %s", exc)
+        _audit(
+            None,
+            "sync.telegram_failed",
+            user_id=int(user["id"]) if user.get("id") else None,
+            provider="telegram",
+            status="error",
+            actor="system",
+            entity_type="pet",
+            entity_id=str(pet.get("id") or ""),
+            metadata={"operation": "pet_deletion_to_telegram", "error": type(exc).__name__},
         )
         return {"synced": False, "reason": "sync_error"}
 
@@ -2655,9 +2675,25 @@ def set_main_pet(pet_id: int, payload: MainPetPayload, request: Request, user: d
 
 @app.delete("/api/pets/{pet_id}")
 def delete_pet(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
+    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id)
+    if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
+        raise HTTPException(status_code=404, detail="pet_not_found")
+    sync_result = _safe_sync_pwa_pet_deletion_to_telegram(user, pet)
     if not db.delete_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
         _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
+    if pet.get("external_source") == "telegram" and pet.get("external_id"):
+        db.create_sync_tombstone(
+            settings.database_path,
+            owner_id=int(user["id"]),
+            provider="telegram",
+            entity_type="pet",
+            external_id=str(pet["external_id"]),
+            local_id=pet_id,
+        )
+    if sync_result.get("synced") and sync_result.get("telegram_pet_id") is not None:
+        _enqueue_core_outbound_event("pets", int(sync_result["telegram_pet_id"]), operation="delete")
     return {"ok": True}
 
 
