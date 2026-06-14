@@ -66,6 +66,38 @@ user_id=123
 - В `integration_events_24h` у любой группы `status = error` после запуска рекламы.
 - `POST /api/internal/push/followups/send` возвращает `sent=0` при наличии подписанных пользователей и ожидаемых follow-up.
 
+## Built-In Monitor Script
+
+В репозитории есть проверочный скрипт без внешних зависимостей:
+
+```bash
+MONITORING_API_SECRET=... .venv/bin/python scripts/monitor_public.py \
+  --base-url https://temichevvet.ru \
+  --strict-config
+```
+
+Что проверяет:
+
+- публичный `GET /api/health`;
+- закрытый `GET /api/monitoring/status`, если задан `MONITORING_API_SECRET`;
+- ошибки за 1 час: `server_5xx`, `payment_errors`, `llm_errors`, `sync_errors`;
+- группы интеграций за 24 часа: API, email, Telegram/MAX, YooKassa, LLM, Telegram/Core sync, PWA push;
+- базовую настройку ключевых интеграций.
+
+Exit codes:
+
+- `0` — критических ошибок нет;
+- `1` — есть предупреждения и запущено с `--fail-on-warning`;
+- `2` — есть критическая ошибка, скрипт должен поднять alert.
+
+Если секрет не задан, скрипт всё равно проверит публичный healthcheck и напишет предупреждение, что закрытый статус не проверен.
+
+Пример cron на внешнем сервере или отдельной машине:
+
+```cron
+*/2 * * * * cd /opt/temichevvet/pwa && MONITORING_API_SECRET=... .venv/bin/python scripts/monitor_public.py --strict-config >/tmp/temichevvet-monitor.log 2>&1
+```
+
 ## PWA Push Follow-Ups
 
 Проверить публичную конфигурацию:

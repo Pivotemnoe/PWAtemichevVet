@@ -135,6 +135,7 @@ git push -u origin main
 - `docs/ROADMAP.md`: implementation stages and priorities.
 - `docs/DEPLOYMENT.md`: local run, environment variables, Docker, production checklist.
 - `docs/PRODUCTION.md`: live VPS layout, domains, services, and health checks.
+- `scripts/monitor_public.py`: public healthcheck and closed monitoring status checker for cron/systemd/external uptime agents.
 - `docs/SECURITY_PRIVACY.md`: personal data, ownership checks, SQLite/PostgreSQL path.
 
 ## Next Steps

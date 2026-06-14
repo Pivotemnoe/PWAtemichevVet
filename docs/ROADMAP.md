@@ -65,6 +65,7 @@
 - Keep SQLite for MVP, but prepare PostgreSQL before scaling.
 - Richer admin UI for `security_audit_events` is in place: the dashboard groups recent warnings/errors and explains them in human-readable language.
 - Closed monitoring groups 24h integration warnings/errors by API, email, messenger login, YooKassa, LLM, Telegram/Core sync and PWA push.
+- Built-in `scripts/monitor_public.py` can be used by cron/systemd/external uptime agents to check `/api/health`, closed monitoring status, 5xx, YooKassa, LLM and sync errors with clear exit codes.
 - Add real external uptime provider for `https://temichevvet.ru/api/health`.
 - Add alert rules for 5xx, YooKassa errors, LLM failures and Telegram sync failures.
 - Add more API regression tests as new PWA scenarios move from Telegram into the web app. Duplicate Telegram/MAX identity merges, reminder-delete ownership/sync ordering, foreign pet mutation side effects, successful PWA sync enqueue paths and Telegram-backed pet deletion are already covered.

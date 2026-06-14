@@ -35,6 +35,15 @@ curl -sS https://temichevvet.ru/api/monitoring/status \
   -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET"
 ```
 
+Readable monitoring report:
+
+```bash
+MONITORING_API_SECRET=$MONITORING_API_SECRET \
+  /opt/temichevvet/pwa/.venv/bin/python /opt/temichevvet/pwa/scripts/monitor_public.py \
+  --base-url https://temichevvet.ru \
+  --strict-config
+```
+
 Closed audit:
 
 ```bash
