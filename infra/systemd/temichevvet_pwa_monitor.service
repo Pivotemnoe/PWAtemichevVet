@@ -1,0 +1,18 @@
+[Unit]
+Description=TemichevVet PWA monitoring check
+After=network-online.target temichevvet_pwa.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=temichevvet
+Group=temichevvet
+WorkingDirectory=/opt/temichevvet/pwa
+EnvironmentFile=/opt/temichevvet/pwa/.env
+ExecStart=/opt/temichevvet/pwa/.venv/bin/python /opt/temichevvet/pwa/scripts/monitor_public.py --base-url http://127.0.0.1:8081 --strict-config
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/temichevvet/data

@@ -63,11 +63,15 @@ Use a timer every 10-15 minutes after `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` an
 Installed production units:
 
 ```text
+temichevvet_pwa_monitor.service
+temichevvet_pwa_monitor.timer
 temichevvet_pwa_followups.service
 temichevvet_pwa_followups.timer
 ```
 
-The timer runs every 10 minutes. The service reads `MONITORING_API_SECRET` from `/opt/temichevvet/pwa/.env` and calls the internal endpoint on `127.0.0.1`, so the secret is not exposed in the unit file.
+`temichevvet_pwa_monitor.timer` runs every 5 minutes. The service reads `MONITORING_API_SECRET` from `/opt/temichevvet/pwa/.env` and calls the internal endpoint on `127.0.0.1`, so the secret is not exposed in the unit file.
+
+`temichevvet_pwa_followups.timer` runs every 10 minutes and sends due browser follow-up notifications.
 
 ## MAX Webhook
 

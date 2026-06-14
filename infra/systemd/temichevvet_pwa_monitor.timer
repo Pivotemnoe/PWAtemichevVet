@@ -1,0 +1,11 @@
+[Unit]
+Description=Run TemichevVet PWA monitoring check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=temichevvet_pwa_monitor.service
+
+[Install]
+WantedBy=timers.target

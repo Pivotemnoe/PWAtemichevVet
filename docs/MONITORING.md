@@ -98,6 +98,16 @@ Exit codes:
 */2 * * * * cd /opt/temichevvet/pwa && MONITORING_API_SECRET=... .venv/bin/python scripts/monitor_public.py --strict-config >/tmp/temichevvet-monitor.log 2>&1
 ```
 
+Production timer на VPS:
+
+```bash
+systemctl list-timers --all | grep temichevvet_pwa_monitor
+systemctl status temichevvet_pwa_monitor.timer
+journalctl -u temichevvet_pwa_monitor.service -n 50 --no-pager
+```
+
+Unit-файлы лежат в `infra/systemd/temichevvet_pwa_monitor.service` и `infra/systemd/temichevvet_pwa_monitor.timer`.
+
 ## PWA Push Follow-Ups
 
 Проверить публичную конфигурацию:
