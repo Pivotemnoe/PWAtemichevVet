@@ -185,6 +185,124 @@ class ApiTests(unittest.TestCase):
             api._safe_sync_pwa_reminder_deactivation = original_sync
             api._enqueue_core_outbound_from_sync = original_enqueue
 
+    def test_foreign_pet_mutations_do_not_trigger_side_effects(self) -> None:
+        user_a, _ = login("pet-mutation-owner-a@example.com")
+        user_b, _ = login("pet-mutation-owner-b@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="собака", pet_name="Рэй", birth_year=2020),
+            user=user_a,
+        )["item"]
+
+        calls: list[str] = []
+        originals = {
+            "pet": api._safe_sync_pwa_pet_to_telegram,
+            "measurement": api._safe_sync_pwa_measurement_to_telegram,
+            "observation": api._safe_sync_pwa_observation_to_telegram,
+            "reminder": api._safe_sync_pwa_reminder_to_telegram,
+            "triage": api._safe_sync_triage_to_telegram,
+            "enqueue": api._enqueue_core_outbound_from_sync,
+            "llm": api.call_triage_llm,
+        }
+
+        def fake_llm(*args, **kwargs):
+            calls.append("llm")
+            raise AssertionError("LLM must not run for a foreign pet")
+
+        api._safe_sync_pwa_pet_to_telegram = lambda user, pet: calls.append("pet") or {"synced": True}
+        api._safe_sync_pwa_measurement_to_telegram = lambda user, measurement: calls.append("measurement") or {"synced": True}
+        api._safe_sync_pwa_observation_to_telegram = lambda user, observation: calls.append("observation") or {"synced": True}
+        api._safe_sync_pwa_reminder_to_telegram = lambda user, reminder: calls.append("reminder") or {"synced": True}
+        api._safe_sync_triage_to_telegram = lambda **kwargs: calls.append("triage") or {"synced": True}
+        api._enqueue_core_outbound_from_sync = lambda sync_result, mappings: False
+        api.call_triage_llm = fake_llm
+        try:
+            denied_calls = (
+                lambda: api.update_pet(
+                    int(pet["id"]),
+                    api.PetPatchPayload(pet_name="Чужое имя"),
+                    request(f"/api/pets/{pet['id']}", "PATCH"),
+                    user=user_b,
+                ),
+                lambda: api.set_main_pet(
+                    int(pet["id"]),
+                    api.MainPetPayload(is_main=True),
+                    request(f"/api/pets/{pet['id']}/main"),
+                    user=user_b,
+                ),
+                lambda: api.add_pet_weight(
+                    int(pet["id"]),
+                    api.MeasurementPayload(weight_kg=12.4, note="чужой вес"),
+                    request(f"/api/pets/{pet['id']}/weights"),
+                    user=user_b,
+                ),
+                lambda: api.add_pet_observation(
+                    int(pet["id"]),
+                    api.ObservationPayload(obs_type="note", text="чужое наблюдение"),
+                    request(f"/api/pets/{pet['id']}/observations"),
+                    user=user_b,
+                ),
+                lambda: api.add_reminder(
+                    api.ReminderPayload(
+                        pet_id=int(pet["id"]),
+                        reminder_type="checkup",
+                        title="Чужой осмотр",
+                        due_date="2026-09-01",
+                        periodicity="once",
+                    ),
+                    request("/api/reminders"),
+                    user=user_b,
+                ),
+                lambda: api.triage(
+                    api.TriageRequest(pet_id=int(pet["id"]), text="собака вялая второй день"),
+                    request("/api/triage"),
+                    user=user_b,
+                ),
+            )
+            for denied_call in denied_calls:
+                with self.assertRaises(HTTPException) as denied_exc:
+                    denied_call()
+                self.assertEqual(denied_exc.exception.status_code, 404)
+            self.assertEqual(calls, [])
+
+            api.update_pet(
+                int(pet["id"]),
+                api.PetPatchPayload(pet_name="Рэй обновлён"),
+                request(f"/api/pets/{pet['id']}", "PATCH"),
+                user=user_a,
+            )
+            api.add_pet_weight(
+                int(pet["id"]),
+                api.MeasurementPayload(weight_kg=12.5),
+                request(f"/api/pets/{pet['id']}/weights"),
+                user=user_a,
+            )
+            api.add_pet_observation(
+                int(pet["id"]),
+                api.ObservationPayload(obs_type="note", text="нормальная активность"),
+                request(f"/api/pets/{pet['id']}/observations"),
+                user=user_a,
+            )
+            api.add_reminder(
+                api.ReminderPayload(
+                    pet_id=int(pet["id"]),
+                    reminder_type="checkup",
+                    title="Плановый осмотр",
+                    due_date="2026-09-01",
+                    periodicity="once",
+                ),
+                request("/api/reminders"),
+                user=user_a,
+            )
+            self.assertEqual(calls, ["pet", "measurement", "observation", "reminder"])
+        finally:
+            api._safe_sync_pwa_pet_to_telegram = originals["pet"]
+            api._safe_sync_pwa_measurement_to_telegram = originals["measurement"]
+            api._safe_sync_pwa_observation_to_telegram = originals["observation"]
+            api._safe_sync_pwa_reminder_to_telegram = originals["reminder"]
+            api._safe_sync_triage_to_telegram = originals["triage"]
+            api._enqueue_core_outbound_from_sync = originals["enqueue"]
+            api.call_triage_llm = originals["llm"]
+
     def test_mock_payment_plus_activation(self) -> None:
         user, _ = login("payer@example.com")
 
