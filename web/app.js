@@ -986,6 +986,7 @@ function renderAdminDashboard(data, system = null) {
   const statusHelp = system?.status_help || {};
   const events1h = system?.events_1h || {};
   const events24h = system?.events_24h || {};
+  const integrationEvents = system?.integration_events_24h || [];
   const statusItems = [
     ["database", "База", system?.checks?.database?.ok],
     ["email_configured", "Email", checks.email_configured],
@@ -1031,6 +1032,14 @@ function renderAdminDashboard(data, system = null) {
         ${renderAdminMetric("Синхронизация за 24ч", events24h.sync_errors ?? "—", "Сбои обмена данными между Telegram-ботом и PWA.")}
       </div>
     </section>
+    ${renderAdminTable("Интеграции за 24 часа", integrationEvents, [
+      { key: "label", label: "Блок" },
+      { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
+      { key: "errors", label: "Ошибки" },
+      { key: "warnings", label: "Предупреждения" },
+      { key: "last_at", label: "Последнее событие", render: (row) => formatDateTime(row.last_at) },
+      { key: "help", label: "Что проверять" }
+    ], "За последние 24 часа интеграционных предупреждений и ошибок не было.")}
     ${renderAdminTable("Что произошло за последние 24 часа", data.audit_breakdown_24h || [], [
       { key: "event_type", label: "Событие", render: renderAuditEventCell },
       { key: "status", label: "Уровень", render: (row) => adminCell(adminStatusLabel(row.status)) },

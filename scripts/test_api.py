@@ -672,10 +672,29 @@ class ApiTests(unittest.TestCase):
             actor="test",
             provider="yookassa",
         )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="llm.triage_failed",
+            status="error",
+            actor="test",
+            provider="openai",
+        )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="sync.telegram_failed",
+            status="error",
+            actor="test",
+            provider="telegram",
+        )
 
         status = api.monitoring_status()
         self.assertEqual(status["ok"], True)
         self.assertIn("events_1h", status)
+        integration = {item["key"]: item for item in status["integration_events_24h"]}
+        self.assertEqual(integration["payments"]["warnings"], 1)
+        self.assertEqual(integration["llm"]["errors"], 1)
+        self.assertEqual(integration["sync"]["errors"], 1)
+        self.assertEqual(integration["api"]["status"], "ok")
 
         audit = api.admin_security_audit(limit=10)
         self.assertIn("items", audit)

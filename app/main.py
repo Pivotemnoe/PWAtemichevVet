@@ -1745,6 +1745,99 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
             ),
         }
 
+    def integration_event_groups(since: str) -> list[dict[str, Any]]:
+        groups = [
+            {
+                "key": "api",
+                "label": "API и сервер",
+                "prefixes": ("http.",),
+                "help": "5xx и серверные сбои. Если растёт, проверять systemd/nginx и /api/health.",
+            },
+            {
+                "key": "email",
+                "label": "Email-вход",
+                "prefixes": ("auth.email",),
+                "help": "Ошибки отправки или проверки email-кодов. Проверять SMTP и лимиты.",
+            },
+            {
+                "key": "messenger_login",
+                "label": "Telegram/MAX вход",
+                "prefixes": ("auth.provider", "auth.telegram", "auth.max", "account.provider"),
+                "help": "Ошибки старта или подтверждения входа через мессенджеры.",
+            },
+            {
+                "key": "payments",
+                "label": "YooKassa",
+                "prefixes": ("payment.",),
+                "help": "Ошибки создания, проверки платежей или webhook YooKassa.",
+            },
+            {
+                "key": "llm",
+                "label": "LLM-разборы",
+                "prefixes": ("llm.",),
+                "help": "Сбои OpenAI/LLM-шлюза. Если растёт, пользователи не получают разборы.",
+            },
+            {
+                "key": "sync",
+                "label": "Telegram/Core sync",
+                "prefixes": ("sync.",),
+                "help": "Сбои обмена между Telegram-ботом, Core API и PWA.",
+            },
+            {
+                "key": "push",
+                "label": "PWA push",
+                "prefixes": ("push.",),
+                "help": "Ошибки подключения или отправки follow-up уведомлений.",
+            },
+        ]
+        if not database_ok:
+            return [
+                {
+                    "key": group["key"],
+                    "label": group["label"],
+                    "status": "unknown",
+                    "warnings": None,
+                    "errors": None,
+                    "last_at": None,
+                    "help": group["help"],
+                }
+                for group in groups
+            ]
+
+        result: list[dict[str, Any]] = []
+        with closing(db.connect(settings.database_path)) as conn:
+            for group in groups:
+                prefixes = tuple(group["prefixes"])
+                prefix_clause = " OR ".join("event_type LIKE ?" for _ in prefixes)
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        SUM(CASE WHEN status = 'warning' THEN 1 ELSE 0 END) AS warnings,
+                        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                        MAX(created_at) AS last_at
+                    FROM security_audit_events
+                    WHERE created_at >= ?
+                      AND status IN ('warning', 'error')
+                      AND ({prefix_clause})
+                    """,
+                    (since, *(f"{prefix}%" for prefix in prefixes)),
+                ).fetchone()
+                warnings = int((row["warnings"] if row else 0) or 0)
+                errors = int((row["errors"] if row else 0) or 0)
+                status = "ok" if warnings == 0 and errors == 0 else "error" if errors else "warning"
+                result.append(
+                    {
+                        "key": group["key"],
+                        "label": group["label"],
+                        "status": status,
+                        "warnings": warnings,
+                        "errors": errors,
+                        "last_at": row["last_at"] if row else None,
+                        "help": group["help"],
+                    }
+                )
+        return result
+
     checks = {
         "database": {"ok": database_ok, "error": database_error},
         "email_configured": _email_delivery_enabled(),
@@ -1773,6 +1866,7 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
         "status_help": status_help,
         "events_1h": audit_counts(since_1h),
         "events_24h": audit_counts(since_24h),
+        "integration_events_24h": integration_event_groups(since_24h),
     }
 
 
