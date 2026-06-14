@@ -142,4 +142,4 @@ git push -u origin main
 
 1. Keep backup and monitoring checks for the PWA SQLite database.
 2. Prepare PostgreSQL migration before active growth.
-3. Add CI coverage for payment mock flows and cross-account access checks.
+3. Connect an external uptime provider to `https://temichevvet.ru/api/health` and closed monitoring alerts.
