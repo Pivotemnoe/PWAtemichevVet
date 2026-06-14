@@ -2066,13 +2066,31 @@ async function renderPetCard(petId) {
       <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Проверить симптомы</button>
       <button class="secondary-button" data-pet-view="edit" data-pet-id="${pet.id}" type="button">✏️ Изменить</button>
       <button class="secondary-button" data-set-main="${pet.id}" type="button">${pet.is_main ? "⭐ Основной" : "⭐ Сделать основным"}</button>
-      <button class="secondary-button danger-text" data-delete-pet="${pet.id}" type="button">🗑 Удалить</button>
+      <button class="secondary-button danger-text" data-delete-pet="${pet.id}" data-delete-pet-title="${escapeHtml(petTitle(pet))}" data-delete-pet-linked="${pet.external_source ? "1" : "0"}" type="button">🗑 Удалить</button>
     </div>
     <section>
       <h3>Последние события</h3>
       ${history ? `<ul class="event-list">${history}</ul>` : "<p>История пока пустая.</p>"}
     </section>
   `);
+}
+
+function confirmPetDeletion(button) {
+  const title = button.dataset.deletePetTitle || "карточка питомца";
+  const isLinked = button.dataset.deletePetLinked === "1";
+  const message = [
+    `Удаление карточки: ${title}`,
+    "",
+    "Будут удалены данные питомца, связанные напоминания, наблюдения, вес и история в веб-кабинете.",
+    isLinked ? "Карточка связана с мессенджером: удаление также уйдёт в очередь синхронизации." : "",
+    "",
+    "Если вы уверены, введите УДАЛИТЬ. Если передумали, нажмите «Отмена»."
+  ].filter(Boolean).join("\n");
+  const answer = window.prompt(message);
+  if (answer === null) return false;
+  const confirmed = String(answer).trim().toUpperCase() === "УДАЛИТЬ";
+  if (!confirmed) window.alert("Удаление отменено: для подтверждения нужно ввести УДАЛИТЬ.");
+  return confirmed;
 }
 
 async function renderPetEdit(petId) {
@@ -3107,7 +3125,7 @@ document.addEventListener("click", async (event) => {
     }
     if (deletePetButton) {
       const petId = Number(deletePetButton.dataset.deletePet);
-      if (confirm("Удалить карточку питомца и связанную историю?")) {
+      if (confirmPetDeletion(deletePetButton)) {
         await api(`/api/pets/${petId}`, { method: "DELETE" });
         await renderPets();
       }

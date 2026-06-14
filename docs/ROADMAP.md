@@ -22,7 +22,7 @@
 - Foreign pet mutation attempts are covered by regression tests: edit pet, main pet, weight, observation, reminder and triage operations return 404 and do not run sync or LLM side effects.
 - Successful PWA sync paths are covered by regression tests: pet edits, main-pet changes, weight, observation, reminder and red-flag triage enqueue the expected Telegram/Core rows after successful owner operations.
 - Telegram-backed pet deletion is guarded by owner checks, records a tombstone to prevent re-import from Telegram, and queues a Core delete event only after the PWA delete succeeds.
-- Next: monitor sync lag/errors in production and review deletion UX copy so users understand that deletion affects linked channels.
+- Next: monitor sync lag/errors in production and watch whether users understand linked-channel deletion on real traffic.
 
 ## Stage 3: Personal Cabinet
 
