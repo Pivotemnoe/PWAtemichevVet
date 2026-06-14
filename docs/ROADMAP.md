@@ -17,7 +17,8 @@
 - Build the full MAX bot menus and service scenarios separately from login.
 - Telegram-linked users can reuse Telegram subscription entitlement in PWA.
 - Telegram-linked users can synchronize core profile data server-side: pet cards, reminders, observations, measurements, history, triage logs and subscription entitlement.
-- Next: monitor sync lag/errors in production and expand regression tests for edge cases such as edits, deletes and duplicate identities.
+- Duplicate Telegram/MAX identities are covered by regression tests: linking an already known messenger account merges the temporary email cabinet into the existing user and keeps pet data.
+- Next: monitor sync lag/errors in production and expand regression tests for edge cases such as edits and deletes.
 
 ## Stage 3: Personal Cabinet
 
@@ -61,5 +62,5 @@
 - Richer admin UI for `security_audit_events` is in place: the dashboard groups recent warnings/errors and explains them in human-readable language.
 - Add real external uptime provider for `https://temichevvet.ru/api/health`.
 - Add alert rules for 5xx, YooKassa errors, LLM failures and Telegram sync failures.
-- Add more API regression tests as new PWA scenarios move from Telegram into the web app.
+- Add more API regression tests as new PWA scenarios move from Telegram into the web app. Duplicate Telegram/MAX identity merges are already covered.
 - Show only a simple user-facing sync status: connected channels, last check and a short readable warning. Keep technical Telegram/MAX sync internals in admin logs.
