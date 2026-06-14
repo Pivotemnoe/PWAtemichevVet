@@ -303,6 +303,123 @@ class ApiTests(unittest.TestCase):
             api._enqueue_core_outbound_from_sync = originals["enqueue"]
             api.call_triage_llm = originals["llm"]
 
+    def test_successful_pwa_sync_paths_enqueue_core_rows(self) -> None:
+        user, _ = login("sync-success-owner@example.com")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Луна", birth_year=2021),
+            user=user,
+        )["item"]
+
+        originals = {
+            "pet": api._safe_sync_pwa_pet_to_telegram,
+            "measurement": api._safe_sync_pwa_measurement_to_telegram,
+            "observation": api._safe_sync_pwa_observation_to_telegram,
+            "reminder": api._safe_sync_pwa_reminder_to_telegram,
+            "triage": api._safe_sync_triage_to_telegram,
+            "enqueue": api._enqueue_core_outbound_from_sync,
+        }
+        enqueued: list[tuple[dict, tuple[tuple[str, str], ...]]] = []
+
+        def record_enqueue(sync_result: dict, mappings: tuple[tuple[str, str], ...]) -> dict[str, int]:
+            enqueued.append((dict(sync_result), tuple(mappings)))
+            return {"queued": len(mappings), "skipped": 0}
+
+        api._safe_sync_pwa_pet_to_telegram = lambda user, pet: {
+            "synced": True,
+            "telegram_pet_id": int(pet["id"]) + 1000,
+        }
+        api._safe_sync_pwa_measurement_to_telegram = lambda user, measurement: {
+            "synced": True,
+            "telegram_pet_id": int(measurement["pet_id"]) + 1000,
+            "telegram_measurement_id": int(measurement["id"]) + 2000,
+        }
+        api._safe_sync_pwa_observation_to_telegram = lambda user, observation: {
+            "synced": True,
+            "telegram_pet_id": int(observation["pet_id"]) + 1000,
+            "telegram_observation_id": int(observation["id"]) + 3000,
+        }
+        api._safe_sync_pwa_reminder_to_telegram = lambda user, reminder: {
+            "synced": True,
+            "telegram_pet_id": int(reminder["pet_id"]) + 1000,
+            "telegram_reminder_id": int(reminder["id"]) + 4000,
+        }
+        api._safe_sync_triage_to_telegram = lambda **kwargs: {
+            "synced": True,
+            "telegram_pet_id": int(kwargs["selected_pet"]["id"]) + 1000,
+            "telegram_triage_id": int(kwargs["pwa_triage_id"]) + 5000,
+            "telegram_history_id": int(kwargs["pwa_triage_id"]) + 6000,
+            "telegram_observation_id": int(kwargs["pwa_triage_id"]) + 7000,
+            "telegram_followup_id": int(kwargs["pwa_triage_id"]) + 8000,
+        }
+        api._enqueue_core_outbound_from_sync = record_enqueue
+        try:
+            api.update_pet(
+                int(pet["id"]),
+                api.PetPatchPayload(pet_name="Луна обновлена"),
+                request(f"/api/pets/{pet['id']}", "PATCH"),
+                user=user,
+            )
+            api.set_main_pet(
+                int(pet["id"]),
+                api.MainPetPayload(is_main=True),
+                request(f"/api/pets/{pet['id']}/main"),
+                user=user,
+            )
+            api.add_pet_weight(
+                int(pet["id"]),
+                api.MeasurementPayload(weight_kg=4.2),
+                request(f"/api/pets/{pet['id']}/weights"),
+                user=user,
+            )
+            api.add_pet_observation(
+                int(pet["id"]),
+                api.ObservationPayload(obs_type="note", text="активность нормальная"),
+                request(f"/api/pets/{pet['id']}/observations"),
+                user=user,
+            )
+            api.add_reminder(
+                api.ReminderPayload(
+                    pet_id=int(pet["id"]),
+                    reminder_type="checkup",
+                    title="Плановый осмотр",
+                    due_date="2026-10-01",
+                    periodicity="once",
+                ),
+                request("/api/reminders"),
+                user=user,
+            )
+            api.triage(
+                api.TriageRequest(pet_id=int(pet["id"]), text="у кошки судороги и кровь"),
+                request("/api/triage"),
+                user=user,
+            )
+
+            self.assertEqual(
+                [mappings for _, mappings in enqueued],
+                [
+                    (("telegram_pet_id", "pets"),),
+                    (("telegram_pet_id", "pets"),),
+                    (("telegram_pet_id", "pets"), ("telegram_measurement_id", "pet_measurements")),
+                    (("telegram_pet_id", "pets"), ("telegram_observation_id", "pet_observations")),
+                    (("telegram_pet_id", "pets"), ("telegram_reminder_id", "reminders")),
+                    (
+                        ("telegram_pet_id", "pets"),
+                        ("telegram_triage_id", "triage_logs"),
+                        ("telegram_history_id", "pet_history"),
+                        ("telegram_observation_id", "pet_observations"),
+                        ("telegram_followup_id", "triage_followups"),
+                    ),
+                ],
+            )
+            self.assertTrue(all(sync_result["synced"] for sync_result, _ in enqueued))
+        finally:
+            api._safe_sync_pwa_pet_to_telegram = originals["pet"]
+            api._safe_sync_pwa_measurement_to_telegram = originals["measurement"]
+            api._safe_sync_pwa_observation_to_telegram = originals["observation"]
+            api._safe_sync_pwa_reminder_to_telegram = originals["reminder"]
+            api._safe_sync_triage_to_telegram = originals["triage"]
+            api._enqueue_core_outbound_from_sync = originals["enqueue"]
+
     def test_mock_payment_plus_activation(self) -> None:
         user, _ = login("payer@example.com")
 

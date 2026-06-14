@@ -20,7 +20,8 @@
 - Duplicate Telegram/MAX identities are covered by regression tests: linking an already known messenger account merges the temporary email cabinet into the existing user and keeps pet data.
 - Sync side effects are guarded by ownership checks for reminder deletion: a foreign reminder ID returns 404 and does not send a Telegram/Core sync event.
 - Foreign pet mutation attempts are covered by regression tests: edit pet, main pet, weight, observation, reminder and triage operations return 404 and do not run sync or LLM side effects.
-- Next: monitor sync lag/errors in production and expand regression tests for successful edit/delete synchronization.
+- Successful PWA sync paths are covered by regression tests: pet edits, main-pet changes, weight, observation, reminder and red-flag triage enqueue the expected Telegram/Core rows after successful owner operations.
+- Next: monitor sync lag/errors in production and define the safe contract for pet deletion propagation before adding Telegram/Core delete sync.
 
 ## Stage 3: Personal Cabinet
 
@@ -64,5 +65,5 @@
 - Richer admin UI for `security_audit_events` is in place: the dashboard groups recent warnings/errors and explains them in human-readable language.
 - Add real external uptime provider for `https://temichevvet.ru/api/health`.
 - Add alert rules for 5xx, YooKassa errors, LLM failures and Telegram sync failures.
-- Add more API regression tests as new PWA scenarios move from Telegram into the web app. Duplicate Telegram/MAX identity merges, reminder-delete ownership/sync ordering and foreign pet mutation side effects are already covered.
+- Add more API regression tests as new PWA scenarios move from Telegram into the web app. Duplicate Telegram/MAX identity merges, reminder-delete ownership/sync ordering, foreign pet mutation side effects and successful PWA sync enqueue paths are already covered.
 - Show only a simple user-facing sync status: connected channels, last check and a short readable warning. Keep technical Telegram/MAX sync internals in admin logs.
