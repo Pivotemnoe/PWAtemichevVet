@@ -31,8 +31,6 @@ const startupAction = (() => {
 
 const authView = document.querySelector("#authView");
 const mainView = document.querySelector("main");
-const dashboardTemplate = document.querySelector("#dashboardTemplate");
-const adminTemplate = document.querySelector("#adminTemplate");
 let dashboardView = document.querySelector("#dashboardView");
 let adminView = document.querySelector("#adminView");
 let adminLoginPanel = null;
@@ -62,7 +60,6 @@ const emailHint = document.querySelector("#emailHint");
 const messengerHint = document.querySelector("#messengerHint");
 const telegramBtn = document.querySelector("#telegramBtn");
 const maxBtn = document.querySelector("#maxBtn");
-let logoutBtn = document.querySelector("#logoutBtn");
 const installBtn = document.querySelector("#installBtn");
 let workspace = document.querySelector("#workspace");
 const privacyConsent = document.querySelector("#privacyConsent");
@@ -73,6 +70,62 @@ const legalCloseBtn = document.querySelector("#legalCloseBtn");
 const cookieBanner = document.querySelector("#cookieBanner");
 const cookieAcceptBtn = document.querySelector("#cookieAcceptBtn");
 const cookieNecessaryBtn = document.querySelector("#cookieNecessaryBtn");
+
+const DASHBOARD_VIEW_HTML = `
+  <section class="dashboard-view" id="dashboardView" hidden>
+    <div class="dashboard-head">
+      <div>
+        <p class="section-label">Личный кабинет</p>
+        <h1>Выберите действие</h1>
+      </div>
+    </div>
+
+    <div class="action-grid">
+      <button class="action-tile" data-action="triage" type="button">
+        <span class="tile-icon">🩺</span>
+        <span>Проверить симптомы</span>
+      </button>
+      <button class="action-tile" data-action="pets" type="button">
+        <span class="tile-icon">🐾</span>
+        <span>Мои питомцы</span>
+      </button>
+      <button class="action-tile" data-action="reminders" type="button">
+        <span class="tile-icon">⏰</span>
+        <span>Напоминания</span>
+      </button>
+      <button class="action-tile" data-action="history" type="button">
+        <span class="tile-icon">📜</span>
+        <span>История здоровья</span>
+      </button>
+      <button class="action-tile" data-action="food" type="button">
+        <span class="tile-icon">🍽️</span>
+        <span>Питание</span>
+      </button>
+      <button class="action-tile" data-action="care" type="button">
+        <span class="tile-icon">🧴</span>
+        <span>Уход и привычки</span>
+      </button>
+      <button class="action-tile" data-action="faq" type="button">
+        <span class="tile-icon">❓</span>
+        <span>Вопросы и ответы</span>
+      </button>
+      <button class="action-tile" data-action="subscription" type="button">
+        <span class="tile-icon">💳</span>
+        <span>Подписка</span>
+      </button>
+    </div>
+    <div class="secondary-menu-row">
+      <button class="secondary-button" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <h2>Личный кабинет готов</h2>
+      <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
+    </div>
+  </section>
+`;
+
+const ADMIN_VIEW_HTML = `<section class="admin-view" id="adminView" hidden></section>`;
 
 const reminderTypes = [
   ["vaccine", "Вакцинация"],
@@ -102,28 +155,31 @@ const periodicityOptions = [
   ["yearly", "Раз в год"]
 ];
 
+function createElementFromHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html.trim();
+  return template.content.firstElementChild;
+}
+
 function ensureDashboardView() {
   if (dashboardView && document.body.contains(dashboardView)) return dashboardView;
-  const dashboardNode = dashboardTemplate?.content?.firstElementChild?.cloneNode(true);
+  const dashboardNode = createElementFromHtml(DASHBOARD_VIEW_HTML);
   if (!dashboardNode || !mainView) return null;
   mainView.append(dashboardNode);
   dashboardView = document.querySelector("#dashboardView");
-  logoutBtn = document.querySelector("#logoutBtn");
   workspace = document.querySelector("#workspace");
-  logoutBtn?.addEventListener("click", performLogout);
   return dashboardView;
 }
 
 function removeDashboardView() {
   if (dashboardView && document.body.contains(dashboardView)) dashboardView.remove();
   dashboardView = null;
-  logoutBtn = null;
   workspace = null;
 }
 
 function ensureAdminView() {
   if (adminView && document.body.contains(adminView)) return adminView;
-  const adminNode = adminTemplate?.content?.firstElementChild?.cloneNode(true);
+  const adminNode = createElementFromHtml(ADMIN_VIEW_HTML);
   if (!adminNode || !mainView) return null;
   mainView.append(adminNode);
   adminView = document.querySelector("#adminView");
@@ -487,7 +543,7 @@ function setCookieConsent(value) {
   localStorage.setItem("tvv_cookie_consent", JSON.stringify({
     value,
     accepted_at: new Date().toISOString(),
-    version: "20260613-errorcopy-1"
+    version: "20260615-cabinet-publicdom-1"
   }));
   cookieBanner.hidden = true;
   if (value === "all") loadMetrika();
@@ -1620,9 +1676,8 @@ function renderMore() {
       <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
       <button class="secondary-button" data-action="observations" type="button">📊 Наблюдения</button>
       <button class="secondary-button" data-action="subscription" type="button">💳 Подписка</button>
-      <button class="secondary-button" data-action="account" type="button">🔐 Способы входа</button>
+      <button class="secondary-button" data-action="account" type="button">⚙️ Настройки аккаунта</button>
       <button class="secondary-button" data-action="feedback" type="button">✉️ Обратная связь</button>
-      <button class="secondary-button danger-text" data-action="logout" type="button">Выйти</button>
     </div>
     <div class="care-note">
       Питание, уход и вопросы-ответы не расходуют лимит проверок симптомов. Для срочной ситуации используйте «Проверить симптомы».
@@ -1729,10 +1784,14 @@ async function renderAccountLinks() {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Способы входа</h2>
-        <p>Подключите мессенджеры к текущему кабинету, чтобы не создавать второй аккаунт и не разделять питомцев, историю и подписку.</p>
+        <h2>Настройки аккаунта</h2>
+        <p>Способы входа, синхронизация, безопасность сессий и управление персональными данными.</p>
       </div>
       <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+    </div>
+    <div class="profile-card">
+      <h3>Способы входа</h3>
+      <p>Подключите мессенджеры к текущему кабинету, чтобы не создавать второй аккаунт и не разделять питомцев, историю и подписку.</p>
     </div>
     <div class="profile-card">
       <h3>Email</h3>
@@ -1760,9 +1819,10 @@ async function renderAccountLinks() {
     </div>
     ${renderPushCard(push)}
     <div class="profile-card">
-      <h3>Безопасность и данные</h3>
-      <p>Здесь можно завершить активные входы, скачать данные кабинета или оставить запрос на удаление персональных данных.</p>
+      <h3>Аккаунт</h3>
+      <p>Здесь можно выйти из текущей сессии, завершить активные входы, скачать данные кабинета или оставить запрос на удаление персональных данных.</p>
       <div class="inline-actions">
+        <button class="secondary-button compact" data-action="logout" type="button">Выйти</button>
         <button class="secondary-button compact" data-action="export-account-data" type="button">Скачать мои данные</button>
         <button class="secondary-button compact" data-action="revoke-sessions" type="button">Выйти со всех устройств</button>
         <button class="secondary-button compact danger-text" data-action="show-data-deletion" type="button">Запросить удаление данных</button>
@@ -3037,8 +3097,6 @@ cookieAcceptBtn.addEventListener("click", () => setCookieConsent("all"));
 cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary"));
 telegramBtn.addEventListener("click", () => startMessenger("telegram"));
 maxBtn.addEventListener("click", () => startMessenger("max"));
-
-logoutBtn?.addEventListener("click", performLogout);
 
 window.addEventListener("focus", () => {
   if (!state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);

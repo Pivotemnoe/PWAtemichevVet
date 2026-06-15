@@ -29,6 +29,7 @@ class PublicDomGuard(HTMLParser):
         self.template_depth = 0
         self.template_ids: set[str] = set()
         self.private_ids_outside_template: list[str] = []
+        self.private_ids_anywhere: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -38,6 +39,8 @@ class PublicDomGuard(HTMLParser):
             if element_id:
                 self.template_ids.add(element_id)
             return
+        if element_id in {"dashboardView", "adminView", "logoutBtn", "workspace"}:
+            self.private_ids_anywhere.append(element_id)
         if self.template_depth == 0 and element_id in {"dashboardView", "adminView"}:
             self.private_ids_outside_template.append(element_id)
 
@@ -51,13 +54,25 @@ def check_public_dom_templates() -> None:
     parser = PublicDomGuard()
     parser.feed(html)
 
-    required_templates = {"dashboardTemplate", "adminTemplate"}
-    missing_templates = sorted(required_templates - parser.template_ids)
-    if missing_templates:
-        raise SystemExit(f"missing private view templates: {', '.join(missing_templates)}")
-    if parser.private_ids_outside_template:
-        ids = ", ".join(sorted(set(parser.private_ids_outside_template)))
-        raise SystemExit(f"private views must not be present in public DOM: {ids}")
+    forbidden_templates = {"dashboardTemplate", "adminTemplate"}
+    forbidden_template_ids = sorted(forbidden_templates & parser.template_ids)
+    if forbidden_template_ids:
+        raise SystemExit(f"private templates must not be present in public HTML: {', '.join(forbidden_template_ids)}")
+    if parser.private_ids_anywhere:
+        ids = ", ".join(sorted(set(parser.private_ids_anywhere)))
+        raise SystemExit(f"private view ids must not be present in public HTML: {ids}")
+
+    forbidden_public_text = (
+        "Личный кабинет",
+        "Выберите действие",
+        "Выйти",
+        "Мои питомцы",
+        "Напоминания",
+        "История здоровья",
+    )
+    found_text = [text for text in forbidden_public_text if text in html]
+    if found_text:
+        raise SystemExit(f"private app text must not be present in public HTML: {', '.join(found_text)}")
 
 
 def main() -> None:
