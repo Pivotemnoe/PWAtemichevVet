@@ -327,7 +327,9 @@ p {
 }
 
 .trust-panel {
-  gap: 14px;
+  gap: 12px;
+  padding-top: 22px;
+  padding-bottom: 22px;
   border-color: #b9d9ee;
   background: linear-gradient(180deg, #f7fcff 0%, #ffffff 100%);
 }
@@ -342,13 +344,13 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  flex: 0 0 44px;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
   border-radius: 8px;
   background: #e7f5ed;
   color: #2f9360;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 900;
 }
 
@@ -356,27 +358,8 @@ p {
   max-width: 980px;
 }
 
-.trust-badges {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.trust-badges span {
-  display: flex;
-  align-items: center;
-  min-height: 42px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: #34425a;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
 .trust-disclaimer {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid #bdd7f3;
   border-radius: 8px;
   background: #f1f8ff;
@@ -1829,7 +1812,6 @@ textarea:focus {
   .service-flow,
   .pricing-grid,
   .channel-grid,
-  .trust-badges,
   .install-grid,
   .auth-grid,
   .summary-grid,
