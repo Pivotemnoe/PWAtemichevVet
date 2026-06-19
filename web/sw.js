@@ -1,19 +1,34 @@
-const CACHE_NAME = "temichevvet-trust-compact-1";
+const CACHE_NAME = "temichevvet-max-live-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260615-trust-compact-1",
-  "/static/app.js?v=20260615-trust-compact-1",
-  "/static/manifest.webmanifest?v=20260615-trust-compact-1",
-  "/static/assets/app-icon-192.png?v=20260615-trust-compact-1",
-  "/static/assets/app-icon-512.png?v=20260615-trust-compact-1",
-  "/static/assets/apple-touch-icon.png?v=20260615-trust-compact-1",
-  "/apple-touch-icon.png?v=20260615-trust-compact-1",
-  "/apple-touch-icon-precomposed.png?v=20260615-trust-compact-1",
+  "/static/styles.css?v=20260617-max-live-1",
+  "/static/app.js?v=20260617-max-live-1",
+  "/static/manifest.webmanifest?v=20260617-max-live-1",
+  "/static/assets/app-icon-192.png?v=20260617-max-live-1",
+  "/static/assets/app-icon-512.png?v=20260617-max-live-1",
+  "/static/assets/apple-touch-icon.png?v=20260617-max-live-1",
+  "/apple-touch-icon.png?v=20260617-max-live-1",
+  "/apple-touch-icon-precomposed.png?v=20260617-max-live-1",
   "/static/assets/logo_temichevvet.jpg",
   "/static/assets/hero_pets.jpg",
   "/static/assets/subscription_banner.jpg",
   "/static/assets/onb_step1_add_pet.jpg"
 ];
+
+const PRIVATE_PATH_PREFIXES = [
+  "/api/",
+  "/admin",
+  "/app",
+  "/auth/",
+  "/review-login"
+];
+
+function isPrivateRequest(url) {
+  return PRIVATE_PATH_PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(prefix))
+    || url.searchParams.has("payment")
+    || url.searchParams.has("review")
+    || url.searchParams.has("token");
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -31,14 +46,14 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) {
+  if (isPrivateRequest(url)) {
     return;
   }
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response.ok) {
+          if (response.ok && url.pathname === "/" && !url.search) {
             const copy = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put("/", copy)).catch(() => {});
           }

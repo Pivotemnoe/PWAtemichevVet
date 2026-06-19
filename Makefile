@@ -1,10 +1,13 @@
 PYTHON ?= .venv/bin/python
 NODE ?= node
 
-.PHONY: run check
+.PHONY: run check max-webhook
 
 run:
 	$(PYTHON) -m app.main
+
+max-webhook:
+	$(PYTHON) scripts/setup_max_webhook.py
 
 check:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m compileall -q app scripts

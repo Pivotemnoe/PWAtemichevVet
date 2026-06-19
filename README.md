@@ -80,9 +80,12 @@ Set these values in `.env`:
 ```text
 MAX_BOT_USERNAME=id230210303969_bot
 MAX_BOT_TOKEN=...
+MAX_WEBHOOK_SECRET=long-random-secret-with-letters-digits-dashes-or-underscores
 ```
 
-MAX login is used only to confirm identity and open or connect the same PWA account. The full MAX bot with service menus and scenarios is a separate product step.
+MAX login confirms identity and opens or connects the same PWA account. The MAX bot is also a lightweight entry point: if `bot_started` arrives without a valid PWA login state, or MAX sends `message_created`/`message_callback`, the bot sends a basic menu with links to the PWA cabinet, triage, pets, reminders, subscription, and help. Telegram remains a separate channel and is not reimplemented in MAX chat.
+
+When the PWA is opened as a MAX mini app, the frontend sends `window.WebApp.initData` to `POST /api/auth/max/init`. The backend validates the MAX signature with `MAX_BOT_TOKEN`, checks `auth_date`, reads the verified MAX `user.id`, and creates the same PWA session used by email, Telegram, and challenge-based MAX login.
 
 For local development without a public HTTPS webhook, run polling in a second terminal:
 
@@ -91,6 +94,22 @@ For local development without a public HTTPS webhook, run polling in a second te
 ```
 
 Production uses `POST /api/webhooks/max` behind HTTPS and requires `MAX_WEBHOOK_SECRET`.
+
+After the production PWA is deployed on HTTPS, register the webhook subscription:
+
+```bash
+make max-webhook
+```
+
+By default this sends `APP_BASE_URL + /api/webhooks/max` to MAX when `APP_BASE_URL` is public HTTPS. If `.env` still has the local development URL, the script uses the production webhook `https://temichevvet.ru/api/webhooks/max`. It subscribes to `bot_started`, `message_created`, and `message_callback`. MAX requires a trusted HTTPS certificate on port 443; long polling is only for local checks. The bot token is available in MAX Partners: `Чат-боты -> Перейти -> Расширенные настройки -> Настроить`.
+
+For the current MAX bot created in the partner cabinet:
+
+```text
+MAX_BOT_USERNAME=id230210303969_bot
+```
+
+Do not commit `.env`; it contains the live MAX token.
 
 ## PWA Push Follow-Ups
 
@@ -134,6 +153,7 @@ git push -u origin main
 
 - `docs/ROADMAP.md`: implementation stages and priorities.
 - `docs/DEPLOYMENT.md`: local run, environment variables, Docker, production checklist.
+- `docs/DB_SCHEMA.md`: current SQLite tables, data ownership, audit and PostgreSQL migration notes.
 - `docs/PRODUCTION.md`: live VPS layout, domains, services, and health checks.
 - `scripts/monitor_public.py`: public healthcheck and closed monitoring status checker for cron/systemd/external uptime agents.
 - `infra/systemd/`: production timers for monitoring checks and PWA follow-up notifications.

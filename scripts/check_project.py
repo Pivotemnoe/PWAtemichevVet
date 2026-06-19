@@ -19,7 +19,9 @@ REQUIRED_FILES = (
     "web/manifest.webmanifest",
     "web/sw.js",
     "web/assets/icon.svg",
+    "docs/DB_SCHEMA.md",
     "scripts/max_poll.py",
+    "scripts/setup_max_webhook.py",
 )
 
 
@@ -73,6 +75,33 @@ def check_public_dom_templates() -> None:
     found_text = [text for text in forbidden_public_text if text in html]
     if found_text:
         raise SystemExit(f"private app text must not be present in public HTML: {', '.join(found_text)}")
+    forbidden_artifacts = (
+        "<h2 id=\"legalModalTitle\">Документ</h2>",
+        ">×</button>",
+    )
+    found_artifacts = [text for text in forbidden_artifacts if text in html]
+    if found_artifacts:
+        raise SystemExit("public HTML contains technical modal artifacts")
+    for modal_id in ("authDialog", "legalModal"):
+        if f'id="{modal_id}" hidden aria-hidden="true"' not in html:
+            raise SystemExit(f"{modal_id} must be hidden from public accessibility tree by default")
+
+
+def check_public_seo() -> None:
+    html = (ROOT / "web/index.html").read_text(encoding="utf-8")
+    required = {
+        "public title": "<title>TemichevVet — оценка срочности симптомов у собак и кошек</title>",
+        "meta description": 'name="description"',
+        "canonical": '<link rel="canonical" href="https://temichevvet.ru/"',
+        "og title": 'property="og:title"',
+        "og image": 'property="og:image"',
+        "webapplication json-ld": '"@type": "WebApplication"',
+        "organization json-ld": '"@type": "Organization"',
+        "person json-ld": '"@type": "Person"',
+    }
+    missing = [label for label, needle in required.items() if needle not in html]
+    if missing:
+        raise SystemExit(f"public SEO metadata missing: {', '.join(missing)}")
 
 
 def main() -> None:
@@ -81,20 +110,48 @@ def main() -> None:
         raise SystemExit(f"missing required files: {', '.join(missing)}")
 
     check_public_dom_templates()
+    check_public_seo()
 
     manifest = (ROOT / "web/manifest.webmanifest").read_text(encoding="utf-8")
     if "TemichevVet" not in manifest:
         raise SystemExit("manifest does not contain app name")
 
     js = (ROOT / "web/app.js").read_text(encoding="utf-8")
+    if 'localStorage.setItem("tvv_token"' in js or "localStorage.setItem('tvv_token'" in js:
+        raise SystemExit("user auth token must not be written to localStorage")
+    if "tvv_admin_token" in js:
+        raise SystemExit("admin auth token must not be stored or read from localStorage")
+    for key in ("tvv_telegram_login_state", "tvv_telegram_login_url", "tvv_max_login_state", "tvv_max_login_url"):
+        if f'localStorage.setItem("{key}"' in js or f"localStorage.setItem('{key}'" in js:
+            raise SystemExit(f"messenger login challenge must not be written to localStorage: {key}")
+
     for endpoint in (
         "/api/auth/email/start",
         "/api/auth/email/verify",
         "/api/auth/${provider}/start",
         "/api/auth/max/status",
+        "/api/auth/max/init",
     ):
         if endpoint not in js:
             raise SystemExit(f"frontend does not reference {endpoint}")
+
+    backend = (ROOT / "app/main.py").read_text(encoding="utf-8")
+    for legal_path in (
+        "/privacy",
+        "/consent",
+        "/terms",
+        "/offer",
+        "/medical-disclaimer",
+        "/cookies",
+        "/contacts",
+    ):
+        if f'@app.get("{legal_path}"' not in backend:
+            raise SystemExit(f"backend does not expose standalone legal route {legal_path}")
+
+    sw = (ROOT / "web/sw.js").read_text(encoding="utf-8")
+    for private_path in ('"/api/"', '"/admin"', '"/app"', '"/review-login"'):
+        if private_path not in sw:
+            raise SystemExit(f"service worker private cache guard misses {private_path}")
 
     print("pwa project check ok")
 

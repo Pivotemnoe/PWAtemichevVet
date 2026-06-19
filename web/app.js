@@ -1,10 +1,11 @@
+const legacySessionToken = localStorage.getItem("tvv_token") || "";
+
 const state = {
-  token: localStorage.getItem("tvv_token") || "",
-  adminToken: localStorage.getItem("tvv_admin_token") || "",
-  telegramLoginState: localStorage.getItem("tvv_telegram_login_state") || "",
-  telegramLoginUrl: localStorage.getItem("tvv_telegram_login_url") || "",
-  maxLoginState: localStorage.getItem("tvv_max_login_state") || "",
-  maxLoginUrl: localStorage.getItem("tvv_max_login_url") || "",
+  token: legacySessionToken,
+  telegramLoginState: "",
+  telegramLoginUrl: "",
+  maxLoginState: "",
+  maxLoginUrl: "",
   deferredInstall: null,
   telegramPollTimer: null,
   maxPollTimer: null,
@@ -24,10 +25,34 @@ const OPERATOR_EMAIL = "support@temichevvet.ru";
 const METRIKA_ID = 109726654;
 let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
-const startupAction = (() => {
-  const action = new URLSearchParams(window.location.search).get("action") || "";
-  return ["triage", "pets", "reminders"].includes(action) ? action : "";
-})();
+const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more"]);
+let consumedStartupAction = "";
+
+function normalizeStartupAction(action) {
+  return STARTUP_ACTIONS.has(action) ? action : "";
+}
+
+function getMaxMiniAppStartParam() {
+  const webApp = window.WebApp;
+  const unsafeParam = webApp?.initDataUnsafe?.start_param;
+  if (typeof unsafeParam === "string" && unsafeParam.trim()) {
+    return unsafeParam.trim();
+  }
+  const initData = typeof webApp?.initData === "string" ? webApp.initData.trim() : "";
+  if (!initData) return "";
+  try {
+    return new URLSearchParams(initData).get("start_param") || "";
+  } catch {
+    return "";
+  }
+}
+
+function getStartupAction() {
+  const queryAction = new URLSearchParams(window.location.search).get("action") || "";
+  const action = normalizeStartupAction(queryAction || getMaxMiniAppStartParam());
+  return action && action !== consumedStartupAction ? action : "";
+}
+let maxMiniAppAuthTried = false;
 
 const authView = document.querySelector("#authView");
 const mainView = document.querySelector("main");
@@ -214,27 +239,26 @@ function setAdminMode(isAuthed) {
 
 function openAuthDialog() {
   authDialog.hidden = false;
+  authDialog.setAttribute("aria-hidden", "false");
   setTimeout(() => emailInput?.focus(), 0);
 }
 
 function closeAuthDialog() {
-  if (authDialog) authDialog.hidden = true;
+  if (!authDialog) return;
+  authDialog.hidden = true;
+  authDialog.setAttribute("aria-hidden", "true");
 }
 
 async function performLogout() {
-  if (state.token) {
-    try {
-      await api("/api/auth/logout", { method: "POST", body: "{}" });
-    } catch {
-      // Local logout still needs to happen even if the session is already expired.
-    }
+  try {
+    await api("/api/auth/logout", { method: "POST", body: "{}" });
+  } catch {
+    // Local logout still needs to happen even if the session is already expired.
   }
   stopTelegramPolling();
   clearTelegramLogin();
   stopMaxPolling();
   clearMaxLogin();
-  localStorage.removeItem("tvv_token");
-  state.token = "";
   clearAccountState();
   setAuthMode(false);
 }
@@ -505,10 +529,12 @@ function openLegalModal(type = "privacy") {
   legalModalTitle.textContent = doc.title;
   legalContent.innerHTML = doc.html;
   legalModal.hidden = false;
+  legalModal.setAttribute("aria-hidden", "false");
 }
 
 function closeLegalModal() {
   legalModal.hidden = true;
+  legalModal.setAttribute("aria-hidden", "true");
 }
 
 const legalPathMap = {
@@ -666,7 +692,7 @@ async function api(path, options = {}) {
   if (state.token) {
     headers.Authorization = `Bearer ${state.token}`;
   }
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || "request_failed");
@@ -679,10 +705,7 @@ async function adminApi(path, options = {}) {
     "Content-Type": "application/json",
     ...(options.headers || {})
   };
-  if (state.adminToken) {
-    headers.Authorization = `Bearer ${state.adminToken}`;
-  }
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || "admin_request_failed");
@@ -788,15 +811,13 @@ function bindAdminEvents() {
     event.preventDefault();
     setAdminHint("Проверяю логин и пароль...");
     try {
-      const data = await adminApi("/api/admin/auth/login", {
+      await adminApi("/api/admin/auth/login", {
         method: "POST",
         body: JSON.stringify({
           username: adminUsernameInput.value,
           password: adminPasswordInput.value
         })
       });
-      state.adminToken = data.token;
-      localStorage.setItem("tvv_admin_token", data.token);
       adminPasswordInput.value = "";
       setAdminHint("");
       await loadAdminDashboard();
@@ -840,15 +861,11 @@ function bindAdminEvents() {
   });
 
   adminLogoutBtn?.addEventListener("click", async () => {
-    if (state.adminToken) {
-      try {
-        await adminApi("/api/admin/auth/logout", { method: "POST", body: "{}" });
-      } catch {
-        // Local admin logout still needs to happen if the server session has expired.
-      }
+    try {
+      await adminApi("/api/admin/auth/logout", { method: "POST", body: "{}" });
+    } catch {
+      // Local admin logout still needs to happen if the server session has expired.
     }
-    localStorage.removeItem("tvv_admin_token");
-    state.adminToken = "";
     setAdminMode(false);
   });
 }
@@ -1167,29 +1184,34 @@ async function loadAdminDashboard() {
 }
 
 async function bootstrapAdmin() {
-  setAdminMode(Boolean(state.adminToken));
-  if (!state.adminToken) {
-    setTimeout(() => adminPasswordInput?.focus(), 0);
-    return;
-  }
+  setAdminMode(false);
   try {
     await loadAdminDashboard();
   } catch (error) {
-    localStorage.removeItem("tvv_admin_token");
-    state.adminToken = "";
     setAdminMode(false);
-    setAdminHint(adminReadableError(error.message), true);
+    if (!["authorization_required", "invalid_admin_session"].includes(error.message)) {
+      setAdminHint(adminReadableError(error.message), true);
+    }
+    setTimeout(() => adminPasswordInput?.focus(), 0);
   }
 }
 
 function clearStartupAction() {
+  const startupAction = getStartupAction();
   if (!startupAction) return;
+  consumedStartupAction = startupAction;
   const url = new URL(window.location.href);
   url.searchParams.delete("action");
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 async function renderStartupView() {
+  const startupAction = getStartupAction();
+  if (startupAction === "home") {
+    await renderHome();
+    clearStartupAction();
+    return;
+  }
   if (startupAction === "triage") {
     await renderTriage();
     clearStartupAction();
@@ -1205,10 +1227,23 @@ async function renderStartupView() {
     clearStartupAction();
     return;
   }
+  if (startupAction === "subscription") {
+    await refreshAccountState();
+    renderSubscription();
+    clearStartupAction();
+    return;
+  }
+  if (startupAction === "more") {
+    renderMore();
+    clearStartupAction();
+    return;
+  }
   await renderHome();
 }
 
 function applyAccountState(data) {
+  state.token = "";
+  localStorage.removeItem("tvv_token");
   state.user = data.user || null;
   state.externalAccounts = data.external_accounts || [];
   state.subscription = data.subscription || null;
@@ -1217,11 +1252,18 @@ function applyAccountState(data) {
 }
 
 function clearAccountState() {
+  state.token = "";
   state.user = null;
   state.externalAccounts = [];
   state.subscription = null;
+  state.pets = [];
+  state.currentPetId = null;
+  state.pushConfig = null;
+  state.lastPlusPaymentId = "";
   state.telegramProfileSync = null;
   state.lastSyncCheckAt = "";
+  localStorage.removeItem("tvv_token");
+  localStorage.removeItem("tvv_last_plus_payment_id");
 }
 
 async function bootstrap() {
@@ -1231,6 +1273,7 @@ async function bootstrap() {
   }
   const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus";
   if (!state.token) {
+    if (await tryMaxMiniAppLogin()) return;
     try {
       const data = await api("/api/me");
       applyAccountState(data);
@@ -1550,11 +1593,11 @@ function renderHistoryCard(item) {
 function renderEmptyBlock({ icon = "ℹ️", title, text, action, actionText }) {
   return `
     <div class="empty-state empty-card">
-      <div class="empty-icon">${icon}</div>
+      <div class="empty-icon">${escapeHtml(icon)}</div>
       <div>
         <h3>${escapeHtml(title)}</h3>
         <p>${escapeHtml(text)}</p>
-        ${action ? `<button class="primary-button compact" data-action="${action}" type="button">${escapeHtml(actionText || "Продолжить")}</button>` : ""}
+        ${action ? `<button class="primary-button compact" data-action="${escapeHtml(action)}" type="button">${escapeHtml(actionText || "Продолжить")}</button>` : ""}
       </div>
     </div>
   `;
@@ -1933,9 +1976,9 @@ async function pollAccountLink(provider, loginState, attempt = 0) {
   }
   try {
     const data = await api(`/api/auth/${provider}/status?state=${encodeURIComponent(loginState)}`, { method: "GET" });
-    if (data.status === "complete" && data.token) {
-      state.token = data.token;
-      localStorage.setItem("tvv_token", data.token);
+    if (data.status === "complete") {
+      state.token = "";
+      localStorage.removeItem("tvv_token");
       await refreshAccountState();
       setAccountLinkHint("Способ входа подключён к этому кабинету.");
       setTimeout(renderAccountLinks, 700);
@@ -1975,11 +2018,7 @@ async function revokeAllSessions() {
   clearTelegramLogin();
   stopMaxPolling();
   clearMaxLogin();
-  localStorage.removeItem("tvv_token");
-  state.token = "";
-  state.user = null;
-  state.externalAccounts = [];
-  state.subscription = null;
+  clearAccountState();
   setAuthMode(false);
   openAuthDialog();
   emailHint.textContent = "Все сессии завершены. Войдите заново удобным способом.";
@@ -2634,7 +2673,8 @@ async function renderKnowledgeSection(kind) {
 }
 
 function paymentStatusNotice(message, type = "") {
-  const className = type ? `notice ${type}` : "notice";
+  const noticeType = new Set(["danger", "success", "warning"]).has(type) ? type : "";
+  const className = noticeType ? `notice ${noticeType}` : "notice";
   return `<div class="${className}">${escapeHtml(message)}</div>`;
 }
 
@@ -2854,12 +2894,12 @@ async function renderGlobalObservations() {
 async function verifyEmailCode() {
   emailHint.textContent = "Проверяю код...";
   try {
-    const data = await api("/api/auth/email/verify", {
+    await api("/api/auth/email/verify", {
       method: "POST",
       body: JSON.stringify({ email: emailInput.value, code: codeInput.value })
     });
-    state.token = data.token;
-    localStorage.setItem("tvv_token", data.token);
+    state.token = "";
+    localStorage.removeItem("tvv_token");
     await refreshAccountState();
     setAuthMode(true);
     emailHint.textContent = "";
@@ -2920,11 +2960,39 @@ async function startMessenger(provider) {
   }
 }
 
+function getMaxMiniAppInitData() {
+  const webApp = window.WebApp;
+  return typeof webApp?.initData === "string" ? webApp.initData.trim() : "";
+}
+
+async function tryMaxMiniAppLogin() {
+  if (maxMiniAppAuthTried || state.token) return false;
+  const initData = getMaxMiniAppInitData();
+  if (!initData) return false;
+  maxMiniAppAuthTried = true;
+  try {
+    const data = await api("/api/auth/max/init", {
+      method: "POST",
+      body: JSON.stringify({ init_data: initData })
+    });
+    if (data.status === "complete") {
+      state.token = "";
+      localStorage.removeItem("tvv_token");
+      clearMaxLogin();
+      await refreshAccountState();
+      setAuthMode(true);
+      await renderStartupView();
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 function saveTelegramLogin(loginState, url) {
   state.telegramLoginState = loginState;
   state.telegramLoginUrl = url;
-  localStorage.setItem("tvv_telegram_login_state", loginState);
-  localStorage.setItem("tvv_telegram_login_url", url);
 }
 
 function clearTelegramLogin() {
@@ -2976,11 +3044,10 @@ async function pollTelegramLogin(loginState, attempt = 0) {
   }
   try {
     const data = await api(`/api/auth/telegram/status?state=${encodeURIComponent(loginState)}`, { method: "GET" });
-    if (data.status === "complete" && data.token) {
-      state.token = data.token;
-      state.user = data.user;
+    if (data.status === "complete") {
+      state.token = "";
       await refreshAccountState();
-      localStorage.setItem("tvv_token", data.token);
+      localStorage.removeItem("tvv_token");
       clearTelegramLogin();
       messengerHint.textContent = "Telegram-вход подтвержден.";
       setAuthMode(true);
@@ -3005,8 +3072,6 @@ async function pollTelegramLogin(loginState, attempt = 0) {
 function saveMaxLogin(loginState, url) {
   state.maxLoginState = loginState;
   state.maxLoginUrl = url;
-  localStorage.setItem("tvv_max_login_state", loginState);
-  localStorage.setItem("tvv_max_login_url", url);
 }
 
 function clearMaxLogin() {
@@ -3019,7 +3084,7 @@ function clearMaxLogin() {
 function renderMaxWaiting(url, loginState) {
   messengerHint.innerHTML = "";
   const text = document.createElement("span");
-  text.textContent = "Откройте MAX только для подтверждения входа. После подтверждения вернитесь сюда — сайт завершит вход автоматически.";
+  text.textContent = "Откройте MAX для подтверждения входа. TemichevVetBot и мини-приложение MAX используют тот же личный кабинет.";
   messengerHint.append(text);
 
   const actions = document.createElement("span");
@@ -3058,11 +3123,10 @@ async function pollMaxLogin(loginState, attempt = 0) {
   }
   try {
     const data = await api(`/api/auth/max/status?state=${encodeURIComponent(loginState)}`, { method: "GET" });
-    if (data.status === "complete" && data.token) {
-      state.token = data.token;
-      state.user = data.user;
+    if (data.status === "complete") {
+      state.token = "";
       await refreshAccountState();
-      localStorage.setItem("tvv_token", data.token);
+      localStorage.removeItem("tvv_token");
       clearMaxLogin();
       messengerHint.textContent = "MAX-вход подтвержден.";
       setAuthMode(true);

@@ -91,6 +91,10 @@ textarea {
   font-size: 22px;
 }
 
+.close-button::before {
+  content: "×";
+}
+
 .topbar .icon-button {
   position: absolute;
   right: 20px;
@@ -1495,6 +1499,54 @@ textarea:focus {
   border-radius: 8px;
   background: var(--surface-2);
   color: var(--muted);
+}
+
+.legal-standalone {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.legal-standalone-page {
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 36px 0;
+}
+
+.legal-document {
+  display: grid;
+  gap: 20px;
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.legal-document h1 {
+  margin: 0;
+  font-size: 34px;
+}
+
+.legal-document h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.legal-document p,
+.legal-document li {
+  color: #34425a;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.legal-document section {
+  display: grid;
+  gap: 10px;
+}
+
+.legal-document ul {
+  margin: 0;
+  padding-left: 24px;
 }
 
 .cookie-banner {

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
+from http.cookies import SimpleCookie
 import sys
 import tempfile
 import types
 import unittest
+import urllib.parse
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -36,10 +42,12 @@ os.environ.update(
     }
 )
 
-from fastapi import HTTPException  # noqa: E402
+from fastapi import HTTPException, Response  # noqa: E402
 
 from app import db  # noqa: E402
 from app import main as api  # noqa: E402
+from app import max_auth  # noqa: E402
+from scripts import setup_max_webhook  # noqa: E402
 
 
 class DummyRequest:
@@ -53,17 +61,53 @@ def request(path: str = "/test", method: str = "POST") -> DummyRequest:
     item = DummyRequest()
     item.method = method
     item.url = types.SimpleNamespace(path=path)
+    item.state = types.SimpleNamespace()
     return item
+
+
+def make_max_init_data(
+    bot_token: str,
+    *,
+    user_id: int = 67890,
+    first_name: str = "Max",
+    last_name: str = "User",
+    auth_date: int | None = None,
+) -> str:
+    params = {
+        "auth_date": str(auth_date or int(max_auth.utc_now().timestamp())),
+        "query_id": "test-query-id",
+        "user": json.dumps(
+            {
+                "id": user_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "username": "max_user",
+                "language_code": "ru",
+                "photo_url": None,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    }
+    launch_params = "\n".join(f"{key}={value}" for key, value in sorted(params.items()))
+    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+    params["hash"] = hmac.new(secret_key, launch_params.encode("utf-8"), hashlib.sha256).hexdigest()
+    return urllib.parse.urlencode(params)
 
 
 def login(email: str) -> tuple[dict, str]:
     start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
     assert start.debug_code
+    response = Response()
     session = api.auth_email_verify(
         api.EmailVerifyRequest(email=email, code=start.debug_code),
         request("/api/auth/email/verify"),
+        response,
     )
-    return session.user, session.token
+    cookie = SimpleCookie()
+    cookie.load(response.headers.get("set-cookie", ""))
+    token = cookie[api.USER_SESSION_COOKIE].value if api.USER_SESSION_COOKIE in cookie else ""
+    return session.user, token
 
 
 def disable_external_sync() -> None:
@@ -97,9 +141,209 @@ class ApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(audit_items), 1)
         self.assertEqual(audit_items[0]["provider"], "email")
 
+    def test_logout_revokes_session_and_deletes_cookie(self) -> None:
+        user, token = login("logout-owner@example.com")
+        self.assertTrue(token)
+        self.assertEqual(api.current_user(token)["id"], user["id"])
+
+        response = api.auth_logout(request("/api/auth/logout"), token=token)
+        cookie = SimpleCookie()
+        cookie.load(response.headers.get("set-cookie", ""))
+
+        self.assertIn(api.USER_SESSION_COOKIE, cookie)
+        self.assertEqual(cookie[api.USER_SESSION_COOKIE].value, "")
+        with self.assertRaises(HTTPException) as old_session_exc:
+            api.current_user(token)
+        self.assertEqual(old_session_exc.exception.status_code, 401)
+
+    def test_admin_session_uses_httponly_cookie_and_revokes_on_logout(self) -> None:
+        old_settings = api.settings
+        api.settings = replace(
+            api.settings,
+            admin_username="admin",
+            admin_password_hash=api.make_password_hash("admin-password-123"),
+        )
+        try:
+            login_response = Response()
+            login_result = api.admin_login(
+                api.AdminLoginRequest(username="admin", password="admin-password-123"),
+                request("/api/admin/auth/login"),
+                login_response,
+            )
+            self.assertTrue(login_result.ok)
+            self.assertIsNone(login_result.token)
+
+            cookie = SimpleCookie()
+            cookie.load(login_response.headers.get("set-cookie", ""))
+            self.assertIn(api.ADMIN_SESSION_COOKIE, cookie)
+            admin_token = cookie[api.ADMIN_SESSION_COOKIE].value
+            self.assertTrue(admin_token)
+            self.assertTrue(cookie[api.ADMIN_SESSION_COOKIE]["httponly"])
+
+            session = api.current_admin_session(admin_token)
+            dashboard = api.admin_dashboard(request("/api/admin/dashboard", method="GET"), session)
+            self.assertIn("overview", dashboard)
+
+            logout_response = Response()
+            logout_result = api.admin_logout(request("/api/admin/auth/logout"), logout_response, token=admin_token)
+            self.assertTrue(logout_result["ok"])
+            deleted_cookie = SimpleCookie()
+            deleted_cookie.load(logout_response.headers.get("set-cookie", ""))
+            self.assertIn(api.ADMIN_SESSION_COOKIE, deleted_cookie)
+            self.assertEqual(deleted_cookie[api.ADMIN_SESSION_COOKIE].value, "")
+
+            with self.assertRaises(HTTPException) as old_admin_session_exc:
+                api.current_admin_session(admin_token)
+            self.assertEqual(old_admin_session_exc.exception.status_code, 401)
+        finally:
+            api.settings = old_settings
+
+    def test_email_code_is_single_use(self) -> None:
+        email = "single-use@example.com"
+        start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
+        self.assertTrue(start.debug_code)
+
+        first_response = Response()
+        session = api.auth_email_verify(
+            api.EmailVerifyRequest(email=email, code=start.debug_code),
+            request("/api/auth/email/verify"),
+            first_response,
+        )
+        self.assertEqual(session.user["email"], email)
+
+        with self.assertRaises(HTTPException) as reuse_exc:
+            api.auth_email_verify(
+                api.EmailVerifyRequest(email=email, code=start.debug_code),
+                request("/api/auth/email/verify"),
+                Response(),
+            )
+        self.assertEqual(reuse_exc.exception.status_code, 400)
+        self.assertEqual(reuse_exc.exception.detail, "code_expired_or_not_found")
+
+    def test_new_email_code_invalidates_previous_code(self) -> None:
+        email = "new-code-invalidates-old@example.com"
+        first = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
+        self.assertTrue(first.debug_code)
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute(
+                "UPDATE auth_challenges SET created_at = ? WHERE channel = 'email' AND target = ?",
+                ((api.utc_now() - timedelta(seconds=api.EMAIL_CODE_COOLDOWN_SECONDS + 1)).isoformat(), email),
+            )
+            conn.commit()
+
+        second = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
+        self.assertTrue(second.debug_code)
+        self.assertNotEqual(first.debug_code, second.debug_code)
+
+        with self.assertRaises(HTTPException) as old_code_exc:
+            api.auth_email_verify(
+                api.EmailVerifyRequest(email=email, code=first.debug_code),
+                request("/api/auth/email/verify"),
+                Response(),
+            )
+        self.assertEqual(old_code_exc.exception.status_code, 400)
+        self.assertEqual(old_code_exc.exception.detail, "invalid_code")
+
+        second_response = Response()
+        session = api.auth_email_verify(
+            api.EmailVerifyRequest(email=email, code=second.debug_code),
+            request("/api/auth/email/verify"),
+            second_response,
+        )
+        self.assertEqual(session.user["email"], email)
+
+    def test_email_code_attempt_limit_consumes_challenge(self) -> None:
+        email = "attempt-limit@example.com"
+        start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
+        self.assertTrue(start.debug_code)
+
+        for attempt in range(api.EMAIL_CODE_MAX_VERIFY_ATTEMPTS):
+            with self.assertRaises(HTTPException) as wrong_code_exc:
+                api.auth_email_verify(
+                    api.EmailVerifyRequest(email=email, code="000000"),
+                    request("/api/auth/email/verify"),
+                    Response(),
+                )
+            if attempt + 1 < api.EMAIL_CODE_MAX_VERIFY_ATTEMPTS:
+                self.assertEqual(wrong_code_exc.exception.detail, "invalid_code")
+            else:
+                self.assertEqual(wrong_code_exc.exception.detail, "code_attempts_exceeded")
+
+        with self.assertRaises(HTTPException) as consumed_exc:
+            api.auth_email_verify(
+                api.EmailVerifyRequest(email=email, code=start.debug_code),
+                request("/api/auth/email/verify"),
+                Response(),
+            )
+        self.assertEqual(consumed_exc.exception.detail, "code_expired_or_not_found")
+
+    def test_expired_email_code_is_rejected(self) -> None:
+        email = "expired-code@example.com"
+        raw_code = "123456"
+        db.create_auth_challenge(
+            api.settings.database_path,
+            channel="email",
+            target=email,
+            code_hash=api.hash_value(raw_code, api.settings.session_secret),
+            expires_at=(api.utc_now() - timedelta(minutes=1)).isoformat(),
+        )
+
+        with self.assertRaises(HTTPException) as expired_exc:
+            api.auth_email_verify(
+                api.EmailVerifyRequest(email=email, code=raw_code),
+                request("/api/auth/email/verify"),
+                Response(),
+            )
+        self.assertEqual(expired_exc.exception.status_code, 400)
+        self.assertEqual(expired_exc.exception.detail, "code_expired_or_not_found")
+
+    def test_review_login_token_is_one_time_and_sets_cookie(self) -> None:
+        raw_token = "review-token-for-one-time-test-123456"
+        token_hash = api.hash_value(raw_token, api.settings.session_secret)
+        expires_at = (api.utc_now() + timedelta(minutes=30)).isoformat()
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO review_login_tokens (token_hash, email, note, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    token_hash,
+                    api.REVIEW_ACCOUNT_EMAIL,
+                    "unit-test",
+                    api.utc_now().isoformat(),
+                    expires_at,
+                ),
+            )
+            conn.commit()
+
+        first = api.review_login(request("/review-login", "GET"), token=raw_token)
+        self.assertEqual(first.status_code, 303)
+        self.assertEqual(first.headers["location"], "/app")
+        self.assertIn(api.USER_SESSION_COOKIE, first.headers.get("set-cookie", ""))
+        self.assertEqual(db.get_active_review_login_token(api.settings.database_path, token_hash=token_hash), None)
+
+        second = api.review_login(request("/review-login", "GET"), token=raw_token)
+        self.assertEqual(second.status_code, 410)
+        self.assertIn("Ссылка для аудита недействительна", second.body.decode("utf-8"))
+
+    def test_legal_routes_are_standalone_documents(self) -> None:
+        for page_key, page in api.LEGAL_PAGES.items():
+            with self.subTest(page_key=page_key):
+                response = api._legal_page_response(page_key)
+                body = response.body.decode("utf-8")
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(str(page["title"]), body)
+                self.assertIn("<h1>", body)
+                self.assertNotIn('id="authView"', body)
+                self.assertNotIn('id="dashboardView"', body)
+                self.assertNotIn("Что нужно сделать?", body)
+                self.assertNotIn("legalModal", body)
+                self.assertNotIn("Документ</h2>", body)
+
     def test_me_includes_sync_status_for_cabinet(self) -> None:
-        user, _ = login("sync-status@example.com")
-        profile = api.me(user=user)
+        _, token = login("sync-status@example.com")
+        profile = api.me(request("/api/me", "GET"), Response(), token=token)
 
         self.assertIn("telegram_profile_sync", profile)
         self.assertEqual(profile["telegram_profile_sync"]["synced"], False)
@@ -593,6 +837,30 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIsNone(old_owner_pet)
 
+    def test_telegram_login_challenge_is_one_time_after_complete(self) -> None:
+        state, _ = api.create_telegram_login_challenge(api.settings)
+        confirmed = api.confirm_telegram_login(
+            api.settings,
+            state=state,
+            telegram_id="tg-one-time",
+            display_name="TG One Time",
+        )
+        self.assertEqual(confirmed["handled"], True)
+
+        completed = api.complete_telegram_login(api.settings, state)
+        replay = api.complete_telegram_login(api.settings, state)
+        reconfirm = api.confirm_telegram_login(
+            api.settings,
+            state=state,
+            telegram_id="tg-one-time",
+            display_name="TG One Time",
+        )
+
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(replay["status"], "expired")
+        self.assertEqual(reconfirm["handled"], False)
+        self.assertEqual(reconfirm["reason"], "challenge_not_found")
+
     def test_duplicate_max_identity_merges_email_account_data(self) -> None:
         max_owner, _ = login("max-owner@example.com")
         linked = db.link_external_account(
@@ -611,14 +879,19 @@ class ApiTests(unittest.TestCase):
         )["item"]
 
         state, _ = api.create_max_login_challenge(api.settings, link_user_id=int(email_user["id"]))
-        processed = api.process_max_update(
-            api.settings,
-            {
-                "update_type": "bot_started",
-                "payload": state,
-                "user": {"user_id": "max-duplicate-owner", "name": "MAX Owner"},
-            },
-        )
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: None
+        try:
+            processed = api.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "payload": state,
+                    "user": {"user_id": "max-duplicate-owner", "name": "MAX Owner"},
+                },
+            )
+        finally:
+            max_auth.send_max_text = original
         self.assertEqual(processed["handled"], True)
 
         completed = api.complete_max_login(api.settings, state)
@@ -639,6 +912,246 @@ class ApiTests(unittest.TestCase):
             pet_id=int(pet["id"]),
         )
         self.assertIsNone(old_owner_pet)
+
+    def test_max_login_challenge_confirms_and_completes_session(self) -> None:
+        calls: list[dict] = []
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: calls.append(
+            {"user_id": user_id, "text": text, "attachments": attachments}
+        )
+        try:
+            state, _ = api.create_max_login_challenge(api.settings)
+            processed = api.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "payload": state,
+                    "user": {"user_id": "max-login-user", "name": "MAX Login"},
+                },
+            )
+            completed = api.complete_max_login(api.settings, state)
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(processed["handled"], True)
+        self.assertEqual(processed["action"], "auth_confirmed")
+        self.assertEqual(completed["status"], "complete")
+        self.assertTrue(completed["token"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["user_id"], "max-login-user")
+        self.assertIn("Вход в TemichevVet подтвержден", calls[0]["text"])
+        self.assertNotIn("Разобрать жалобу", calls[0]["text"])
+
+    def test_max_login_challenge_is_one_time_after_complete(self) -> None:
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: None
+        try:
+            state, _ = api.create_max_login_challenge(api.settings)
+            processed = api.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "payload": state,
+                    "user": {"user_id": "max-one-time", "name": "MAX One Time"},
+                },
+            )
+            completed = api.complete_max_login(api.settings, state)
+            replay = api.complete_max_login(api.settings, state)
+            replay_update = api.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "payload": state,
+                    "user": {"user_id": "max-one-time", "name": "MAX One Time"},
+                },
+            )
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(processed["handled"], True)
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(replay["status"], "expired")
+        self.assertEqual(replay_update["handled"], False)
+        self.assertEqual(replay_update["reason"], "challenge_not_found")
+
+    def test_max_init_data_login_creates_session_from_verified_user_id(self) -> None:
+        settings = replace(api.settings, max_bot_token="fake-max-token-for-init-data")
+        init_data = make_max_init_data(settings.max_bot_token, user_id=246813)
+
+        completed = max_auth.complete_max_init_login(settings, init_data)
+
+        self.assertEqual(completed["status"], "complete")
+        self.assertTrue(completed["token"])
+        account = db.get_external_account(
+            api.settings.database_path,
+            user_id=int(completed["user"]["id"]),
+            provider="max",
+        )
+        self.assertIsNotNone(account)
+        self.assertEqual(account["provider_user_id"], "246813")
+        self.assertEqual(account["display_name"], "Max User")
+
+    def test_max_init_data_rejects_tampered_hash(self) -> None:
+        settings = replace(api.settings, max_bot_token="fake-max-token-for-init-data")
+        init_data = make_max_init_data(settings.max_bot_token, user_id=555555).replace("555555", "777777")
+
+        completed = max_auth.complete_max_init_login(settings, init_data)
+
+        self.assertEqual(completed["status"], "expired")
+        self.assertEqual(completed["reason"], "hash_mismatch")
+
+    def test_max_send_message_uses_user_id_query(self) -> None:
+        calls: list[dict] = []
+        original = max_auth._max_request
+        max_auth._max_request = lambda settings, method, path, body=None, query=None: calls.append(
+            {"method": method, "path": path, "body": body, "query": query}
+        ) or {"ok": True}
+        try:
+            max_auth.send_max_text(api.settings, user_id="12345", text="Привет")
+        finally:
+            max_auth._max_request = original
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["method"], "POST")
+        self.assertEqual(calls[0]["path"], "/messages")
+        self.assertEqual(calls[0]["query"], {"user_id": 12345})
+        self.assertEqual(calls[0]["body"], {"text": "Привет"})
+
+    def test_plain_max_start_sends_menu_without_completing_pending_login(self) -> None:
+        calls: list[dict] = []
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: calls.append(
+            {"user_id": user_id, "text": text, "attachments": attachments}
+        )
+        try:
+            pending_state, _ = api.create_max_login_challenge(api.settings)
+            result = max_auth.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "user": {"user_id": "98765", "name": "MAX User"},
+                },
+            )
+            pending = api.complete_max_login(api.settings, pending_state)
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(result["handled"], True)
+        self.assertEqual(result["action"], "welcome")
+        self.assertEqual(pending["status"], "pending")
+        self.assertEqual(calls[0]["user_id"], "98765")
+        self.assertIn("TemichevVet", calls[0]["text"])
+        self.assertEqual(calls[0]["attachments"][0]["type"], "inline_keyboard")
+
+    def test_max_bot_started_with_valid_payload_does_not_send_regular_menu(self) -> None:
+        calls: list[dict] = []
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: calls.append(
+            {"user_id": user_id, "text": text, "attachments": attachments}
+        )
+        try:
+            state, _ = api.create_max_login_challenge(api.settings)
+            result = max_auth.process_max_update(
+                api.settings,
+                {
+                    "update_type": "bot_started",
+                    "payload": state,
+                    "user": {"user_id": "max-valid-state", "name": "MAX User"},
+                },
+            )
+            completed = api.complete_max_login(api.settings, state)
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(result["handled"], True)
+        self.assertEqual(result["action"], "auth_confirmed")
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Вход в TemichevVet подтвержден", calls[0]["text"])
+        self.assertNotIn("Разобрать жалобу", calls[0]["text"])
+
+    def test_max_message_created_sends_welcome(self) -> None:
+        calls: list[dict] = []
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: calls.append(
+            {"user_id": user_id, "text": text, "attachments": attachments}
+        )
+        try:
+            result = max_auth.process_max_update(
+                api.settings,
+                {
+                    "update_type": "message_created",
+                    "message": {
+                        "sender": {"user_id": "24680", "name": "MAX User"},
+                        "body": {"text": "старт"},
+                    },
+                },
+            )
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(result["handled"], True)
+        self.assertEqual(result["action"], "message_menu")
+        self.assertEqual(calls[0]["user_id"], "24680")
+        self.assertIn("Открыть кабинет", calls[0]["attachments"][0]["payload"]["buttons"][0][0]["text"])
+
+    def test_max_menu_uses_mini_app_deep_links_when_app_base_url_is_local(self) -> None:
+        settings = replace(
+            api.settings,
+            app_base_url="http://127.0.0.1:8080",
+            max_bot_username="id230210303969_bot",
+        )
+        buttons = max_auth._open_app_keyboard(settings)[0]["payload"]["buttons"]
+
+        self.assertEqual(buttons[0][0]["url"], "https://max.ru/id230210303969_bot?startapp=home")
+        self.assertEqual(buttons[1][0]["url"], "https://max.ru/id230210303969_bot?startapp=triage")
+        self.assertEqual(buttons[1][1]["url"], "https://max.ru/id230210303969_bot?startapp=pets")
+        self.assertEqual(buttons[2][0]["url"], "https://max.ru/id230210303969_bot?startapp=reminders")
+        self.assertEqual(buttons[2][1]["url"], "https://max.ru/id230210303969_bot?startapp=subscription")
+        self.assertEqual(buttons[3][0]["url"], "https://max.ru/id230210303969_bot?startapp=more")
+
+    def test_max_message_callback_sends_menu(self) -> None:
+        calls: list[dict] = []
+        original = max_auth.send_max_text
+        max_auth.send_max_text = lambda settings, user_id, text, attachments=None: calls.append(
+            {"user_id": user_id, "text": text, "attachments": attachments}
+        )
+        try:
+            result = max_auth.process_max_update(
+                api.settings,
+                {
+                    "update_type": "message_callback",
+                    "user": {"user_id": "13579", "name": "MAX User"},
+                    "callback": {"payload": "menu"},
+                },
+            )
+        finally:
+            max_auth.send_max_text = original
+
+        self.assertEqual(result["handled"], True)
+        self.assertEqual(result["action"], "callback_menu")
+        self.assertEqual(calls[0]["user_id"], "13579")
+        self.assertIn("Открыть кабинет", calls[0]["attachments"][0]["payload"]["buttons"][0][0]["text"])
+
+    def test_max_webhook_setup_defaults_to_production_url_when_app_url_is_local(self) -> None:
+        resolved = setup_max_webhook._resolve_webhook_url("http://127.0.0.1:8080", "")
+        self.assertEqual(resolved, "https://temichevvet.ru/api/webhooks/max")
+
+    def test_max_webhook_setup_rejects_non_https_url(self) -> None:
+        with self.assertRaises(SystemExit):
+            setup_max_webhook._resolve_webhook_url("", "http://temichevvet.ru/api/webhooks/max")
+
+    def test_max_webhook_setup_redacts_secrets_from_output(self) -> None:
+        redacted = setup_max_webhook._redact_sensitive(
+            {
+                "id": "sub-1",
+                "secret": "live-secret",
+                "nested": {"access_token": "live-token", "url": "https://temichevvet.ru"},
+            }
+        )
+        self.assertEqual(redacted["secret"], "***")
+        self.assertEqual(redacted["nested"]["access_token"], "***")
+        self.assertEqual(redacted["nested"]["url"], "https://temichevvet.ru")
 
     def test_payment_status_owner_only(self) -> None:
         user_a, _ = login("payment-owner-a@example.com")
@@ -693,11 +1206,22 @@ class ApiTests(unittest.TestCase):
         status = api.monitoring_status()
         self.assertEqual(status["ok"], True)
         self.assertIn("events_1h", status)
+        self.assertIn("status_help", status)
+        status_help = status["status_help"]
+        self.assertIn("SMTP_HOST", status_help["email_configured"])
+        self.assertIn("Telegram-вход", status_help["telegram_login_configured"])
+        self.assertIn("MAX-вход", status_help["max_login_configured"])
+        self.assertIn("YOOKASSA_SHOP_ID", status_help["yookassa_configured"])
+        self.assertIn("OPENAI_API_KEY", status_help["llm_configured"])
+        self.assertIn("CORE_API_SECRET", status_help["core_api_configured"])
         integration = {item["key"]: item for item in status["integration_events_24h"]}
         self.assertEqual(integration["payments"]["warnings"], 1)
         self.assertEqual(integration["llm"]["errors"], 1)
         self.assertEqual(integration["sync"]["errors"], 1)
         self.assertEqual(integration["api"]["status"], "ok")
+        self.assertIn("YooKassa", integration["payments"]["help"])
+        self.assertIn("OpenAI", integration["llm"]["help"])
+        self.assertIn("Telegram-ботом", integration["sync"]["help"])
 
         audit = api.admin_security_audit(limit=10)
         self.assertIn("items", audit)
@@ -714,6 +1238,37 @@ class ApiTests(unittest.TestCase):
                 for row in breakdown
             )
         )
+
+    def test_security_audit_metadata_filters_medical_text(self) -> None:
+        complaint = "кошка вялая второй день, была рвота желтым"
+        llm_answer = "подробный ответ модели с медицинскими рекомендациями"
+        event = db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="llm.triage_failed",
+            status="error",
+            actor="test",
+            metadata={
+                "error": "RuntimeError",
+                "plan": "free",
+                "complaint_text": complaint,
+                "response_text": llm_answer,
+                "symptoms": "рвота, кровь, отказ от еды",
+                "message": "пользовательский текст",
+                "safe_long": "x" * 400,
+            },
+        )
+
+        metadata = event["metadata"]
+        serialized = json.dumps(metadata, ensure_ascii=False)
+        self.assertEqual(metadata["error"], "RuntimeError")
+        self.assertEqual(metadata["plan"], "free")
+        self.assertEqual(len(metadata["safe_long"]), 240)
+        self.assertNotIn("complaint_text", metadata)
+        self.assertNotIn("response_text", metadata)
+        self.assertNotIn("symptoms", metadata)
+        self.assertNotIn("message", metadata)
+        self.assertNotIn(complaint, serialized)
+        self.assertNotIn(llm_answer, serialized)
 
     def test_push_config_and_subscribe_guard(self) -> None:
         user, _ = login("push-owner@example.com")

@@ -4,12 +4,81 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1476d4" />
-    <title>TemichevVet</title>
-    <link rel="manifest" href="/static/manifest.webmanifest?v=20260615-trust-compact-1" />
-    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260615-trust-compact-1" type="image/png" sizes="192x192" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260615-trust-compact-1" />
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260615-trust-compact-1" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260615-trust-compact-1" />
+    <title>TemichevVet — оценка срочности симптомов у собак и кошек</title>
+    <meta
+      name="description"
+      content="PWA-сервис для владельцев собак и кошек: оценка срочности симптомов, история здоровья питомца, напоминания и подготовка информации для ветеринарного врача."
+    />
+    <link rel="canonical" href="https://temichevvet.ru/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:site_name" content="TemichevVet" />
+    <meta property="og:title" content="TemichevVet — оценка срочности симптомов у собак и кошек" />
+    <meta
+      property="og:description"
+      content="Оценка срочности симптомов, история здоровья питомца, напоминания и подготовка информации для ветеринарного врача."
+    />
+    <meta property="og:url" content="https://temichevvet.ru/" />
+    <meta property="og:image" content="https://temichevvet.ru/static/assets/hero_pets.jpg" />
+    <link rel="manifest" href="/static/manifest.webmanifest?v=20260617-max-live-1" />
+    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260617-max-live-1" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260617-max-live-1" />
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260617-max-live-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260617-max-live-1" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebApplication",
+            "@id": "https://temichevvet.ru/#app",
+            "name": "TemichevVet",
+            "url": "https://temichevvet.ru/",
+            "applicationCategory": "HealthApplication",
+            "operatingSystem": "Web",
+            "inLanguage": "ru-RU",
+            "description": "PWA-сервис для владельцев собак и кошек: оценка срочности симптомов, история здоровья питомца, напоминания и подготовка информации для ветеринарного врача.",
+            "offers": [
+              {
+                "@type": "Offer",
+                "name": "Free",
+                "price": "0",
+                "priceCurrency": "RUB"
+              },
+              {
+                "@type": "Offer",
+                "name": "Plus",
+                "price": "200",
+                "priceCurrency": "RUB",
+                "availability": "https://schema.org/InStock"
+              }
+            ]
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://temichevvet.ru/#organization",
+            "name": "TemichevVet",
+            "url": "https://temichevvet.ru/",
+            "logo": "https://temichevvet.ru/static/assets/logo_temichevvet.jpg",
+            "contactPoint": {
+              "@type": "ContactPoint",
+              "email": "support@temichevvet.ru",
+              "contactType": "customer support",
+              "availableLanguage": "Russian"
+            }
+          },
+          {
+            "@type": "Person",
+            "@id": "https://temichevvet.ru/#konstantin-temichev",
+            "name": "Константин Темичев",
+            "jobTitle": "Кандидат ветеринарных наук",
+            "worksFor": {
+              "@id": "https://temichevvet.ru/#organization"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div class="app-shell">
@@ -203,7 +272,8 @@
               </article>
               <article class="channel-card">
                 <strong>MAX</strong>
-                <p>Вход через MAX предусмотрен для личного кабинета. Полноценная MAX-версия сервиса пока в разработке.</p>
+                <p>MAX уже подключён: вход работает через MAX ID, а TemichevVetBot открывает личный кабинет как мини-приложение внутри MAX.</p>
+                <a href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">Открыть TemichevVet в MAX</a>
               </article>
             </div>
           </section>
@@ -242,15 +312,15 @@
             </p>
           </section>
 
-          <div class="auth-dialog" id="authDialog" hidden role="dialog" aria-modal="true" aria-labelledby="authDialogTitle">
+          <div class="auth-dialog" id="authDialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="authDialogTitle">
             <div class="auth-card">
               <div class="auth-card-head">
                 <div>
                   <p class="section-label">Вход в личный кабинет</p>
                   <h2 id="authDialogTitle">Выберите удобный способ входа</h2>
-                  <p>Один аккаунт нужен для сайта, PWA и подключённых мессенджеров. Мессенджер только подтверждает вход, а работать можно продолжать здесь.</p>
+                  <p>Один аккаунт работает на сайте, в PWA, Telegram и MAX. Через MAX можно войти в кабинет или открыть его прямо внутри MAX.</p>
                 </div>
-                <button class="icon-button" id="authCloseBtn" type="button" title="Закрыть">×</button>
+                <button class="icon-button close-button" id="authCloseBtn" type="button" aria-label="Закрыть окно входа"></button>
               </div>
 
               <div class="auth-grid">
@@ -291,9 +361,9 @@
                   </button>
                   <button class="messenger-button" id="maxBtn" type="button">
                     <span>MAX</span>
-                    <small>Подтвердить вход</small>
+                    <small>Войти или открыть в MAX</small>
                   </button>
-                  <p class="hint" id="messengerHint">Telegram и MAX используются только для подтверждения личности. После подтверждения вернитесь сюда — кабинет откроется автоматически.</p>
+                  <p class="hint" id="messengerHint">Telegram подтверждает вход. MAX подтверждает вход и открывает TemichevVet как мини-приложение внутри MAX.</p>
                 </div>
               </div>
             </div>
@@ -319,11 +389,11 @@
       </footer>
     </div>
 
-    <div class="legal-modal" id="legalModal" hidden role="dialog" aria-modal="true" aria-labelledby="legalModalTitle">
+    <div class="legal-modal" id="legalModal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="legalModalTitle">
       <article class="legal-card">
         <div class="legal-card-head">
-          <h2 id="legalModalTitle">Документ</h2>
-          <button class="icon-button" id="legalCloseBtn" type="button" title="Закрыть">×</button>
+          <h2 id="legalModalTitle">Юридическая информация</h2>
+          <button class="icon-button close-button" id="legalCloseBtn" type="button" aria-label="Закрыть юридический документ"></button>
         </div>
         <div class="legal-content" id="legalContent"></div>
       </article>
@@ -344,6 +414,7 @@
       </div>
     </div>
 
-    <script src="/static/app.js?v=20260615-trust-compact-1" type="module"></script>
+    <script src="https://st.max.ru/js/max-web-app.js"></script>
+    <script src="/static/app.js?v=20260617-max-live-1" type="module"></script>
   </body>
 </html>

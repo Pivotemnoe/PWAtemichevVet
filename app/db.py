@@ -503,18 +503,55 @@ def _json_load(value: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+_AUDIT_METADATA_BLOCKED_KEYS = {
+    "answer",
+    "complaint",
+    "complaint_text",
+    "details",
+    "llm_answer",
+    "message",
+    "note",
+    "notes",
+    "payload",
+    "raw_payload",
+    "response",
+    "response_text",
+    "text",
+}
+_AUDIT_METADATA_BLOCKED_KEY_PARTS = (
+    "anamnesis",
+    "answer_text",
+    "complaint",
+    "diagnosis",
+    "diagnose",
+    "medical",
+    "response_text",
+    "symptom",
+)
+
+
+def _is_safe_audit_metadata_key(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in _AUDIT_METADATA_BLOCKED_KEYS:
+        return False
+    return not any(part in normalized for part in _AUDIT_METADATA_BLOCKED_KEY_PARTS)
+
+
 def _safe_audit_metadata(value: dict[str, Any] | None) -> str | None:
     if not value:
         return None
     safe: dict[str, Any] = {}
     for key, item in value.items():
+        safe_key = str(key)[:80]
+        if not _is_safe_audit_metadata_key(safe_key):
+            continue
         if item is None:
             continue
         if isinstance(item, (bool, int, float)):
-            safe[str(key)[:80]] = item
+            safe[safe_key] = item
             continue
         text = str(item)
-        safe[str(key)[:80]] = text[:240]
+        safe[safe_key] = text[:240]
     payload = _json_dump(safe)
     if payload and len(payload) > 1600:
         return payload[:1600]
@@ -934,6 +971,25 @@ def create_auth_challenge(
         return int(cur.lastrowid)
 
 
+def consume_active_challenges(db_path: Path, *, channel: str, target: str) -> int:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE auth_challenges
+            SET consumed_at = ?
+            WHERE channel = ?
+              AND target = ?
+              AND consumed_at IS NULL
+              AND expires_at > ?
+            """,
+            (utc_now_iso(), channel, target, utc_now_iso()),
+        )
+        consumed = int(cur.rowcount or 0)
+        conn.commit()
+        return consumed
+
+
 def find_active_challenge(db_path: Path, *, channel: str, target: str) -> dict[str, Any] | None:
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
@@ -1345,6 +1401,7 @@ def get_active_review_login_token(db_path: Path, *, token_hash: str) -> dict[str
             FROM review_login_tokens
             WHERE token_hash = ?
               AND revoked_at IS NULL
+              AND last_used_at IS NULL
               AND expires_at > ?
             LIMIT 1
             """,

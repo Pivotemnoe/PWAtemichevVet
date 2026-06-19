@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import sqlite3
+import html
 from collections import defaultdict, deque
 from contextlib import closing
 from datetime import date, datetime, timedelta
@@ -13,8 +14,8 @@ from time import monotonic
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -24,7 +25,7 @@ from app.emailer import send_login_code
 from app.followups import detect_followup_scenario, followup_due_at, followup_payload
 from app.knowledge import check_food, find_care, find_faq, find_food, food_to_public
 from app.llm_triage import call_triage_llm, extract_urgency, short_summary
-from app.max_auth import complete_max_login, create_max_login_challenge, process_max_update
+from app.max_auth import complete_max_init_login, complete_max_login, create_max_login_challenge, process_max_update
 from app.medical_safety import detect_red_flags, render_red_flag_response
 from app.payments.yookassa import (
     PLUS_DAYS,
@@ -96,14 +97,19 @@ EMAIL_CODE_COOLDOWN_SECONDS = 60
 EMAIL_CODE_MAX_PER_HOUR = 5
 EMAIL_CODE_MAX_VERIFY_ATTEMPTS = 5
 USER_SESSION_COOKIE = "tvv_session"
+ADMIN_SESSION_COOKIE = "tvv_admin_session"
 REVIEW_ACCOUNT_EMAIL = "chatgpt-review@temichevvet.ru"
 REVIEW_SESSION_MAX_AGE_SECONDS = 72 * 60 * 60
+REVIEW_LOGIN_TOKEN_MAX_AGE_SECONDS = 60 * 60
+LEGAL_UPDATED_AT = "15.06.2026"
+LEGAL_CONTACT_EMAIL = "support@temichevvet.ru"
 
 
 RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = (
     ("auth_email_start", {"POST"}, ("/api/auth/email/start",), 20, 3600),
     ("auth_email_verify", {"POST"}, ("/api/auth/email/verify",), 40, 3600),
     ("auth_provider_start", {"POST"}, ("/api/auth/telegram/start", "/api/auth/max/start"), 30, 3600),
+    ("auth_max_init", {"POST"}, ("/api/auth/max/init",), 60, 600),
     ("account_provider_start", {"POST"}, ("/api/account/telegram/start", "/api/account/max/start"), 30, 3600),
     ("auth_provider_status", {"GET"}, ("/api/auth/telegram/status", "/api/auth/max/status"), 150, 600),
     ("payment", {"GET", "POST"}, ("/api/payments",), 60, 3600),
@@ -210,7 +216,7 @@ def _apply_security_headers(request: Request, response) -> None:
                 "base-uri 'self'",
                 "object-src 'none'",
                 "frame-ancestors 'none'",
-                "script-src 'self' https://mc.yandex.ru",
+                "script-src 'self' https://mc.yandex.ru https://st.max.ru",
                 "style-src 'self'",
                 "img-src 'self' data: https://mc.yandex.ru https://*.mc.yandex.ru",
                 "font-src 'self' data:",
@@ -223,7 +229,82 @@ def _apply_security_headers(request: Request, response) -> None:
     if settings.app_env == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if request.url.path.startswith("/api/"):
-        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("Cache-Control", "no-store, private")
+        response.headers.setdefault("Pragma", "no-cache")
+
+
+def _set_user_session_cookie(
+    response: Response,
+    token: str,
+    *,
+    max_age: int = 30 * 24 * 60 * 60,
+) -> None:
+    response.set_cookie(
+        USER_SESSION_COOKIE,
+        token,
+        max_age=max_age,
+        expires=max_age,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def _delete_user_session_cookie(response: Response) -> None:
+    response.delete_cookie(USER_SESSION_COOKIE, path="/")
+
+
+def _set_admin_session_cookie(response: Response, token: str, *, max_age: int = 12 * 60 * 60) -> None:
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        token,
+        max_age=max_age,
+        expires=max_age,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def _delete_admin_session_cookie(response: Response) -> None:
+    response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+
+
+def _review_login_error_response() -> HTMLResponse:
+    html = """<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Ссылка для аудита недействительна</title>
+  <style>
+    body{margin:0;font-family:Arial,sans-serif;background:#edf3fb;color:#111827}
+    main{min-height:100vh;display:grid;place-items:center;padding:24px}
+    section{max-width:560px;background:#fff;border:1px solid #d8e2ef;border-radius:16px;padding:28px;box-shadow:0 18px 50px rgba(31,41,55,.12)}
+    h1{font-size:28px;margin:0 0 12px}
+    p{font-size:18px;line-height:1.5;color:#607089;margin:0 0 18px}
+    a{color:#2f6fd1;font-weight:700}
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>Ссылка для аудита недействительна или истекла</h1>
+      <p>Запросите новую временную ссылку. Старые ссылки одноразовые и ограничены по времени.</p>
+      <a href="/">Вернуться на главную</a>
+    </section>
+  </main>
+</body>
+</html>"""
+    response = HTMLResponse(html, status_code=410)
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
 
 
 @app.middleware("http")
@@ -282,7 +363,7 @@ class AdminLoginRequest(BaseModel):
 
 class AdminLoginResponse(BaseModel):
     ok: bool
-    token: str
+    token: str | None = None
     expires_at: str
 
 
@@ -293,7 +374,7 @@ class AdminCredentialsRequest(BaseModel):
 
 
 class SessionResponse(BaseModel):
-    token: str
+    token: str | None = None
     user: dict
 
 
@@ -310,6 +391,10 @@ class ProviderStatusResponse(BaseModel):
     message: str | None = None
     token: str | None = None
     user: dict | None = None
+
+
+class MaxInitDataRequest(BaseModel):
+    init_data: str = Field(min_length=10, max_length=12000)
 
 
 class TelegramCompleteRequest(BaseModel):
@@ -1250,6 +1335,7 @@ def _parse_json_payload(row: dict) -> dict:
 
 
 def _require_bearer(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     tvv_session: Annotated[str | None, Cookie(alias=USER_SESSION_COOKIE)] = None,
 ) -> str:
@@ -1257,8 +1343,10 @@ def _require_bearer(
         match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
         if not match:
             raise HTTPException(status_code=401, detail="invalid_authorization_header")
+        request.state.session_token_source = "authorization"
         return match.group(1).strip()
     if tvv_session:
+        request.state.session_token_source = "cookie"
         return tvv_session.strip()
     raise HTTPException(status_code=401, detail="authorization_required")
 
@@ -1271,16 +1359,24 @@ def current_user(token: str = Depends(_require_bearer)) -> dict:
     return user
 
 
-def _require_admin_bearer(authorization: Annotated[str | None, Header()] = None) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="authorization_required")
-    match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
-    if not match:
-        raise HTTPException(status_code=401, detail="invalid_authorization_header")
-    return match.group(1).strip()
+def _require_admin_token(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+    tvv_admin_session: Annotated[str | None, Cookie(alias=ADMIN_SESSION_COOKIE)] = None,
+) -> str:
+    if authorization:
+        match = re.match(r"^Bearer\s+(.+)$", authorization.strip(), flags=re.IGNORECASE)
+        if not match:
+            raise HTTPException(status_code=401, detail="invalid_authorization_header")
+        request.state.admin_session_token_source = "authorization"
+        return match.group(1).strip()
+    if tvv_admin_session:
+        request.state.admin_session_token_source = "cookie"
+        return tvv_admin_session.strip()
+    raise HTTPException(status_code=401, detail="authorization_required")
 
 
-def current_admin_session(token: str = Depends(_require_admin_bearer)) -> dict:
+def current_admin_session(token: str = Depends(_require_admin_token)) -> dict:
     token_hash = hash_value(token, settings.session_secret)
     session = db.get_admin_session(settings.database_path, token_hash=token_hash)
     if not session:
@@ -1614,19 +1710,27 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
     )
 
 
-@app.get("/review-login", include_in_schema=False)
-def review_login(request: Request, token: str = Query(min_length=24, max_length=256)) -> RedirectResponse:
+@app.get("/review-login", include_in_schema=False, response_model=None)
+def review_login(request: Request, token: str = Query(default="", max_length=256)) -> RedirectResponse | HTMLResponse:
     raw_token = token.strip()
+    if len(raw_token) < 24:
+        _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "invalid_format"})
+        return _review_login_error_response()
     token_hash = hash_value(raw_token, settings.session_secret)
     review_token = db.get_active_review_login_token(settings.database_path, token_hash=token_hash)
     if not review_token:
         _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "invalid_or_expired"})
-        raise HTTPException(status_code=404, detail="review_token_not_found")
+        return _review_login_error_response()
 
     email = _normalize_email(str(review_token.get("email") or ""))
     if email != REVIEW_ACCOUNT_EMAIL:
         _audit(request, "review_login.denied", status="warning", actor="system", metadata={"reason": "wrong_account"})
-        raise HTTPException(status_code=403, detail="review_account_forbidden")
+        return _review_login_error_response()
+
+    created_dt = _parse_iso_dt(str(review_token.get("created_at") or ""))
+    if created_dt and (utc_now() - created_dt).total_seconds() > REVIEW_LOGIN_TOKEN_MAX_AGE_SECONDS:
+        _audit(request, "review_login.denied", status="warning", actor="user", metadata={"reason": "token_too_old"})
+        return _review_login_error_response()
 
     expires_at = str(review_token["expires_at"])
     expires_dt = _parse_iso_dt(expires_at)
@@ -1634,7 +1738,7 @@ def review_login(request: Request, token: str = Query(min_length=24, max_length=
     if expires_dt:
         seconds_left = int((expires_dt - utc_now()).total_seconds())
         if seconds_left <= 0:
-            raise HTTPException(status_code=404, detail="review_token_expired")
+            return _review_login_error_response()
         max_age = max(60, min(REVIEW_SESSION_MAX_AGE_SECONDS, seconds_left))
 
     user = _ensure_review_account(period_end=expires_at)
@@ -1648,18 +1752,12 @@ def review_login(request: Request, token: str = Query(min_length=24, max_length=
     db.mark_review_login_token_used(settings.database_path, token_hash=token_hash)
     _audit(request, "review_login.success", user_id=int(user["id"]), provider="review", status="ok", actor="user")
 
-    response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie(
-        USER_SESSION_COOKIE,
-        session_token,
-        max_age=max_age,
-        expires=max_age,
-        path="/",
-        secure=settings.app_env == "production",
-        httponly=True,
-        samesite="lax",
-    )
-    response.headers["Cache-Control"] = "no-store"
+    response = RedirectResponse(url="/app", status_code=303)
+    _set_user_session_cookie(response, session_token, max_age=max_age)
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 
@@ -1890,7 +1988,7 @@ def admin_security_audit(
 
 
 @app.post("/api/admin/auth/login", response_model=AdminLoginResponse)
-def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginResponse:
+def admin_login(payload: AdminLoginRequest, request: Request, response: Response) -> AdminLoginResponse:
     if not settings.admin_password_hash:
         _audit(request, "admin.login_disabled", status="error", actor="admin")
         raise HTTPException(status_code=503, detail="admin_not_configured")
@@ -1910,7 +2008,8 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> AdminLoginRespo
         user_agent=request.headers.get("user-agent", ""),
     )
     _audit(request, "admin.login_success", status="ok", actor="admin")
-    return AdminLoginResponse(ok=True, token=token, expires_at=expires_at)
+    _set_admin_session_cookie(response, token)
+    return AdminLoginResponse(ok=True, token=None, expires_at=expires_at)
 
 
 @app.post("/api/admin/auth/credentials")
@@ -1940,9 +2039,10 @@ def admin_change_credentials(
 
 
 @app.post("/api/admin/auth/logout")
-def admin_logout(request: Request, token: str = Depends(_require_admin_bearer)) -> dict:
+def admin_logout(request: Request, response: Response, token: str = Depends(_require_admin_token)) -> dict:
     revoked = db.revoke_admin_session(settings.database_path, token_hash=hash_value(token, settings.session_secret))
     _audit(request, "admin.logout", status="ok", actor="admin", metadata={"revoked": revoked})
+    _delete_admin_session_cookie(response)
     return {"ok": True, "revoked": revoked}
 
 
@@ -2126,6 +2226,7 @@ def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStart
         _audit(request, "auth.email_code_rate_limited", provider="email", status="warning", actor="user")
         raise HTTPException(status_code=429, detail="email_code_hour_limit")
 
+    db.consume_active_challenges(settings.database_path, channel="email", target=email)
     code = make_code()
     db.create_auth_challenge(
         settings.database_path,
@@ -2150,7 +2251,7 @@ def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStart
 
 
 @app.post("/api/auth/email/verify", response_model=SessionResponse)
-def auth_email_verify(payload: EmailVerifyRequest, request: Request) -> SessionResponse:
+def auth_email_verify(payload: EmailVerifyRequest, request: Request, response: Response) -> SessionResponse:
     email = _normalize_email(str(payload.email))
     challenge = db.find_active_challenge(settings.database_path, channel="email", target=email)
     if not challenge:
@@ -2176,8 +2277,9 @@ def auth_email_verify(payload: EmailVerifyRequest, request: Request) -> SessionR
         token_hash=hash_value(token, settings.session_secret),
         expires_at=(utc_now() + timedelta(days=30)).isoformat(),
     )
+    _set_user_session_cookie(response, token)
     _audit(request, "auth.login_success", user_id=int(user["id"]), provider="email", status="ok", actor="user")
-    return SessionResponse(token=token, user=user)
+    return SessionResponse(user=user)
 
 
 @app.post("/api/auth/telegram/start", response_model=ProviderStartResponse)
@@ -2208,9 +2310,13 @@ def auth_telegram_start(request: Request) -> ProviderStartResponse:
 
 
 @app.get("/api/auth/telegram/status", response_model=ProviderStatusResponse)
-def auth_telegram_status(state: str, request: Request) -> ProviderStatusResponse:
+def auth_telegram_status(state: str, request: Request, response: Response) -> ProviderStatusResponse:
     result = complete_telegram_login(settings, state)
     if result.get("status") == "complete" and isinstance(result.get("user"), dict):
+        token = str(result.get("token") or "")
+        if token:
+            _set_user_session_cookie(response, token)
+            result["token"] = None
         _audit(
             request,
             "auth.login_success",
@@ -2305,9 +2411,13 @@ def auth_max_start(request: Request) -> ProviderStartResponse:
 
 
 @app.get("/api/auth/max/status", response_model=ProviderStatusResponse)
-def auth_max_status(state: str, request: Request) -> ProviderStatusResponse:
+def auth_max_status(state: str, request: Request, response: Response) -> ProviderStatusResponse:
     result = complete_max_login(settings, state)
     if result.get("status") == "complete" and isinstance(result.get("user"), dict):
+        token = str(result.get("token") or "")
+        if token:
+            _set_user_session_cookie(response, token)
+            result["token"] = None
         _audit(
             request,
             "auth.login_success",
@@ -2315,6 +2425,35 @@ def auth_max_status(state: str, request: Request) -> ProviderStatusResponse:
             provider="max",
             status="ok",
             actor="user",
+        )
+    return ProviderStatusResponse(**result)
+
+
+@app.post("/api/auth/max/init", response_model=ProviderStatusResponse)
+def auth_max_init(payload: MaxInitDataRequest, request: Request, response: Response) -> ProviderStatusResponse:
+    result = complete_max_init_login(settings, payload.init_data)
+    if result.get("status") == "complete" and isinstance(result.get("user"), dict):
+        token = str(result.get("token") or "")
+        if token:
+            _set_user_session_cookie(response, token)
+            result["token"] = None
+        _audit(
+            request,
+            "auth.login_success",
+            user_id=int(result["user"]["id"]),
+            provider="max",
+            status="ok",
+            actor="user",
+            metadata={"method": "mini_app_init_data"},
+        )
+    else:
+        _audit(
+            request,
+            "auth.max_init_failed",
+            provider="max",
+            status="warning",
+            actor="user",
+            metadata={"reason": result.get("reason") or "init_data_invalid"},
         )
     return ProviderStatusResponse(**result)
 
@@ -2351,10 +2490,19 @@ async def max_webhook(
     request: Request,
     x_max_bot_api_secret: Annotated[str | None, Header()] = None,
 ) -> dict:
-    if settings.max_webhook_secret and x_max_bot_api_secret != settings.max_webhook_secret:
+    if settings.max_webhook_secret and (
+        not x_max_bot_api_secret or not constant_time_equal(x_max_bot_api_secret, settings.max_webhook_secret)
+    ):
         _audit(request, "auth.max_webhook_forbidden", provider="max", status="warning", actor="provider")
         raise HTTPException(status_code=403, detail="invalid_webhook_secret")
-    update = await request.json()
+    try:
+        update = await request.json()
+    except Exception:
+        _audit(request, "auth.max_webhook_bad_request", provider="max", status="warning", actor="provider", metadata={"reason": "invalid_json"})
+        raise HTTPException(status_code=400, detail="invalid_json")
+    if not isinstance(update, dict):
+        _audit(request, "auth.max_webhook_bad_request", provider="max", status="warning", actor="provider", metadata={"reason": "invalid_update"})
+        raise HTTPException(status_code=400, detail="invalid_update")
     result = process_max_update(settings, update)
     _audit(
         request,
@@ -2368,7 +2516,13 @@ async def max_webhook(
 
 
 @app.get("/api/me")
-def me(user: dict = Depends(current_user)) -> dict:
+def me(request: Request, response: Response, token: str = Depends(_require_bearer)) -> dict:
+    token_hash = hash_value(token, settings.session_secret)
+    user = db.get_user_by_session(settings.database_path, token_hash=token_hash)
+    if not user:
+        raise HTTPException(status_code=401, detail="invalid_session")
+    if getattr(request.state, "session_token_source", "") == "authorization":
+        _set_user_session_cookie(response, token)
     telegram_profile_sync = _safe_sync_telegram_profile_to_pwa(user)
     return {
         "user": user,
@@ -2476,14 +2630,15 @@ def auth_logout(request: Request, token: str = Depends(_require_bearer)) -> JSON
     )
     _audit(request, "auth.logout", user_id=int(user["id"]) if user else None, status="ok", actor="user")
     response = JSONResponse({"ok": True, "message": "Сессия завершена."})
-    response.delete_cookie(USER_SESSION_COOKIE, path="/")
+    _delete_user_session_cookie(response)
     return response
 
 
 @app.post("/api/account/sessions/revoke-all")
-def account_revoke_sessions(request: Request, user: dict = Depends(current_user)) -> dict:
+def account_revoke_sessions(request: Request, response: Response, user: dict = Depends(current_user)) -> dict:
     revoked = db.revoke_user_sessions(settings.database_path, user_id=int(user["id"]))
     _audit(request, "auth.sessions_revoked", user_id=int(user["id"]), status="ok", actor="user", metadata={"revoked": revoked})
+    _delete_user_session_cookie(response)
     return {"ok": True, "revoked": revoked, "message": "Все активные сессии завершены."}
 
 
@@ -3248,6 +3403,344 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
         "followup": followup,
         "telegram_sync": telegram_sync,
     }
+
+
+LEGAL_PAGES: dict[str, dict[str, Any]] = {
+    "privacy": {
+        "path": "/privacy",
+        "title": "Политика конфиденциальности",
+        "description": "Какие данные обрабатывает TemichevVet и как пользователь может управлять своими данными.",
+        "sections": (
+            (
+                "Для чего нужна политика",
+                (
+                    "Эта политика объясняет, какие данные обрабатывает сервис TemichevVet, зачем они нужны, где хранятся и как пользователь может запросить доступ, исправление или удаление данных.",
+                ),
+                (),
+            ),
+            (
+                "Оператор и контакт",
+                (
+                    f"Основной контакт по вопросам персональных данных, сервиса и платежей: {LEGAL_CONTACT_EMAIL}.",
+                ),
+                (),
+            ),
+            (
+                "Какие данные обрабатываются",
+                (),
+                (
+                    "email, внешние идентификаторы Telegram и MAX, сведения о способе входа;",
+                    "данные о питомцах: кличка, вид, возраст, вес, порода, пол, наблюдения, напоминания и история обращений;",
+                    "тексты симптомов, вопросов по питанию и обратной связи, которые пользователь вводит сам;",
+                    "данные подписки, лимитов и платежных событий без хранения полных реквизитов банковской карты;",
+                    "технические данные: IP-адрес, время запроса, ошибки, данные сессии, cookie/localStorage и события безопасности.",
+                ),
+            ),
+            (
+                "Цели обработки",
+                (),
+                (
+                    "создание и защита личного кабинета;",
+                    "ведение карточек питомцев, истории, наблюдений, веса и напоминаний;",
+                    "оценка срочности ситуации и подготовка понятных следующих шагов;",
+                    "синхронизация одного аккаунта между сайтом, PWA, Telegram и MAX;",
+                    "учёт подписки, лимитов, платежей, обращений в поддержку и технических ошибок.",
+                ),
+            ),
+            (
+                "Хранение и передача",
+                (
+                    "Основные данные личного кабинета размещаются на сервере в Российской Федерации. Для работы отдельных функций могут использоваться интеграции с Telegram, MAX, email-провайдером, платежным провайдером, инфраструктурными сервисами и LLM-шлюзом. Передаются только данные, необходимые для конкретной функции.",
+                ),
+                (),
+            ),
+            (
+                "Права пользователя",
+                (
+                    f"Пользователь может запросить сведения об обработке, уточнение, блокирование, удаление данных или отзыв согласия письмом на {LEGAL_CONTACT_EMAIL}.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "consent": {
+        "path": "/consent",
+        "title": "Согласие на обработку персональных данных",
+        "description": "Согласие пользователя на обработку данных для работы личного кабинета TemichevVet.",
+        "sections": (
+            (
+                "Что подтверждает пользователь",
+                (
+                    "Пользователь свободно, своей волей и в своём интересе даёт согласие оператору TemichevVet на обработку персональных данных для работы личного кабинета и функций сервиса.",
+                ),
+                (),
+            ),
+            (
+                "На какие данные распространяется согласие",
+                (
+                    "Согласие распространяется на email, идентификаторы Telegram/MAX, сведения о питомцах, тексты обращений, историю, напоминания, подписку, платежные события и технические данные, необходимые для безопасности и работы сервиса.",
+                ),
+                (),
+            ),
+            (
+                "Действия с данными",
+                (
+                    "Разрешаются сбор, запись, систематизация, хранение, уточнение, использование, передача партнёрам для выполнения функций сервиса, обезличивание, блокирование, удаление и уничтожение данных.",
+                ),
+                (),
+            ),
+            (
+                "Срок действия и отзыв",
+                (
+                    f"Согласие действует до его отзыва или до достижения целей обработки. Отозвать согласие можно письмом на {LEGAL_CONTACT_EMAIL}. После отзыва часть функций сервиса может стать недоступной.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "terms": {
+        "path": "/terms",
+        "title": "Пользовательское соглашение",
+        "description": "Условия использования сайта, PWA и подключённых мессенджеров TemichevVet.",
+        "sections": (
+            (
+                "Предмет соглашения",
+                (
+                    "TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, проверку симптомов, проверку питания, подписку и синхронизацию входов.",
+                ),
+                (),
+            ),
+            (
+                "Один аккаунт",
+                (
+                    "Email, Telegram и MAX могут быть связаны с одним личным кабинетом. Это нужно, чтобы не создавать две регистрации, не разделять историю питомцев и не оплачивать подписку повторно.",
+                ),
+                (),
+            ),
+            (
+                "Обязанности пользователя",
+                (),
+                (
+                    "указывать достоверные данные о питомце и ситуации;",
+                    "не использовать сервис вместо очного осмотра ветеринарного врача;",
+                    "не передавать доступ к личному кабинету третьим лицам;",
+                    "не загружать незаконные, вредоносные или чужие персональные данные без оснований.",
+                ),
+            ),
+            (
+                "Ограничения сервиса",
+                (
+                    "Ответы сервиса являются информационной поддержкой. Сервис не ставит диагноз, не назначает лечение, не гарантирует исход ситуации и не заменяет ветеринарного врача.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "offer": {
+        "path": "/offer",
+        "title": "Публичная оферта",
+        "description": "Условия покупки доступа Plus в TemichevVet.",
+        "sections": (
+            (
+                "Услуга",
+                (
+                    "Платная услуга TemichevVet — предоставление доступа Plus к расширенным функциям личного кабинета здоровья питомца на 30 календарных дней.",
+                ),
+                (),
+            ),
+            (
+                "Что входит в Plus",
+                (),
+                (
+                    "до 10 проверок по здоровью питомца в месяц;",
+                    "расширенная история обращений по питомцам;",
+                    "до 20 активных напоминаний;",
+                    "ведение до 3 питомцев в личном кабинете;",
+                    "синхронизация доступа между сайтом, PWA и подключёнными мессенджерами.",
+                ),
+            ),
+            (
+                "Стоимость и срок",
+                (
+                    "Стоимость Plus составляет 200 рублей за 30 дней. Оплата разовая, автоматических списаний нет. После окончания оплаченного срока сервис возвращает доступ на Free, если Plus не продлён повторной оплатой.",
+                ),
+                (),
+            ),
+            (
+                "Ограничения",
+                (
+                    "TemichevVet является информационным сервисом. Платный доступ не является медицинской услугой, ветеринарной консультацией, постановкой диагноза или назначением лечения.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "medical-disclaimer": {
+        "path": "/medical-disclaimer",
+        "title": "Медицинский дисклеймер",
+        "description": "TemichevVet помогает сориентироваться, но не заменяет ветеринарного врача.",
+        "sections": (
+            (
+                "Что важно понимать",
+                (
+                    "Сервис помогает быстрее сориентироваться по срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.",
+                ),
+                (),
+            ),
+            (
+                "Когда срочно в клинику",
+                (
+                    "При тяжелом дыхании, судорогах, потере сознания, признаках отравления, крови, сильной боли, невозможности мочиться, резком вздутии живота, тяжелой травме или быстром ухудшении состояния нужно срочно обращаться в ветеринарную клинику и не ждать ответа сервиса.",
+                ),
+                (),
+            ),
+            (
+                "Как использовать ответы",
+                (
+                    "Ответы удобно использовать как чек-лист: что наблюдать, что подготовить для врача, какие признаки считать тревожными. Окончательное решение по диагностике и лечению принимает ветеринарный врач.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "cookies": {
+        "path": "/cookies",
+        "title": "Cookie и локальное хранение",
+        "description": "Какие cookie и локальные данные использует TemichevVet.",
+        "sections": (
+            (
+                "Что используется",
+                (),
+                (
+                    "необходимые данные входа и серверная HttpOnly-сессия;",
+                    "состояние входа через Telegram/MAX и одноразовые состояния формы;",
+                    "PWA-кеш публичных файлов интерфейса для быстрой загрузки и установки приложения;",
+                    "настройка cookie-согласия, чтобы не показывать баннер повторно;",
+                    "технические серверные журналы безопасности и ошибок.",
+                ),
+            ),
+            (
+                "Аналитика",
+                (
+                    "При выборе “Принять все” сервис подключает Яндекс.Метрику для понимания посещаемости, кликов, технических ошибок и удобства интерфейса. Это помогает улучшать сайт, но не является обязательным для входа и работы личного кабинета.",
+                ),
+                (),
+            ),
+        ),
+    },
+    "contacts": {
+        "path": "/contacts",
+        "title": "Контакты оператора",
+        "description": "Контактные данные TemichevVet для поддержки, платежей и персональных данных.",
+        "sections": (
+            (
+                "Основной контакт",
+                (
+                    f"По вопросам личного кабинета, входа, платежей, подписки, персональных данных и технических ошибок пишите на {LEGAL_CONTACT_EMAIL}.",
+                ),
+                (),
+            ),
+            (
+                "Важно",
+                (
+                    "Этот контакт не является экстренной ветеринарной консультацией. При тяжелом состоянии питомца обращайтесь в ближайшую ветеринарную клинику.",
+                ),
+                (),
+            ),
+        ),
+    },
+}
+
+
+def _legal_section_html(section: tuple[str, tuple[str, ...], tuple[str, ...]]) -> str:
+    heading, paragraphs, bullets = section
+    paragraphs_html = "".join(f"<p>{html.escape(text)}</p>" for text in paragraphs)
+    bullets_html = ""
+    if bullets:
+        bullets_html = "<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in bullets) + "</ul>"
+    return f"<section><h2>{html.escape(heading)}</h2>{paragraphs_html}{bullets_html}</section>"
+
+
+def _legal_page_response(page_key: str) -> HTMLResponse:
+    page = LEGAL_PAGES.get(page_key)
+    if not page:
+        raise HTTPException(status_code=404, detail="legal_page_not_found")
+    title = str(page["title"])
+    description = str(page["description"])
+    path = str(page["path"])
+    canonical = f"{settings.app_base_url.rstrip('/')}{path}"
+    sections = "".join(_legal_section_html(section) for section in page["sections"])
+    page_html = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{html.escape(title)} — TemichevVet</title>
+  <meta name="description" content="{html.escape(description)}" />
+  <link rel="canonical" href="{html.escape(canonical)}" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260617-max-live-1" />
+</head>
+<body class="legal-standalone">
+  <main class="legal-standalone-page">
+    <article class="legal-document">
+      <p class="legal-meta">TemichevVet · редакция от {html.escape(LEGAL_UPDATED_AT)}</p>
+      <h1>{html.escape(title)}</h1>
+      <p>{html.escape(description)}</p>
+      {sections}
+      <section>
+        <h2>Контакт</h2>
+        <p>По вопросам документа и работы сервиса: <a href="mailto:{html.escape(LEGAL_CONTACT_EMAIL)}">{html.escape(LEGAL_CONTACT_EMAIL)}</a>.</p>
+      </section>
+      <p><a href="/">Вернуться на главную</a></p>
+    </article>
+  </main>
+</body>
+</html>"""
+    response = HTMLResponse(page_html)
+    response.headers["Cache-Control"] = "public, max-age=600"
+    return response
+
+
+@app.get("/privacy", include_in_schema=False)
+@app.head("/privacy", include_in_schema=False)
+def legal_privacy() -> HTMLResponse:
+    return _legal_page_response("privacy")
+
+
+@app.get("/consent", include_in_schema=False)
+@app.head("/consent", include_in_schema=False)
+def legal_consent() -> HTMLResponse:
+    return _legal_page_response("consent")
+
+
+@app.get("/terms", include_in_schema=False)
+@app.head("/terms", include_in_schema=False)
+def legal_terms() -> HTMLResponse:
+    return _legal_page_response("terms")
+
+
+@app.get("/offer", include_in_schema=False)
+@app.head("/offer", include_in_schema=False)
+def legal_offer() -> HTMLResponse:
+    return _legal_page_response("offer")
+
+
+@app.get("/medical-disclaimer", include_in_schema=False)
+@app.head("/medical-disclaimer", include_in_schema=False)
+def legal_medical_disclaimer() -> HTMLResponse:
+    return _legal_page_response("medical-disclaimer")
+
+
+@app.get("/cookies", include_in_schema=False)
+@app.head("/cookies", include_in_schema=False)
+def legal_cookies() -> HTMLResponse:
+    return _legal_page_response("cookies")
+
+
+@app.get("/contacts", include_in_schema=False)
+@app.head("/contacts", include_in_schema=False)
+def legal_contacts() -> HTMLResponse:
+    return _legal_page_response("contacts")
 
 
 @app.get("/{path:path}")
