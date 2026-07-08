@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
@@ -165,6 +166,214 @@ def _audit(
         )
     except Exception as exc:
         logger.warning("Security audit write failed for %s: %s", event_type, exc)
+
+
+FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("landing", "Открыли сайт", "Человек попал на публичную страницу."),
+    ("primary_cta", "Нажали главный призыв", "Нажали основную кнопку первого экрана."),
+    ("auth_open", "Открыли вход", "Открыли окно входа или регистрации."),
+    ("email_code", "Запросили email-код", "Попросили одноразовый код на email."),
+    ("provider_start", "Начали вход через мессенджер", "Открыли Telegram или MAX для подтверждения."),
+    ("login_success", "Вошли в кабинет", "Успешно вошли через email, Telegram или MAX."),
+    ("triage_start", "Начали проверку симптомов", "Отправили форму проверки симптомов."),
+    ("triage_success", "Получили результат", "Сервис вернул разбор или срочное предупреждение."),
+    ("subscription_open", "Открыли тарифы", "Открыли экран подписки."),
+    ("payment_created", "Перешли к оплате", "Создана ссылка оплаты Plus."),
+    ("payment_success", "Оплатили Plus", "Платёж подтверждён и Plus активирован."),
+]
+
+FUNNEL_EVENT_STEPS = {
+    "landing.view": "landing",
+    "landing.primary_cta_click": "primary_cta",
+    "landing.login_cta_click": "auth_open",
+    "landing.service_link_click": "auth_open",
+    "auth.dialog_open": "auth_open",
+    "auth.email_start_click": "email_code",
+    "auth.telegram_start_click": "provider_start",
+    "auth.max_start_click": "provider_start",
+    "auth.email_code_sent": "email_code",
+    "auth.provider_start": "provider_start",
+    "auth.login_success": "login_success",
+    "triage.submit_click": "triage_start",
+    "triage.started": "triage_start",
+    "triage.completed": "triage_success",
+    "triage.red_flag": "triage_success",
+    "triage.failed": "triage_start",
+    "subscription.open_click": "subscription_open",
+    "payment.plus_click": "payment_created",
+    "payment.created": "payment_created",
+    "payment.succeeded": "payment_success",
+}
+
+
+def _funnel_session_hash(session_id: str | None) -> str | None:
+    clean = (session_id or "").strip()
+    if not clean:
+        return None
+    return hash_value(clean[:128], settings.session_secret)[:24]
+
+
+def _track_funnel(
+    request: Request | None,
+    event_type: str,
+    *,
+    user_id: int | None = None,
+    status: str = "ok",
+    session_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    step = FUNNEL_EVENT_STEPS.get(event_type)
+    if not step:
+        return
+    try:
+        referrer_host = _site_visit_referrer_host(request) if request else None
+        if request:
+            device, browser, is_bot = _site_visit_user_agent_summary(request)
+            if is_bot and user_id is None:
+                return
+            source = _site_visit_source(request, referrer_host)
+            path = request.url.path or None
+            resolved_user_id = user_id if user_id is not None else _site_visit_user_id(request)
+        else:
+            device, browser, source, path, resolved_user_id = None, None, None, None, user_id
+        db.create_funnel_event(
+            settings.database_path,
+            event_type=event_type,
+            step=step,
+            status=status,
+            session_hash=_funnel_session_hash(session_id),
+            user_id=resolved_user_id,
+            source=source,
+            path=path,
+            device=device,
+            browser=browser,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        logger.warning("Funnel event write failed for %s: %s", event_type, exc)
+
+
+def _site_visit_user_id(request: Request) -> int | None:
+    token = request.cookies.get(USER_SESSION_COOKIE)
+    if not token:
+        return None
+    try:
+        user = db.get_user_by_session(
+            settings.database_path,
+            token_hash=hash_value(token.strip(), settings.session_secret),
+        )
+    except Exception:
+        return None
+    if not user:
+        return None
+    try:
+        return int(user["id"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _site_visit_referrer_host(request: Request) -> str | None:
+    referrer = request.headers.get("referer") or request.headers.get("referrer")
+    if not referrer:
+        return None
+    try:
+        parsed = urlparse(referrer)
+    except ValueError:
+        return None
+    host = (parsed.netloc or "").lower()
+    if not host:
+        return None
+    return host[:160]
+
+
+def _site_visit_source(request: Request, referrer_host: str | None) -> str:
+    utm_source = (request.query_params.get("utm_source") or "").strip()
+    if utm_source:
+        return utm_source[:80]
+    host = (request.url.hostname or "").lower()
+    if referrer_host:
+        normalized_referrer = referrer_host.split("@")[-1].split(":")[0]
+        if normalized_referrer and normalized_referrer != host:
+            return normalized_referrer[:80]
+        return "Внутри сайта"
+    return "Прямой заход"
+
+
+def _site_visit_user_agent_summary(request: Request) -> tuple[str, str, bool]:
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    is_bot = any(marker in user_agent for marker in ("bot", "crawler", "spider", "monitor", "curl", "wget"))
+    if is_bot:
+        device = "Бот/проверка"
+    elif any(marker in user_agent for marker in ("iphone", "android", "mobile")):
+        device = "Телефон"
+    elif any(marker in user_agent for marker in ("ipad", "tablet")):
+        device = "Планшет"
+    elif user_agent:
+        device = "Компьютер"
+    else:
+        device = "Неизвестно"
+
+    if "yabrowser" in user_agent:
+        browser = "Яндекс Браузер"
+    elif "edg/" in user_agent:
+        browser = "Edge"
+    elif "crios" in user_agent or "chrome" in user_agent:
+        browser = "Chrome"
+    elif "firefox" in user_agent:
+        browser = "Firefox"
+    elif "safari" in user_agent:
+        browser = "Safari"
+    elif is_bot:
+        browser = "Бот/проверка"
+    else:
+        browser = "Неизвестно"
+    return device, browser, is_bot
+
+
+def _should_log_site_visit(request: Request, response: Response) -> bool:
+    if request.method.upper() not in {"GET", "HEAD"}:
+        return False
+    path = request.url.path or "/"
+    ignored_prefixes = ("/api/", "/static/", "/admin")
+    ignored_paths = {
+        "/api",
+        "/favicon.ico",
+        "/manifest.webmanifest",
+        "/robots.txt",
+        "/sitemap.xml",
+        "/sw.js",
+        "/apple-touch-icon.png",
+        "/apple-touch-icon-precomposed.png",
+    }
+    if path in ignored_paths or any(path.startswith(prefix) for prefix in ignored_prefixes):
+        return False
+    accept = request.headers.get("accept", "")
+    if "text/html" not in accept and path not in {"/", "/app", "/cabinet"}:
+        return False
+    return int(getattr(response, "status_code", 0) or 0) < 500
+
+
+def _log_site_visit(request: Request, response: Response) -> None:
+    if not _should_log_site_visit(request, response):
+        return
+    referrer_host = _site_visit_referrer_host(request)
+    device, browser, is_bot = _site_visit_user_agent_summary(request)
+    try:
+        db.create_site_visit(
+            settings.database_path,
+            method=request.method.upper(),
+            path=request.url.path or "/",
+            status_code=int(response.status_code),
+            user_id=_site_visit_user_id(request),
+            ip_hash=_audit_ip_hash(request),
+            referrer_host=referrer_host,
+            source=_site_visit_source(request, referrer_host),
+            device=device,
+            browser=browser,
+            is_bot=is_bot,
+        )
+    except Exception as exc:
+        logger.warning("Site visit write failed for %s: %s", request.url.path, exc)
 
 
 def _rate_limit_identity(request: Request, name: str) -> str:
@@ -337,6 +546,7 @@ async def security_middleware(request: Request, call_next):
             actor="system",
             metadata={"method": request.method, "path": request.url.path, "status_code": response.status_code},
         )
+    _log_site_visit(request, response)
     _apply_security_headers(request, response)
     return response
 
@@ -354,6 +564,12 @@ class EmailStartResponse(BaseModel):
 class EmailVerifyRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=4, max_length=12)
+
+
+class FunnelEventRequest(BaseModel):
+    event_type: str = Field(min_length=3, max_length=120)
+    session_id: str | None = Field(default=None, max_length=128)
+    metadata: dict[str, Any] | None = None
 
 
 class AdminLoginRequest(BaseModel):
@@ -487,6 +703,15 @@ class PushUnsubscribePayload(BaseModel):
     endpoint: str = Field(min_length=10, max_length=2000)
 
 
+class PushBroadcastPayload(BaseModel):
+    title: str = Field(min_length=2, max_length=120)
+    body: str = Field(min_length=5, max_length=300)
+    url: str = Field(default="/app", min_length=1, max_length=200)
+    dry_run: bool = True
+    confirm: str | None = Field(default=None, max_length=40)
+    limit: int = Field(default=500, ge=1, le=5000)
+
+
 class FollowupAnswerPayload(BaseModel):
     answer: str = Field(min_length=2, max_length=20)
 
@@ -528,6 +753,46 @@ class TelegramCoreOutboundAck(BaseModel):
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _email_domain(email: str) -> str:
+    value = _normalize_email(email)
+    if "@" not in value:
+        return ""
+    return value.rsplit("@", 1)[1].strip(".")
+
+
+def _is_russian_email_domain(email: str) -> bool:
+    domain = _email_domain(email)
+    if not domain:
+        return False
+    try:
+        ascii_domain = domain.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        ascii_domain = domain.lower()
+    normalized = domain.lower()
+    return normalized.endswith(".ru") or normalized.endswith(".рф") or ascii_domain.endswith(".xn--p1ai")
+
+
+def _existing_email_user(email: str) -> dict[str, Any] | None:
+    return db.get_user_by_email(settings.database_path, email)
+
+
+def _require_email_registration_domain(email: str, request: Request) -> dict[str, Any] | None:
+    user = _existing_email_user(email)
+    if user:
+        return user
+    if _is_russian_email_domain(email):
+        return None
+    _audit(
+        request,
+        "auth.email_registration_blocked",
+        provider="email",
+        status="warning",
+        actor="user",
+        metadata={"reason": "non_russian_email_domain", "domain": _email_domain(email)},
+    )
+    raise HTTPException(status_code=400, detail="email_registration_russian_domain_required")
 
 
 def _is_review_user(user: dict | None) -> bool:
@@ -691,6 +956,21 @@ def _mask_endpoint(endpoint: str) -> str:
     if len(text) <= 32:
         return text
     return f"{text[:18]}…{text[-12:]}"
+
+
+def _clean_push_broadcast_url(value: str) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if (
+        not url
+        or not url.startswith("/")
+        or url.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
+        or "\\" in url
+    ):
+        raise HTTPException(status_code=400, detail="invalid_push_broadcast_url")
+    return url
 
 
 def _parse_iso_dt(value: str | None):
@@ -1393,10 +1673,51 @@ def _admin_rows(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = 
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, Any]:
+    rows = _admin_rows(
+        conn,
+        """
+        SELECT step,
+               COUNT(*) AS count,
+               COUNT(DISTINCT COALESCE(session_hash, 'user:' || user_id, 'event:' || id)) AS unique_count,
+               SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS issues,
+               MAX(created_at) AS last_at
+        FROM funnel_events
+        WHERE created_at >= ?
+        GROUP BY step
+        """,
+        (since,),
+    )
+    by_step = {str(row["step"]): row for row in rows}
+    steps: list[dict[str, Any]] = []
+    previous_unique: int | None = None
+    for step, label, help_text in FUNNEL_STEPS:
+        row = by_step.get(step, {})
+        unique_count = int(row.get("unique_count") or 0)
+        conversion: float | None = None
+        if previous_unique and previous_unique > 0:
+            conversion = round((unique_count / previous_unique) * 100, 1)
+        steps.append(
+            {
+                "step": step,
+                "label": label,
+                "help": help_text,
+                "count": int(row.get("count") or 0),
+                "unique_count": unique_count,
+                "issues": int(row.get("issues") or 0),
+                "last_at": row.get("last_at"),
+                "conversion_from_previous": conversion,
+            }
+        )
+        previous_unique = unique_count
+    return {"since": since, "steps": steps}
+
+
 def _admin_dashboard_payload() -> dict[str, Any]:
     now = utc_now()
     now_iso = now.isoformat()
     since_24h = (now - timedelta(days=1)).isoformat()
+    since_72h = (now - timedelta(days=3)).isoformat()
     since_30d = (now - timedelta(days=30)).isoformat()
     today = date.today().isoformat()
     with closing(db.connect(settings.database_path)) as conn:
@@ -1410,6 +1731,17 @@ def _admin_dashboard_payload() -> dict[str, Any]:
                 (now_iso,),
             ),
             "active_reminders": _admin_scalar(conn, "SELECT COUNT(*) FROM reminders WHERE is_active = 1"),
+            "site_visits_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM site_visits WHERE created_at >= ?", (since_24h,)),
+            "site_visitors_24h": _admin_scalar(
+                conn,
+                "SELECT COUNT(DISTINCT ip_hash) FROM site_visits WHERE created_at >= ? AND ip_hash IS NOT NULL",
+                (since_24h,),
+            ),
+            "site_logged_in_visits_24h": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM site_visits WHERE created_at >= ? AND user_id IS NOT NULL",
+                (since_24h,),
+            ),
             "triage_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_24h,)),
             "triage_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_30d,)),
             "feedback_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM feedback WHERE created_at >= ?", (since_30d,)),
@@ -1527,11 +1859,50 @@ def _admin_dashboard_payload() -> dict[str, Any]:
             """,
             (since_24h,),
         )
-        recent_audit = db.list_security_audit_events(settings.database_path, limit=80)
+        site_sources_24h = _admin_rows(
+            conn,
+            """
+            SELECT COALESCE(source, 'Неизвестно') AS source,
+                   COUNT(*) AS count,
+                   COUNT(DISTINCT ip_hash) AS visitors,
+                   MAX(created_at) AS last_at
+            FROM site_visits
+            WHERE created_at >= ?
+            GROUP BY COALESCE(source, 'Неизвестно')
+            ORDER BY count DESC, last_at DESC
+            LIMIT 20
+            """,
+            (since_24h,),
+        )
+        site_paths_24h = _admin_rows(
+            conn,
+            """
+            SELECT path,
+                   COUNT(*) AS count,
+                   COUNT(DISTINCT ip_hash) AS visitors,
+                   MAX(created_at) AS last_at
+            FROM site_visits
+            WHERE created_at >= ?
+            GROUP BY path
+            ORDER BY count DESC, last_at DESC
+            LIMIT 20
+            """,
+            (since_24h,),
+        )
+        recent_audit = db.list_security_audit_events(
+            settings.database_path,
+            limit=80,
+            hide_noisy_system_events=True,
+        )
+        recent_site_visits = db.list_site_visits(settings.database_path, limit=80)
+        conversion_funnel_72h = _admin_conversion_funnel(conn, since_72h)
+        recent_funnel_events = db.list_funnel_events(settings.database_path, limit=80)
 
     return {
         "generated_at": now_iso,
         "overview": overview,
+        "conversion_funnel_72h": conversion_funnel_72h,
+        "recent_funnel_events": recent_funnel_events,
         "payments_by_status": payments_by_status,
         "providers": providers,
         "recent_payments": recent_payments,
@@ -1540,6 +1911,9 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         "recent_feedback": recent_feedback,
         "audit_breakdown_24h": audit_breakdown_24h,
         "recent_audit": recent_audit,
+        "site_sources_24h": site_sources_24h,
+        "site_paths_24h": site_paths_24h,
+        "recent_site_visits": recent_site_visits,
     }
 
 
@@ -1858,10 +2232,18 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
                 "help": "Ошибки отправки или проверки email-кодов. Проверять SMTP и лимиты.",
             },
             {
-                "key": "messenger_login",
-                "label": "Telegram/MAX вход",
-                "prefixes": ("auth.provider", "auth.telegram", "auth.max", "account.provider"),
-                "help": "Ошибки старта или подтверждения входа через мессенджеры.",
+                "key": "telegram_login",
+                "label": "Telegram-вход",
+                "prefixes": ("auth.provider", "auth.telegram", "account.provider"),
+                "provider": "telegram",
+                "help": "Ошибки старта, подтверждения или привязки входа через Telegram.",
+            },
+            {
+                "key": "max_login",
+                "label": "MAX-вход",
+                "prefixes": ("auth.provider", "auth.max", "account.provider"),
+                "provider": "max",
+                "help": "Ошибки старта, подтверждения или привязки входа через MAX.",
             },
             {
                 "key": "payments",
@@ -1907,6 +2289,8 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
             for group in groups:
                 prefixes = tuple(group["prefixes"])
                 prefix_clause = " OR ".join("event_type LIKE ?" for _ in prefixes)
+                provider = str(group.get("provider") or "")
+                provider_clause = " AND provider = ?" if provider else ""
                 row = conn.execute(
                     f"""
                     SELECT
@@ -1917,8 +2301,9 @@ def monitoring_status(_: None = Depends(_require_monitoring_api_secret)) -> dict
                     WHERE created_at >= ?
                       AND status IN ('warning', 'error')
                       AND ({prefix_clause})
+                      {provider_clause}
                     """,
-                    (since, *(f"{prefix}%" for prefix in prefixes)),
+                    (since, *(f"{prefix}%" for prefix in prefixes), *((provider,) if provider else ())),
                 ).fetchone()
                 warnings = int((row["warnings"] if row else 0) or 0)
                 errors = int((row["errors"] if row else 0) or 0)
@@ -1983,6 +2368,7 @@ def admin_security_audit(
             event_type=event_type,
             user_id=user_id,
             status=status,
+            hide_noisy_system_events=True,
         )
     }
 
@@ -2203,6 +2589,20 @@ def public_config() -> dict:
     }
 
 
+@app.post("/api/funnel/event")
+def funnel_event(payload: FunnelEventRequest, request: Request) -> dict[str, Any]:
+    event_type = payload.event_type.strip()
+    if event_type not in FUNNEL_EVENT_STEPS:
+        return {"ok": True, "ignored": True}
+    _track_funnel(
+        request,
+        event_type,
+        session_id=payload.session_id,
+        metadata=payload.metadata or {},
+    )
+    return {"ok": True}
+
+
 @app.post("/api/auth/email/start", response_model=EmailStartResponse)
 def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStartResponse:
     if not _email_delivery_enabled():
@@ -2210,6 +2610,7 @@ def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStart
         raise HTTPException(status_code=503, detail="email_not_configured")
 
     email = _normalize_email(str(payload.email))
+    _require_email_registration_domain(email, request)
     last_challenge = db.get_last_auth_challenge(settings.database_path, channel="email", target=email)
     last_created_at = _parse_iso_dt(last_challenge.get("created_at") if last_challenge else None)
     if last_created_at and utc_now() - last_created_at < timedelta(seconds=EMAIL_CODE_COOLDOWN_SECONDS):
@@ -2243,6 +2644,7 @@ def auth_email_start(payload: EmailStartRequest, request: Request) -> EmailStart
             _audit(request, "auth.email_code_failed", provider="email", status="error", actor="system", metadata={"reason": "delivery_failed"})
             raise HTTPException(status_code=503, detail="email_delivery_failed") from None
     _audit(request, "auth.email_code_sent", provider="email", status="ok", actor="user", metadata={"target_hash": hash_value(email, settings.session_secret)[:16]})
+    _track_funnel(request, "auth.email_code_sent", metadata={"provider": "email"})
     return EmailStartResponse(
         ok=True,
         message="Код отправлен на email.",
@@ -2269,7 +2671,9 @@ def auth_email_verify(payload: EmailVerifyRequest, request: Request, response: R
         raise HTTPException(status_code=400, detail="invalid_code")
 
     db.consume_challenge(settings.database_path, int(challenge["id"]))
-    user = db.get_or_create_user_by_email(settings.database_path, email)
+    user = _require_email_registration_domain(email, request)
+    if not user:
+        user = db.get_or_create_user_by_email(settings.database_path, email)
     token = make_token()
     db.create_session(
         settings.database_path,
@@ -2279,6 +2683,7 @@ def auth_email_verify(payload: EmailVerifyRequest, request: Request, response: R
     )
     _set_user_session_cookie(response, token)
     _audit(request, "auth.login_success", user_id=int(user["id"]), provider="email", status="ok", actor="user")
+    _track_funnel(request, "auth.login_success", user_id=int(user["id"]), metadata={"provider": "email"})
     return SessionResponse(user=user)
 
 
@@ -2300,6 +2705,7 @@ def auth_telegram_start(request: Request) -> ProviderStartResponse:
         )
     state, url = create_telegram_login_challenge(settings)
     _audit(request, "auth.provider_start", provider="telegram", status="ok", actor="user")
+    _track_funnel(request, "auth.provider_start", metadata={"provider": "telegram"})
     return ProviderStartResponse(
         enabled=True,
         provider="telegram",
@@ -2325,6 +2731,7 @@ def auth_telegram_status(state: str, request: Request, response: Response) -> Pr
             status="ok",
             actor="user",
         )
+        _track_funnel(request, "auth.login_success", user_id=int(result["user"]["id"]), metadata={"provider": "telegram"})
     return ProviderStatusResponse(**result)
 
 
@@ -2401,6 +2808,7 @@ def auth_max_start(request: Request) -> ProviderStartResponse:
         )
     state, url = create_max_login_challenge(settings)
     _audit(request, "auth.provider_start", provider="max", status="ok", actor="user")
+    _track_funnel(request, "auth.provider_start", metadata={"provider": "max"})
     return ProviderStartResponse(
         enabled=True,
         provider="max",
@@ -2426,6 +2834,7 @@ def auth_max_status(state: str, request: Request, response: Response) -> Provide
             status="ok",
             actor="user",
         )
+        _track_funnel(request, "auth.login_success", user_id=int(result["user"]["id"]), metadata={"provider": "max"})
     return ProviderStatusResponse(**result)
 
 
@@ -2445,6 +2854,12 @@ def auth_max_init(payload: MaxInitDataRequest, request: Request, response: Respo
             status="ok",
             actor="user",
             metadata={"method": "mini_app_init_data"},
+        )
+        _track_funnel(
+            request,
+            "auth.login_success",
+            user_id=int(result["user"]["id"]),
+            metadata={"provider": "max", "method": "mini_app_init_data"},
         )
     else:
         _audit(
@@ -2710,16 +3125,19 @@ def payment_plus_create(request: Request, user: dict = Depends(current_user)) ->
         )
     except YooKassaConfigError as exc:
         _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="system", metadata={"reason": "not_configured"})
+        _track_funnel(request, "payment.created", user_id=int(user["id"]), status="error", metadata={"provider": "yookassa", "reason": "not_configured"})
         raise HTTPException(status_code=503, detail="payment_provider_not_configured") from exc
     except YooKassaPaymentError as exc:
         logger.warning("YooKassa create payment failed: %s", exc)
         _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", metadata={"error": type(exc).__name__})
+        _track_funnel(request, "payment.created", user_id=int(user["id"]), status="error", metadata={"provider": "yookassa", "error": type(exc).__name__})
         raise HTTPException(status_code=502, detail="payment_provider_error") from exc
 
     payment_id = str(payment.get("id") or "").strip()
     pay_url = yookassa_confirmation_url(payment)
     if not payment_id or not pay_url:
         _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", metadata={"reason": "confirmation_missing"})
+        _track_funnel(request, "payment.created", user_id=int(user["id"]), status="error", metadata={"provider": "yookassa", "reason": "confirmation_missing"})
         raise HTTPException(status_code=502, detail="payment_confirmation_missing")
 
     status = yookassa_payment_status(payment)
@@ -2745,6 +3163,12 @@ def payment_plus_create(request: Request, user: dict = Depends(current_user)) ->
         entity_type="payment",
         entity_id=payment_id,
         metadata={"amount_rub": 200, "plan": "plus", "provider_status": status},
+    )
+    _track_funnel(
+        request,
+        "payment.created",
+        user_id=int(user["id"]),
+        metadata={"provider": "yookassa", "amount_rub": 200, "provider_status": status},
     )
     return PaymentCreateResponse(
         ok=True,
@@ -2819,6 +3243,8 @@ async def yookassa_webhook(request: Request, secret: str | None = Query(default=
         _audit(request, "payment.webhook_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"detail": exc.detail})
         return {"ok": True, "status": "failed", "detail": exc.detail}
     _audit(request, "payment.webhook_processed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="ok", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"status": result.status})
+    if result.status == "succeeded":
+        _track_funnel(request, "payment.succeeded", user_id=int(user["id"]), metadata={"provider": "yookassa"})
     return {"ok": True, "status": result.status, "payment_id": result.payment_id}
 
 
@@ -3129,6 +3555,84 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, request: R
     return {"ok": True, "message": messages[answer]}
 
 
+@app.post("/api/internal/push/broadcast")
+def send_push_broadcast(
+    payload: PushBroadcastPayload,
+    request: Request,
+    _: None = Depends(_require_monitoring_api_secret),
+) -> dict:
+    title = _clean_text(payload.title)
+    body = _clean_text(payload.body)
+    if not title or not body:
+        raise HTTPException(status_code=400, detail="empty_push_broadcast_message")
+    url = _clean_push_broadcast_url(payload.url)
+
+    if payload.dry_run:
+        subscriptions = db.list_active_push_subscriptions_for_delivery(
+            settings.database_path,
+            limit=payload.limit,
+        )
+        return {
+            "ok": True,
+            "dry_run": True,
+            "message_type": "incident_recovered",
+            "subscriptions": len(subscriptions),
+            "sent": 0,
+            "failed": 0,
+            "failure_reasons": {},
+            "push_configured": _push_delivery_enabled(),
+        }
+
+    if payload.confirm != "SEND_PUSH_BROADCAST":
+        raise HTTPException(status_code=400, detail="push_broadcast_confirmation_required")
+    if not _push_delivery_enabled():
+        raise HTTPException(status_code=503, detail="push_not_configured")
+
+    subscriptions = db.list_active_push_subscriptions_for_delivery(
+        settings.database_path,
+        limit=payload.limit,
+    )
+    notification_payload = {
+        "title": title,
+        "body": body,
+        "url": url,
+    }
+    sent = 0
+    failed = 0
+    failure_reasons: dict[str, int] = {}
+    for subscription in subscriptions:
+        result = send_web_push(settings, subscription=subscription, payload=notification_payload)
+        if result.get("sent"):
+            sent += 1
+            continue
+        failed += 1
+        reason = str(result.get("reason") or "unknown")[:80]
+        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+
+    _audit(
+        request,
+        "push.broadcast_send",
+        status="ok" if failed == 0 else "warning",
+        actor="system",
+        metadata={
+            "message_type": "incident_recovered",
+            "subscriptions": len(subscriptions),
+            "sent": sent,
+            "failed": failed,
+        },
+    )
+    return {
+        "ok": failed == 0,
+        "dry_run": False,
+        "message_type": "incident_recovered",
+        "subscriptions": len(subscriptions),
+        "sent": sent,
+        "failed": failed,
+        "failure_reasons": failure_reasons,
+        "push_configured": True,
+    }
+
+
 @app.post("/api/internal/push/followups/send")
 def send_due_followup_pushes(
     request: Request,
@@ -3182,19 +3686,20 @@ def send_due_followup_pushes(
                 error=last_error,
             )
 
-    _audit(
-        request,
-        "push.followups_send",
-        status="ok" if failed == 0 else "warning",
-        actor="system",
-        metadata={
-            "followups": len(followups),
-            "processed_followups": processed_followups,
-            "sent": sent,
-            "failed": failed,
-            "skipped": skipped,
-        },
-    )
+    if sent or failed:
+        _audit(
+            request,
+            "push.followups_send",
+            status="ok" if failed == 0 else "warning",
+            actor="system",
+            metadata={
+                "followups": len(followups),
+                "processed_followups": processed_followups,
+                "sent": sent,
+                "failed": failed,
+                "skipped": skipped,
+            },
+        )
     return {
         "ok": True,
         "followups": len(followups),
@@ -3218,6 +3723,7 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
         if pet_id is not None
         else None
     )
+    _track_funnel(request, "triage.started", user_id=int(user["id"]), metadata={"has_pet": bool(selected_pet)})
 
     red_flags = detect_red_flags(payload.text)
     if red_flags.has_red_flags:
@@ -3274,6 +3780,12 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
             entity_id=str(log["id"] if log else ""),
             metadata={"urgency": "red", "matched_count": len(red_flags.matched), "subscription_source": sub.source},
         )
+        _track_funnel(
+            request,
+            "triage.red_flag",
+            user_id=int(user["id"]),
+            metadata={"urgency": "red", "matched_count": len(red_flags.matched), "subscription_source": sub.source},
+        )
         return {
             "status": "red",
             "urgency": "red",
@@ -3313,6 +3825,13 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
             user_id=int(user["id"]),
             status="error",
             actor="system",
+            metadata={"error": type(exc).__name__, "plan": sub.plan},
+        )
+        _track_funnel(
+            request,
+            "triage.failed",
+            user_id=int(user["id"]),
+            status="error",
             metadata={"error": type(exc).__name__, "plan": sub.plan},
         )
         raise HTTPException(
@@ -3389,6 +3908,12 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
             "total_tokens": llm_result.total_tokens,
             "model": llm_result.model,
         },
+    )
+    _track_funnel(
+        request,
+        "triage.completed",
+        user_id=int(user["id"]),
+        metadata={"urgency": urgency, "plan": sub.plan, "subscription_source": sub.source},
     )
     return {
         "status": "saved",
@@ -3678,7 +4203,7 @@ def _legal_page_response(page_key: str) -> HTMLResponse:
   <title>{html.escape(title)} — TemichevVet</title>
   <meta name="description" content="{html.escape(description)}" />
   <link rel="canonical" href="{html.escape(canonical)}" />
-  <link rel="stylesheet" href="/static/styles.css?v=20260617-max-live-1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260626-funnel" />
 </head>
 <body class="legal-standalone">
   <main class="legal-standalone-page">

@@ -16,11 +16,6 @@ from app import db
 from app.config import Settings
 from app.security import constant_time_equal, expires_in, hash_value, make_token, utc_now
 
-try:
-    import certifi
-except ImportError:  # pragma: no cover
-    certifi = None
-
 
 MAX_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{12,80}$")
 MAX_WEBHOOK_UPDATE_TYPES = ("bot_started", "message_created", "message_callback")
@@ -188,7 +183,7 @@ def _max_request(
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+    context = ssl.create_default_context(cafile=settings.max_api_ca_bundle or None)
     try:
         with urllib.request.urlopen(request, timeout=20, context=context) as response:
             raw = response.read().decode("utf-8")

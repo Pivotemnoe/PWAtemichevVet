@@ -10,6 +10,7 @@ import tempfile
 import types
 import unittest
 import urllib.parse
+import urllib.request
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +46,7 @@ os.environ.update(
 from fastapi import HTTPException, Response  # noqa: E402
 
 from app import db  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app import main as api  # noqa: E402
 from app import max_auth  # noqa: E402
 from scripts import setup_max_webhook  # noqa: E402
@@ -60,7 +62,9 @@ class DummyRequest:
 def request(path: str = "/test", method: str = "POST") -> DummyRequest:
     item = DummyRequest()
     item.method = method
-    item.url = types.SimpleNamespace(path=path)
+    item.url = types.SimpleNamespace(path=path, hostname="127.0.0.1")
+    item.query_params = {}
+    item.cookies = {}
     item.state = types.SimpleNamespace()
     return item
 
@@ -129,20 +133,43 @@ class ApiTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         disable_external_sync()
 
+    def _clear_broadcast_push_test_data(self) -> None:
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute("DELETE FROM push_subscriptions WHERE endpoint LIKE ?", ("https://broadcast.example.test/%",))
+            conn.execute("DELETE FROM security_audit_events WHERE event_type = ?", ("push.broadcast_send",))
+            conn.commit()
+
+    def _add_broadcast_push_subscription(self, user: dict, suffix: str, *, revoked: bool = False) -> dict:
+        item = db.upsert_push_subscription(
+            api.settings.database_path,
+            user_id=int(user["id"]),
+            endpoint=f"https://broadcast.example.test/{suffix}",
+            p256dh="p" * 88,
+            auth="a" * 24,
+            user_agent="test-agent",
+        )
+        if revoked:
+            db.revoke_push_subscription(
+                api.settings.database_path,
+                user_id=int(user["id"]),
+                endpoint=str(item["endpoint"]),
+            )
+        return item
+
     def test_health_and_email_login(self) -> None:
         response = api.health()
         self.assertEqual(response["ok"], True)
 
-        user, token = login("owner@example.com")
+        user, token = login("owner@example.ru")
         self.assertTrue(token)
-        self.assertEqual(user["email"], "owner@example.com")
+        self.assertEqual(user["email"], "owner@example.ru")
 
         audit_items = db.list_security_audit_events(api.settings.database_path, event_type="auth.login_success")
         self.assertGreaterEqual(len(audit_items), 1)
         self.assertEqual(audit_items[0]["provider"], "email")
 
     def test_logout_revokes_session_and_deletes_cookie(self) -> None:
-        user, token = login("logout-owner@example.com")
+        user, token = login("logout-owner@example.ru")
         self.assertTrue(token)
         self.assertEqual(api.current_user(token)["id"], user["id"])
 
@@ -198,8 +225,77 @@ class ApiTests(unittest.TestCase):
         finally:
             api.settings = old_settings
 
+    def test_admin_dashboard_includes_site_visits_without_raw_ip(self) -> None:
+        user, _ = login("site-visit-owner@example.ru")
+        db.create_site_visit(
+            api.settings.database_path,
+            method="GET",
+            path="/",
+            status_code=200,
+            user_id=int(user["id"]),
+            ip_hash="hashed-ip-only",
+            referrer_host="yandex.ru",
+            source="yandex.ru",
+            device="Телефон",
+            browser="Safari",
+        )
+        db.create_site_visit(
+            api.settings.database_path,
+            method="GET",
+            path="/app",
+            status_code=200,
+            user_id=None,
+            ip_hash="anonymous-hash",
+            source="Прямой заход",
+            device="Компьютер",
+            browser="Chrome",
+        )
+
+        dashboard = api._admin_dashboard_payload()
+        overview = dashboard["overview"]
+        self.assertGreaterEqual(overview["site_visits_24h"], 2)
+        self.assertGreaterEqual(overview["site_visitors_24h"], 2)
+        self.assertGreaterEqual(overview["site_logged_in_visits_24h"], 1)
+
+        recent_visits = dashboard["recent_site_visits"]
+        self.assertTrue(any(item.get("user_email") == "site-visit-owner@example.ru" for item in recent_visits))
+        self.assertTrue(any(item.get("user_email") is None and item.get("path") == "/app" for item in recent_visits))
+        self.assertTrue(any(item.get("source") == "yandex.ru" for item in dashboard["site_sources_24h"]))
+        self.assertFalse(any("raw_ip" in item for item in recent_visits))
+
+    def test_funnel_events_are_sanitized_and_visible_in_admin(self) -> None:
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="landing.primary_cta_click",
+                session_id="session-1",
+                metadata={"target": "hero", "complaint_text": "secret symptom"},
+            ),
+            request("/api/funnel/event"),
+        )
+        user, _ = login("funnel-owner@example.ru")
+        api._track_funnel(
+            request("/api/triage"),
+            "triage.completed",
+            user_id=int(user["id"]),
+            metadata={"urgency": "yellow", "text": "secret"},
+        )
+
+        items = db.list_funnel_events(api.settings.database_path, limit=20)
+        self.assertTrue(any(item["step"] == "primary_cta" for item in items))
+        self.assertTrue(any(item["step"] == "triage_success" for item in items))
+        for item in items:
+            metadata = item.get("metadata") or {}
+            self.assertNotIn("complaint_text", metadata)
+            self.assertNotIn("text", metadata)
+
+        dashboard = api._admin_dashboard_payload()
+        self.assertIn("conversion_funnel_72h", dashboard)
+        steps = dashboard["conversion_funnel_72h"]["steps"]
+        self.assertTrue(any(step["step"] == "primary_cta" and step["count"] >= 1 for step in steps))
+        self.assertTrue(any(step["step"] == "triage_success" and step["count"] >= 1 for step in steps))
+
     def test_email_code_is_single_use(self) -> None:
-        email = "single-use@example.com"
+        email = "single-use@example.ru"
         start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
         self.assertTrue(start.debug_code)
 
@@ -220,8 +316,39 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reuse_exc.exception.status_code, 400)
         self.assertEqual(reuse_exc.exception.detail, "code_expired_or_not_found")
 
+    def test_foreign_email_registration_is_blocked_but_existing_login_allowed(self) -> None:
+        blocked_email = "new-foreign-registration@gmail.com"
+        with self.assertRaises(HTTPException) as blocked_exc:
+            api.auth_email_start(api.EmailStartRequest(email=blocked_email), request("/api/auth/email/start"))
+        self.assertEqual(blocked_exc.exception.status_code, 400)
+        self.assertEqual(blocked_exc.exception.detail, "email_registration_russian_domain_required")
+        self.assertIsNone(db.get_user_by_email(api.settings.database_path, blocked_email))
+
+        events = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="auth.email_registration_blocked",
+        )
+        self.assertTrue(any((item.get("metadata") or {}).get("domain") == "gmail.com" for item in events))
+
+        existing_email = "existing-foreign-login@gmail.com"
+        db.get_or_create_user_by_email(api.settings.database_path, existing_email)
+        start = api.auth_email_start(api.EmailStartRequest(email=existing_email), request("/api/auth/email/start"))
+        self.assertTrue(start.debug_code)
+        response = Response()
+        session = api.auth_email_verify(
+            api.EmailVerifyRequest(email=existing_email, code=start.debug_code),
+            request("/api/auth/email/verify"),
+            response,
+        )
+        self.assertEqual(session.user["email"], existing_email)
+
+    def test_email_registration_accepts_russian_domain_names(self) -> None:
+        for email in ("new-russian-domain@example.ru", "new-russian-idn@почта.рф"):
+            start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
+            self.assertTrue(start.debug_code)
+
     def test_new_email_code_invalidates_previous_code(self) -> None:
-        email = "new-code-invalidates-old@example.com"
+        email = "new-code-invalidates-old@example.ru"
         first = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
         self.assertTrue(first.debug_code)
         with db.connect(api.settings.database_path) as conn:
@@ -253,7 +380,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(session.user["email"], email)
 
     def test_email_code_attempt_limit_consumes_challenge(self) -> None:
-        email = "attempt-limit@example.com"
+        email = "attempt-limit@example.ru"
         start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
         self.assertTrue(start.debug_code)
 
@@ -278,7 +405,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(consumed_exc.exception.detail, "code_expired_or_not_found")
 
     def test_expired_email_code_is_rejected(self) -> None:
-        email = "expired-code@example.com"
+        email = "expired-code@example.ru"
         raw_code = "123456"
         db.create_auth_challenge(
             api.settings.database_path,
@@ -342,7 +469,7 @@ class ApiTests(unittest.TestCase):
                 self.assertNotIn("Документ</h2>", body)
 
     def test_me_includes_sync_status_for_cabinet(self) -> None:
-        _, token = login("sync-status@example.com")
+        _, token = login("sync-status@example.ru")
         profile = api.me(request("/api/me", "GET"), Response(), token=token)
 
         self.assertIn("telegram_profile_sync", profile)
@@ -352,8 +479,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("subscription", profile)
 
     def test_pet_and_reminder_ownership(self) -> None:
-        user_a, _ = login("pet-owner-a@example.com")
-        user_b, _ = login("pet-owner-b@example.com")
+        user_a, _ = login("pet-owner-a@example.ru")
+        user_b, _ = login("pet-owner-b@example.ru")
 
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Лео", birth_year=2018),
@@ -387,8 +514,8 @@ class ApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(denied), 2)
 
     def test_reminder_delete_sync_runs_only_after_owner_check(self) -> None:
-        user_a, _ = login("reminder-sync-owner-a@example.com")
-        user_b, _ = login("reminder-sync-owner-b@example.com")
+        user_a, _ = login("reminder-sync-owner-a@example.ru")
+        user_b, _ = login("reminder-sync-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Сима", birth_year=2019),
             user=user_a,
@@ -434,8 +561,8 @@ class ApiTests(unittest.TestCase):
             api._enqueue_core_outbound_from_sync = original_enqueue
 
     def test_foreign_pet_mutations_do_not_trigger_side_effects(self) -> None:
-        user_a, _ = login("pet-mutation-owner-a@example.com")
-        user_b, _ = login("pet-mutation-owner-b@example.com")
+        user_a, _ = login("pet-mutation-owner-a@example.ru")
+        user_b, _ = login("pet-mutation-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="собака", pet_name="Рэй", birth_year=2020),
             user=user_a,
@@ -560,8 +687,8 @@ class ApiTests(unittest.TestCase):
             api.call_triage_llm = originals["llm"]
 
     def test_pet_delete_records_tombstone_and_queues_core_delete_after_owner_check(self) -> None:
-        user_a, _ = login("pet-delete-owner-a@example.com")
-        user_b, _ = login("pet-delete-owner-b@example.com")
+        user_a, _ = login("pet-delete-owner-a@example.ru")
+        user_b, _ = login("pet-delete-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Тиша", birth_year=2017),
             user=user_a,
@@ -623,7 +750,7 @@ class ApiTests(unittest.TestCase):
             api._enqueue_core_outbound_event = original_enqueue
 
     def test_successful_pwa_sync_paths_enqueue_core_rows(self) -> None:
-        user, _ = login("sync-success-owner@example.com")
+        user, _ = login("sync-success-owner@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Луна", birth_year=2021),
             user=user,
@@ -740,7 +867,7 @@ class ApiTests(unittest.TestCase):
             api._enqueue_core_outbound_from_sync = originals["enqueue"]
 
     def test_mock_payment_plus_activation(self) -> None:
-        user, _ = login("payer@example.com")
+        user, _ = login("payer@example.ru")
 
         def fake_create_payment(settings, *, user_id: int, user_email: str | None = None) -> dict:
             return {
@@ -793,7 +920,7 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(api._require_core_api_secret("Bearer core-test-secret"))
 
     def test_duplicate_telegram_identity_merges_email_account_data(self) -> None:
-        telegram_owner, _ = login("telegram-owner@example.com")
+        telegram_owner, _ = login("telegram-owner@example.ru")
         linked = db.link_external_account(
             api.settings.database_path,
             user_id=int(telegram_owner["id"]),
@@ -803,7 +930,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIsNotNone(linked)
 
-        email_user, _ = login("telegram-linking@example.com")
+        email_user, _ = login("telegram-linking@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="собака", pet_name="Барс", birth_year=2020),
             user=email_user,
@@ -862,7 +989,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reconfirm["reason"], "challenge_not_found")
 
     def test_duplicate_max_identity_merges_email_account_data(self) -> None:
-        max_owner, _ = login("max-owner@example.com")
+        max_owner, _ = login("max-owner@example.ru")
         linked = db.link_external_account(
             api.settings.database_path,
             user_id=int(max_owner["id"]),
@@ -872,7 +999,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIsNotNone(linked)
 
-        email_user, _ = login("max-linking@example.com")
+        email_user, _ = login("max-linking@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Мия", birth_year=2021),
             user=email_user,
@@ -1017,6 +1144,51 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(calls[0]["query"], {"user_id": 12345})
         self.assertEqual(calls[0]["body"], {"text": "Привет"})
 
+    def test_max_api_base_url_defaults_to_platform_api2_and_normalizes_legacy_url(self) -> None:
+        original = os.environ.get("MAX_API_BASE_URL")
+        try:
+            os.environ.pop("MAX_API_BASE_URL", None)
+            self.assertEqual(get_settings().max_api_base_url, "https://platform-api2.max.ru")
+            os.environ["MAX_API_BASE_URL"] = "https://platform-api.max.ru"
+            self.assertEqual(get_settings().max_api_base_url, "https://platform-api2.max.ru")
+            os.environ["MAX_API_BASE_URL"] = "https://max-api.example.test"
+            self.assertEqual(get_settings().max_api_base_url, "https://max-api.example.test")
+        finally:
+            if original is None:
+                os.environ.pop("MAX_API_BASE_URL", None)
+            else:
+                os.environ["MAX_API_BASE_URL"] = original
+
+    def test_max_request_uses_authorization_header_without_token_query(self) -> None:
+        requests: list[urllib.request.Request] = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"ok": true}'
+
+        original_urlopen = urllib.request.urlopen
+        urllib.request.urlopen = lambda request, timeout=0, context=None: requests.append(request) or FakeResponse()
+        try:
+            settings = replace(
+                api.settings,
+                max_api_base_url="https://platform-api2.max.ru",
+                max_bot_token="test-max-token",
+            )
+            max_auth._max_request(settings, "POST", "/messages", {"text": "ok"}, query={"user_id": 12345})
+        finally:
+            urllib.request.urlopen = original_urlopen
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].full_url, "https://platform-api2.max.ru/messages?user_id=12345")
+        self.assertEqual(requests[0].headers.get("Authorization"), "test-max-token")
+        self.assertNotIn("access_token", requests[0].full_url)
+
     def test_plain_max_start_sends_menu_without_completing_pending_login(self) -> None:
         calls: list[dict] = []
         original = max_auth.send_max_text
@@ -1154,8 +1326,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(redacted["nested"]["url"], "https://temichevvet.ru")
 
     def test_payment_status_owner_only(self) -> None:
-        user_a, _ = login("payment-owner-a@example.com")
-        user_b, _ = login("payment-owner-b@example.com")
+        user_a, _ = login("payment-owner-a@example.ru")
+        user_b, _ = login("payment-owner-b@example.ru")
         db.create_payment_record(
             api.settings.database_path,
             user_id=int(user_a["id"]),
@@ -1202,6 +1374,20 @@ class ApiTests(unittest.TestCase):
             actor="test",
             provider="telegram",
         )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="auth.provider_start_failed",
+            status="warning",
+            actor="test",
+            provider="telegram",
+        )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="auth.max_init_failed",
+            status="warning",
+            actor="test",
+            provider="max",
+        )
 
         status = api.monitoring_status()
         self.assertEqual(status["ok"], True)
@@ -1218,10 +1404,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(integration["payments"]["warnings"], 1)
         self.assertEqual(integration["llm"]["errors"], 1)
         self.assertEqual(integration["sync"]["errors"], 1)
+        self.assertEqual(integration["telegram_login"]["warnings"], 1)
+        self.assertEqual(integration["max_login"]["warnings"], 1)
         self.assertEqual(integration["api"]["status"], "ok")
         self.assertIn("YooKassa", integration["payments"]["help"])
         self.assertIn("OpenAI", integration["llm"]["help"])
         self.assertIn("Telegram-ботом", integration["sync"]["help"])
+        self.assertIn("Telegram", integration["telegram_login"]["help"])
+        self.assertIn("MAX", integration["max_login"]["help"])
 
         audit = api.admin_security_audit(limit=10)
         self.assertIn("items", audit)
@@ -1238,6 +1428,37 @@ class ApiTests(unittest.TestCase):
                 for row in breakdown
             )
         )
+
+    def test_admin_audit_hides_empty_push_followup_checks(self) -> None:
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="push.followups_send",
+            status="ok",
+            actor="system",
+            metadata={"followups": 0, "processed_followups": 0, "sent": 0, "failed": 0, "skipped": 0},
+        )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="push.followups_send",
+            status="ok",
+            actor="system",
+            metadata={"followups": 1, "processed_followups": 1, "sent": 1, "failed": 0, "skipped": 0},
+        )
+
+        audit = api.admin_security_audit(limit=10)
+        visible_push = [item for item in audit["items"] if item["event_type"] == "push.followups_send"]
+        self.assertEqual(len(visible_push), 1)
+        self.assertEqual(visible_push[0]["metadata"]["sent"], 1)
+
+        explicit = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="push.followups_send",
+            hide_noisy_system_events=True,
+        )
+        self.assertEqual(len(explicit), 2)
+
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute("DELETE FROM security_audit_events WHERE event_type = ?", ("push.followups_send",))
 
     def test_security_audit_metadata_filters_medical_text(self) -> None:
         complaint = "кошка вялая второй день, была рвота желтым"
@@ -1271,7 +1492,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(llm_answer, serialized)
 
     def test_push_config_and_subscribe_guard(self) -> None:
-        user, _ = login("push-owner@example.com")
+        user, _ = login("push-owner@example.ru")
         config = api.push_config()
         self.assertEqual(config["enabled"], False)
         self.assertEqual(config["public_key"], "")
@@ -1290,8 +1511,150 @@ class ApiTests(unittest.TestCase):
         events = db.list_security_audit_events(api.settings.database_path, event_type="push.subscribe_failed")
         self.assertGreaterEqual(len(events), 1)
 
+    def test_push_broadcast_endpoint_requires_monitoring_secret(self) -> None:
+        self._clear_broadcast_push_test_data()
+        route = next(route for route in api.app.routes if getattr(route, "path", "") == "/api/internal/push/broadcast")
+        dependency_names = {getattr(dependency.call, "__name__", "") for dependency in route.dependant.dependencies}
+        self.assertIn("_require_monitoring_api_secret", dependency_names)
+
+        with self.assertRaises(HTTPException) as missing_exc:
+            api._require_monitoring_api_secret()
+        self.assertEqual(missing_exc.exception.status_code, 403)
+        self.assertEqual(missing_exc.exception.detail, "invalid_monitoring_api_secret")
+        self.assertIsNone(api._require_monitoring_api_secret("monitoring-test-secret"))
+
+    def test_push_broadcast_dry_run_counts_active_subscriptions_without_sending(self) -> None:
+        self._clear_broadcast_push_test_data()
+        active_user, _ = login("push-broadcast-dry-active@example.ru")
+        revoked_user, _ = login("push-broadcast-dry-revoked@example.ru")
+        self._add_broadcast_push_subscription(active_user, "dry-active")
+        self._add_broadcast_push_subscription(revoked_user, "dry-revoked", revoked=True)
+
+        original_send = api.send_web_push
+        api.send_web_push = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("dry-run sent push"))
+        try:
+            result = api.send_push_broadcast(
+                api.PushBroadcastPayload(
+                    title="TemichevVet: работа восстановлена",
+                    body="Сервис доступен, работа восстановлена.",
+                    url="/app",
+                    dry_run=True,
+                    limit=10,
+                ),
+                request("/api/internal/push/broadcast"),
+                _=None,
+            )
+        finally:
+            api.send_web_push = original_send
+
+        self.assertEqual(result["dry_run"], True)
+        self.assertEqual(result["subscriptions"], 1)
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(result["failed"], 0)
+        events = db.list_security_audit_events(api.settings.database_path, event_type="push.broadcast_send")
+        self.assertEqual(events, [])
+
+    def test_push_broadcast_real_send_requires_confirm(self) -> None:
+        self._clear_broadcast_push_test_data()
+        with self.assertRaises(HTTPException) as exc:
+            api.send_push_broadcast(
+                api.PushBroadcastPayload(
+                    title="TemichevVet: работа восстановлена",
+                    body="Сервис доступен, работа восстановлена.",
+                    url="/app",
+                    dry_run=False,
+                ),
+                request("/api/internal/push/broadcast"),
+                _=None,
+            )
+        self.assertEqual(exc.exception.status_code, 400)
+        self.assertEqual(exc.exception.detail, "push_broadcast_confirmation_required")
+
+    def test_push_broadcast_real_send_requires_vapid(self) -> None:
+        self._clear_broadcast_push_test_data()
+        old_settings = api.settings
+        api.settings = replace(api.settings, vapid_public_key="", vapid_private_key="", vapid_subject="")
+        try:
+            with self.assertRaises(HTTPException) as exc:
+                api.send_push_broadcast(
+                    api.PushBroadcastPayload(
+                        title="TemichevVet: работа восстановлена",
+                        body="Сервис доступен, работа восстановлена.",
+                        url="/app",
+                        dry_run=False,
+                        confirm="SEND_PUSH_BROADCAST",
+                    ),
+                    request("/api/internal/push/broadcast"),
+                    _=None,
+                )
+        finally:
+            api.settings = old_settings
+        self.assertEqual(exc.exception.status_code, 503)
+        self.assertEqual(exc.exception.detail, "push_not_configured")
+
+    def test_push_broadcast_real_send_uses_active_pwa_subscriptions_and_safe_audit(self) -> None:
+        self._clear_broadcast_push_test_data()
+        user_a, _ = login("push-broadcast-send-a@example.ru")
+        user_b, _ = login("push-broadcast-send-b@example.ru")
+        user_revoked, _ = login("push-broadcast-send-revoked@example.ru")
+        self._add_broadcast_push_subscription(user_a, "send-ok")
+        self._add_broadcast_push_subscription(user_b, "send-fail")
+        self._add_broadcast_push_subscription(user_revoked, "send-revoked", revoked=True)
+
+        calls: list[dict] = []
+        old_settings = api.settings
+        original_send = api.send_web_push
+        api.settings = replace(
+            api.settings,
+            vapid_public_key="test-public-key",
+            vapid_private_key="test-private-key",
+            vapid_subject="mailto:test@example.ru",
+        )
+
+        def fake_send(settings, *, subscription: dict, payload: dict) -> dict:
+            calls.append({"subscription": subscription, "payload": payload})
+            if str(subscription["endpoint"]).endswith("send-fail"):
+                return {"sent": False, "reason": "provider_down"}
+            return {"sent": True, "reason": "ok"}
+
+        api.send_web_push = fake_send
+        try:
+            result = api.send_push_broadcast(
+                api.PushBroadcastPayload(
+                    title="TemichevVet: работа восстановлена",
+                    body="Приносим извинения: был кратковременный сбой. Сейчас сервис доступен.",
+                    url="/app",
+                    dry_run=False,
+                    confirm="SEND_PUSH_BROADCAST",
+                    limit=10,
+                ),
+                request("/api/internal/push/broadcast"),
+                _=None,
+            )
+        finally:
+            api.send_web_push = original_send
+            api.settings = old_settings
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["subscriptions"], 2)
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failure_reasons"], {"provider_down": 1})
+        self.assertTrue(all(call["payload"]["url"] == "/app" for call in calls))
+
+        events = db.list_security_audit_events(api.settings.database_path, event_type="push.broadcast_send")
+        self.assertEqual(len(events), 1)
+        metadata = events[0]["metadata"]
+        serialized = json.dumps(metadata, ensure_ascii=False)
+        self.assertEqual(metadata["message_type"], "incident_recovered")
+        self.assertEqual(metadata["subscriptions"], 2)
+        self.assertEqual(metadata["sent"], 1)
+        self.assertEqual(metadata["failed"], 1)
+        self.assertNotIn("работа восстановлена", serialized)
+        self.assertNotIn("кратковременный сбой", serialized)
+
     def test_due_followup_push_sender_skips_without_subscription(self) -> None:
-        user, _ = login("push-followup-owner@example.com")
+        user, _ = login("push-followup-owner@example.ru")
         triage = db.create_triage_log(
             api.settings.database_path,
             owner_id=int(user["id"]),
@@ -1319,6 +1682,20 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(result["sent"], 0)
         self.assertGreaterEqual(result["skipped"], 1)
+        events = db.list_security_audit_events(api.settings.database_path, event_type="push.followups_send")
+        self.assertEqual(events, [])
+
+    def test_due_followup_push_sender_does_not_audit_empty_queue(self) -> None:
+        result = api.send_due_followup_pushes(
+            request("/api/internal/push/followups/send"),
+            limit=10,
+            _=None,
+        )
+        self.assertEqual(result["followups"], 0)
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(result["failed"], 0)
+        events = db.list_security_audit_events(api.settings.database_path, event_type="push.followups_send")
+        self.assertEqual(events, [])
 
 
 if __name__ == "__main__":

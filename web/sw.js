@@ -1,14 +1,15 @@
-const CACHE_NAME = "temichevvet-max-live-1";
+const CACHE_NAME = "temichevvet-pwa-20260702-notranslate-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260617-max-live-1",
-  "/static/app.js?v=20260617-max-live-1",
-  "/static/manifest.webmanifest?v=20260617-max-live-1",
-  "/static/assets/app-icon-192.png?v=20260617-max-live-1",
-  "/static/assets/app-icon-512.png?v=20260617-max-live-1",
-  "/static/assets/apple-touch-icon.png?v=20260617-max-live-1",
-  "/apple-touch-icon.png?v=20260617-max-live-1",
-  "/apple-touch-icon-precomposed.png?v=20260617-max-live-1",
+  "/static/styles.css?v=20260626-funnel",
+  "/static/app.js?v=20260702-notranslate-1",
+  "/static/manifest.webmanifest?v=20260627-ios-icon-1",
+  "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
+  "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",
+  "/static/assets/apple-touch-icon-20260627.png",
+  "/static/assets/apple-touch-icon.png?v=20260627-ios-icon-1",
+  "/apple-touch-icon.png?v=20260627-ios-icon-1",
+  "/apple-touch-icon-precomposed.png?v=20260627-ios-icon-1",
   "/static/assets/logo_temichevvet.jpg",
   "/static/assets/hero_pets.jpg",
   "/static/assets/subscription_banner.jpg",
@@ -32,7 +33,11 @@ function isPrivateRequest(url) {
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))
+    )
+  );
 });
 
 self.addEventListener("activate", (event) => {

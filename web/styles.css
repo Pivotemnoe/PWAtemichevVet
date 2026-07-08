@@ -261,6 +261,11 @@ p {
   margin: 18px 0 4px;
 }
 
+.hero-actions .primary-link,
+.hero-actions .secondary-link {
+  flex: 1 1 220px;
+}
+
 .primary-link,
 .secondary-link {
   min-height: 44px;
@@ -284,6 +289,19 @@ p {
   background: #e8eef6;
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.hero-support,
+.hero-channel-links {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.hero-channel-links a {
+  color: var(--blue);
+  text-decoration: none;
 }
 
 .feature-list {

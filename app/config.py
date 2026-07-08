@@ -17,6 +17,13 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _max_api_base_url() -> str:
+    value = os.getenv("MAX_API_BASE_URL", "").strip().rstrip("/")
+    if not value or value == "https://platform-api.max.ru":
+        return "https://platform-api2.max.ru"
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     app_env: str
@@ -28,6 +35,7 @@ class Settings:
     max_bot_username: str
     max_bot_token: str
     max_api_base_url: str
+    max_api_ca_bundle: str
     max_webhook_secret: str
     dev_auth_code_log: bool
     smtp_host: str
@@ -65,7 +73,8 @@ def get_settings() -> Settings:
         telegram_auth_secret=os.getenv("TELEGRAM_AUTH_SECRET", "").strip(),
         max_bot_username=os.getenv("MAX_BOT_USERNAME", "").strip().lstrip("@"),
         max_bot_token=os.getenv("MAX_BOT_TOKEN", "").strip(),
-        max_api_base_url=os.getenv("MAX_API_BASE_URL", "https://platform-api.max.ru").strip().rstrip("/"),
+        max_api_base_url=_max_api_base_url(),
+        max_api_ca_bundle=os.getenv("MAX_API_CA_BUNDLE", "").strip(),
         max_webhook_secret=os.getenv("MAX_WEBHOOK_SECRET", "").strip(),
         dev_auth_code_log=_bool_env("DEV_AUTH_CODE_LOG", default=False),
         smtp_host=os.getenv("SMTP_HOST", "").strip(),

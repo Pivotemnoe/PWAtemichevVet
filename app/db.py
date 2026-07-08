@@ -476,6 +476,52 @@ def init_db(db_path: Path) -> None:
             ON security_audit_events(status, created_at)
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS site_visits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                user_id INTEGER,
+                ip_hash TEXT,
+                referrer_host TEXT,
+                source TEXT,
+                device TEXT,
+                browser TEXT,
+                is_bot INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_site_visits_created ON site_visits(created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_site_visits_user_created ON site_visits(user_id, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_site_visits_path_created ON site_visits(path, created_at)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS funnel_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                step TEXT NOT NULL,
+                status TEXT NOT NULL,
+                session_hash TEXT,
+                user_id INTEGER,
+                source TEXT,
+                path TEXT,
+                device TEXT,
+                browser TEXT,
+                metadata TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_created ON funnel_events(created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_event_created ON funnel_events(event_type, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_step_created ON funnel_events(step, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_user_created ON funnel_events(user_id, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_session_created ON funnel_events(session_hash, created_at)")
         conn.commit()
 
 
@@ -612,6 +658,7 @@ def list_security_audit_events(
     event_type: str | None = None,
     user_id: int | None = None,
     status: str | None = None,
+    hide_noisy_system_events: bool = False,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -625,6 +672,9 @@ def list_security_audit_events(
         clauses.append("status = ?")
         params.append(status)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    query_limit = int(limit)
+    if hide_noisy_system_events and not event_type:
+        query_limit = min(max(query_limit * 5, query_limit), 2000)
     with closing(connect(db_path)) as conn:
         rows = conn.execute(
             f"""
@@ -634,12 +684,26 @@ def list_security_audit_events(
             ORDER BY id DESC
             LIMIT ?
             """,
-            (*params, int(limit)),
+            (*params, query_limit),
         ).fetchall()
     items = rows_to_dicts(rows)
+    visible_items: list[dict[str, Any]] = []
     for item in items:
-        item["metadata"] = _json_load(item.get("metadata"))
-    return items
+        metadata = _json_load(item.get("metadata"))
+        item["metadata"] = metadata
+        if hide_noisy_system_events and not event_type:
+            if (
+                item.get("event_type") == "push.followups_send"
+                and item.get("actor") == "system"
+                and item.get("status") == "ok"
+                and int((metadata or {}).get("sent") or 0) == 0
+                and int((metadata or {}).get("failed") or 0) == 0
+            ):
+                continue
+        visible_items.append(item)
+        if len(visible_items) >= int(limit):
+            break
+    return visible_items
 
 
 def count_security_audit_events_since(
@@ -667,6 +731,129 @@ def count_security_audit_events_since(
             tuple(params),
         ).fetchone()
         return int((row or (0,))[0] or 0)
+
+
+def create_site_visit(
+    db_path: Path,
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    user_id: int | None = None,
+    ip_hash: str | None = None,
+    referrer_host: str | None = None,
+    source: str | None = None,
+    device: str | None = None,
+    browser: str | None = None,
+    is_bot: bool = False,
+) -> None:
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO site_visits (
+                created_at, method, path, status_code, user_id, ip_hash,
+                referrer_host, source, device, browser, is_bot
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                utc_now_iso(),
+                method[:12],
+                path[:240],
+                int(status_code),
+                int(user_id) if user_id is not None else None,
+                ip_hash[:80] if ip_hash else None,
+                referrer_host[:160] if referrer_host else None,
+                source[:160] if source else None,
+                device[:40] if device else None,
+                browser[:80] if browser else None,
+                1 if is_bot else 0,
+            ),
+        )
+        conn.commit()
+
+
+def list_site_visits(db_path: Path, *, limit: int = 80) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT sv.id, sv.created_at, sv.method, sv.path, sv.status_code,
+                   sv.user_id, u.email AS user_email, sv.referrer_host, sv.source,
+                   sv.device, sv.browser, sv.is_bot
+            FROM site_visits sv
+            LEFT JOIN users u ON u.id = sv.user_id
+            ORDER BY sv.id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def create_funnel_event(
+    db_path: Path,
+    *,
+    event_type: str,
+    step: str,
+    status: str = "ok",
+    session_hash: str | None = None,
+    user_id: int | None = None,
+    source: str | None = None,
+    path: str | None = None,
+    device: str | None = None,
+    browser: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funnel_events (
+                created_at, event_type, step, status, session_hash, user_id,
+                source, path, device, browser, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                utc_now_iso(),
+                event_type[:120],
+                step[:80],
+                status[:40],
+                session_hash[:80] if session_hash else None,
+                int(user_id) if user_id is not None else None,
+                source[:160] if source else None,
+                path[:240] if path else None,
+                device[:40] if device else None,
+                browser[:80] if browser else None,
+                _safe_audit_metadata(metadata),
+            ),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM funnel_events WHERE id = ?", (int(cur.lastrowid),))
+        row = cur.fetchone()
+    item = row_to_dict(row)
+    if not item:
+        raise RuntimeError("funnel_event_not_created")
+    item["metadata"] = _json_load(item.get("metadata"))
+    return item
+
+
+def list_funnel_events(db_path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, created_at, event_type, step, status, user_id, source,
+                   path, device, browser, metadata
+            FROM funnel_events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    items = rows_to_dicts(rows)
+    for item in items:
+        item["metadata"] = _json_load(item.get("metadata"))
+    return items
 
 
 def upsert_push_subscription(
@@ -751,6 +938,21 @@ def list_push_subscriptions_for_delivery(db_path: Path, *, user_id: int) -> list
             ORDER BY updated_at DESC
             """,
             (int(user_id),),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def list_active_push_subscriptions_for_delivery(db_path: Path, *, limit: int = 500) -> list[dict[str, Any]]:
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at
+            FROM push_subscriptions
+            WHERE revoked_at IS NULL
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (int(limit),),
         ).fetchall()
     return rows_to_dicts(rows)
 
@@ -1075,6 +1277,13 @@ def update_challenge_payload(db_path: Path, challenge_id: int, payload: str) -> 
             (payload, int(challenge_id)),
         )
         conn.commit()
+
+
+def get_user_by_email(db_path: Path, email: str) -> dict[str, Any] | None:
+    email = email.strip().lower()
+    with closing(connect(db_path)) as conn:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+    return dict(row) if row else None
 
 
 def get_or_create_user_by_email(db_path: Path, email: str) -> dict[str, Any]:

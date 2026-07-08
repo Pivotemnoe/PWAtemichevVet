@@ -28,6 +28,42 @@ const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more"]);
 let consumedStartupAction = "";
 
+function isAuthLinkRequested() {
+  const value = new URLSearchParams(window.location.search).get("auth") || "";
+  return ["1", "true", "login", "cabinet"].includes(value.trim().toLowerCase());
+}
+
+function clearAuthLinkRequest() {
+  if (!isAuthLinkRequested()) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("auth");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+const FUNNEL_SESSION_KEY = "tvv_funnel_session";
+
+function getFunnelSessionId() {
+  let value = localStorage.getItem(FUNNEL_SESSION_KEY) || "";
+  if (value) return value;
+  value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(FUNNEL_SESSION_KEY, value);
+  return value;
+}
+
+function trackFunnel(eventType, metadata = {}) {
+  if (isAdminRoute) return;
+  fetch("/api/funnel/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      event_type: eventType,
+      session_id: getFunnelSessionId(),
+      metadata
+    })
+  }).catch(() => {});
+}
+
 function normalizeStartupAction(action) {
   return STARTUP_ACTIONS.has(action) ? action : "";
 }
@@ -74,6 +110,7 @@ let adminLogoutBtn = null;
 let adminContent = null;
 let adminMarkupReady = false;
 const openAuthBtn = document.querySelector("#openAuthBtn");
+const openLoginBtn = document.querySelector("#openLoginBtn");
 const authDialog = document.querySelector("#authDialog");
 const authCloseBtn = document.querySelector("#authCloseBtn");
 const emailForm = document.querySelector("#emailForm");
@@ -150,7 +187,7 @@ const DASHBOARD_VIEW_HTML = `
   </section>
 `;
 
-const ADMIN_VIEW_HTML = `<section class="admin-view" id="adminView" hidden></section>`;
+const ADMIN_VIEW_HTML = `<section class="admin-view notranslate" id="adminView" translate="no" hidden></section>`;
 
 const reminderTypes = [
   ["vaccine", "Вакцинация"],
@@ -238,9 +275,17 @@ function setAdminMode(isAuthed) {
 }
 
 function openAuthDialog() {
+  trackFunnel("auth.dialog_open", { source: "dialog" });
   authDialog.hidden = false;
   authDialog.setAttribute("aria-hidden", "false");
   setTimeout(() => emailInput?.focus(), 0);
+}
+
+function openAuthDialogFromLink() {
+  if (!isAuthLinkRequested()) return false;
+  openAuthDialog();
+  clearAuthLinkRequest();
+  return true;
 }
 
 function closeAuthDialog() {
@@ -268,6 +313,7 @@ function readableError(message) {
   const messages = {
     email_not_configured: "Вход по email временно недоступен. Попробуйте позже или используйте Telegram/MAX для подтверждения входа.",
     email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
+    email_registration_russian_domain_required: "Регистрация по email доступна только с российской почтой .ru или .рф. Войдите через Telegram или MAX либо укажите другую почту.",
     email_code_too_many_requests: "Код уже отправлен. Подождите около минуты перед повторной отправкой.",
     email_code_hour_limit: "Слишком много кодов на этот email. Попробуйте позже.",
     invalid_code: "Код не подошёл. Проверьте цифры и попробуйте ещё раз.",
@@ -983,6 +1029,14 @@ function adminAuditEventInfo(eventType) {
       title: "Push не подключён",
       help: "Пользователь попытался включить PWA-уведомления, но VAPID ещё не настроен."
     },
+    "push.followups_send": {
+      title: "Контрольное напоминание",
+      help: "Система отправила PWA-напоминание после разбора состояния питомца. Пустые проверки очереди в журнал не попадают."
+    },
+    "push.broadcast_send": {
+      title: "Сервисная PWA-рассылка",
+      help: "Разовое служебное уведомление пользователям, у которых включены push-уведомления."
+    },
     "review_login.denied": {
       title: "Review-ссылка не принята",
       help: "Временная ссылка аудита недействительна, истекла или относится не к review-аккаунту."
@@ -1019,6 +1073,27 @@ function renderAuditEventCell(row) {
 function renderAuditHelpCell(row) {
   const info = adminAuditEventInfo(row.event_type);
   return escapeHtml(info.help);
+}
+
+function renderSiteVisitUser(row) {
+  if (row.user_email) {
+    return adminCell(row.user_email);
+  }
+  if (row.user_id) {
+    return adminCell(`User ${row.user_id}`);
+  }
+  return `<span>Анонимно</span><small>без входа</small>`;
+}
+
+function renderSiteVisitSource(row) {
+  const source = row.source || row.referrer_host || "Прямой заход";
+  return adminCell(source);
+}
+
+function renderSiteVisitDevice(row) {
+  const parts = [row.device, row.browser].filter(Boolean);
+  const label = parts.length ? parts.join(" / ") : "Неизвестно";
+  return adminCell(row.is_bot ? `${label} · бот/проверка` : label);
 }
 
 function renderAdminMetric(label, value, hint = "") {
@@ -1076,11 +1151,59 @@ function renderAdminDashboard(data, system = null) {
       ${renderAdminMetric("Питомцев", overview.pets_total)}
       ${renderAdminMetric("Активный Plus", overview.active_plus)}
       ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
+      ${renderAdminMetric("Заходов на сайт 24ч", overview.site_visits_24h, `${overview.site_visitors_24h || 0} уникальных`)}
+      ${renderAdminMetric("Авторизованных заходов 24ч", overview.site_logged_in_visits_24h)}
       ${renderAdminMetric("Проверок за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
       ${renderAdminMetric("Событий защиты 24ч", overview.security_events_24h, `${overview.security_warnings_24h || 0} предупреждений / ${overview.security_errors_24h || 0} ошибок`)}
     </div>
+    <section class="admin-section">
+      <h2>Воронка за 72 часа</h2>
+      <p class="admin-explain">Показывает путь от первого открытия сайта до входа, проверки симптомов и оплаты. Уникальность считается по обезличенной сессии или пользователю. Email, IP и медицинский текст здесь не хранятся.</p>
+    </section>
+    ${renderAdminTable("Шаги воронки", data.conversion_funnel_72h?.steps || [], [
+      { key: "label", label: "Шаг", render: (row) => `<strong>${escapeHtml(row.label || row.step)}</strong><br><small>${escapeHtml(row.step || "")}</small>` },
+      { key: "unique_count", label: "Уникальные" },
+      { key: "count", label: "Всего событий" },
+      { key: "conversion_from_previous", label: "Переход", render: (row) => row.conversion_from_previous == null ? "—" : `${escapeHtml(row.conversion_from_previous)}%` },
+      { key: "issues", label: "Ошибки" },
+      { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
+      { key: "help", label: "Что значит" }
+    ], "За последние 72 часа событий воронки пока нет.")}
+    ${renderAdminTable("Последние события воронки", data.recent_funnel_events || [], [
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
+      { key: "event_type", label: "Событие" },
+      { key: "step", label: "Шаг" },
+      { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
+      { key: "user_id", label: "User" },
+      { key: "source", label: "Источник" },
+      { key: "device", label: "Устройство" }
+    ], "Событий воронки пока нет.")}
+    <section class="admin-section">
+      <h2>Посещения сайта</h2>
+      <p class="admin-explain">Здесь показаны технические заходы на сайт: время, страница, источник и устройство. Если человек не вошёл в кабинет, он отображается как «Анонимно». IP не хранится в открытом виде, используется только обезличенный хэш для подсчёта уникальных посетителей.</p>
+    </section>
+    ${renderAdminTable("Источники за 24 часа", data.site_sources_24h || [], [
+      { key: "source", label: "Источник" },
+      { key: "count", label: "Заходы" },
+      { key: "visitors", label: "Уникальные" },
+      { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
+    ], "За последние 24 часа заходов на сайт не было.")}
+    ${renderAdminTable("Страницы за 24 часа", data.site_paths_24h || [], [
+      { key: "path", label: "Страница" },
+      { key: "count", label: "Заходы" },
+      { key: "visitors", label: "Уникальные" },
+      { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
+    ], "За последние 24 часа открытых страниц не было.")}
+    ${renderAdminTable("Последние посещения сайта", data.recent_site_visits || [], [
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
+      { key: "path", label: "Страница" },
+      { key: "user_email", label: "Кто", render: renderSiteVisitUser },
+      { key: "source", label: "Источник", render: renderSiteVisitSource },
+      { key: "device", label: "Устройство", render: renderSiteVisitDevice },
+      { key: "status_code", label: "HTTP" }
+    ], "Посещения ещё не записаны.")}
     <section class="admin-section">
       <h2>Системный статус</h2>
       <p class="admin-explain">Статусы ниже показывают, какие интеграции подключены именно на этом сервере. «Не подключено» не означает взлом или потерю данных: функция просто не будет доступна, пока не добавлены нужные ключи или секреты. Критично только если «Проблема» у базы.</p>
@@ -1283,12 +1406,14 @@ async function bootstrap() {
         await checkPlusPaymentStatus({ replaceHistory: true });
         return;
       }
+      clearAuthLinkRequest();
       await renderStartupView();
       return;
     } catch {
       clearAccountState();
     }
     setAuthMode(false);
+    openAuthDialogFromLink();
     if (state.telegramLoginState) {
       openAuthDialog();
       renderTelegramWaiting(state.telegramLoginUrl, state.telegramLoginState);
@@ -1310,12 +1435,14 @@ async function bootstrap() {
       await checkPlusPaymentStatus({ replaceHistory: true });
       return;
     }
+    clearAuthLinkRequest();
     await renderStartupView();
   } catch {
     localStorage.removeItem("tvv_token");
     state.token = "";
     clearAccountState();
     setAuthMode(false);
+    openAuthDialogFromLink();
     if (state.telegramLoginState) {
       openAuthDialog();
       renderTelegramWaiting(state.telegramLoginUrl, state.telegramLoginState);
@@ -2441,6 +2568,7 @@ async function renderTriage(prefillPetId = null) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const petId = String(form.get("pet_id") || "");
+    trackFunnel("triage.submit_click", { has_pet: Boolean(petId) });
     const resultEl = document.querySelector("#triageResult");
     resultEl.innerHTML = `<p class="hint">Проверяю...</p>`;
     try {
@@ -2679,6 +2807,7 @@ function paymentStatusNotice(message, type = "") {
 }
 
 async function startPlusPayment() {
+  trackFunnel("payment.plus_click");
   const resultEl = document.querySelector("#paymentResult");
   if (resultEl) resultEl.innerHTML = paymentStatusNotice("Создаю защищённую ссылку оплаты...");
   try {
@@ -2921,6 +3050,7 @@ emailForm.addEventListener("submit", async (event) => {
     return;
   }
   emailHint.textContent = "Отправляю код...";
+  trackFunnel("auth.email_start_click");
   try {
     const data = await api("/api/auth/email/start", {
       method: "POST",
@@ -3148,7 +3278,14 @@ async function pollMaxLogin(loginState, attempt = 0) {
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
-openAuthBtn.addEventListener("click", openAuthDialog);
+openAuthBtn.addEventListener("click", () => {
+  trackFunnel("landing.primary_cta_click", { target: "hero" });
+  openAuthDialog();
+});
+openLoginBtn?.addEventListener("click", () => {
+  trackFunnel("landing.login_cta_click", { target: "hero" });
+  openAuthDialog();
+});
 authCloseBtn.addEventListener("click", closeAuthDialog);
 authDialog.addEventListener("click", (event) => {
   if (event.target === authDialog) closeAuthDialog();
@@ -3159,8 +3296,14 @@ legalModal.addEventListener("click", (event) => {
 });
 cookieAcceptBtn.addEventListener("click", () => setCookieConsent("all"));
 cookieNecessaryBtn.addEventListener("click", () => setCookieConsent("necessary"));
-telegramBtn.addEventListener("click", () => startMessenger("telegram"));
-maxBtn.addEventListener("click", () => startMessenger("max"));
+telegramBtn.addEventListener("click", () => {
+  trackFunnel("auth.telegram_start_click");
+  startMessenger("telegram");
+});
+maxBtn.addEventListener("click", () => {
+  trackFunnel("auth.max_start_click");
+  startMessenger("max");
+});
 
 window.addEventListener("focus", () => {
   if (!state.token && state.telegramLoginState) pollTelegramLogin(state.telegramLoginState);
@@ -3280,6 +3423,7 @@ document.addEventListener("click", async (event) => {
     if (action === "faq") await renderKnowledgeSection("faq");
     if (action === "reminders") await renderReminders();
     if (action === "subscription") {
+      trackFunnel("subscription.open_click");
       await refreshAccountState();
       renderSubscription();
     }
@@ -3319,5 +3463,6 @@ if ("serviceWorker" in navigator) {
 }
 
 showCookieBannerIfNeeded();
+trackFunnel("landing.view", { path: location.pathname, search: location.search.slice(0, 80) });
 bootstrap();
 openLegalFromCurrentPath();

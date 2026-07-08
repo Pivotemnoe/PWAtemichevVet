@@ -1,30 +1,36 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" translate="no" class="notranslate">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1476d4" />
+    <meta name="google" content="notranslate" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="TemichevVet" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
     <title>TemichevVet — оценка срочности симптомов у собак и кошек</title>
     <meta
       name="description"
-      content="PWA-сервис для владельцев собак и кошек: оценка срочности симптомов, история здоровья питомца, напоминания и подготовка информации для ветеринарного врача."
+      content="Сервис для владельцев собак и кошек: оценка срочности состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
     />
     <link rel="canonical" href="https://temichevvet.ru/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="ru_RU" />
     <meta property="og:site_name" content="TemichevVet" />
-    <meta property="og:title" content="TemichevVet — оценка срочности симптомов у собак и кошек" />
+    <meta property="og:title" content="TemichevVet — понять, что делать, если питомцу плохо" />
     <meta
       property="og:description"
-      content="Оценка срочности симптомов, история здоровья питомца, напоминания и подготовка информации для ветеринарного врача."
+      content="Оценка срочности состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
     />
     <meta property="og:url" content="https://temichevvet.ru/" />
     <meta property="og:image" content="https://temichevvet.ru/static/assets/hero_pets.jpg" />
-    <link rel="manifest" href="/static/manifest.webmanifest?v=20260617-max-live-1" />
-    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260617-max-live-1" type="image/png" sizes="192x192" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260617-max-live-1" />
-    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=20260617-max-live-1" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260617-max-live-1" />
+    <link rel="manifest" href="/static/manifest.webmanifest?v=20260627-ios-icon-1" />
+    <link rel="icon" href="/static/assets/app-icon-192.png?v=20260627-ios-icon-1" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-funnel" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -106,17 +112,25 @@
               </div>
             </div>
             <div class="hero-copy">
-              <p class="section-label">Сервис для владельцев собак и кошек</p>
-              <h1>TemichevVet — быстрый помощник, когда питомцу плохо</h1>
+              <p class="section-label">Для владельцев собак и кошек</p>
+              <h1>Питомцу плохо? Поймите, что делать сейчас</h1>
               <p class="lead">
-                Опишите симптомы питомца простыми словами. Сервис поможет понять срочность,
-                сохранить проверку в истории и подготовиться к разговору с ветеринарным врачом.
+                Опишите, что происходит с питомцем, простыми словами. TemichevVet оценит
+                срочность и подскажет следующий шаг: наблюдать дома, обратиться за консультацией
+                или ехать в клинику.
               </p>
               <div class="hero-actions">
-                <button class="primary-link" id="openAuthBtn" type="button">Проверить симптомы</button>
-                <a class="secondary-link" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-версию</a>
-                <a class="secondary-link" href="#installTitle">Как установить приложение</a>
+                <button class="primary-link" id="openAuthBtn" type="button">Описать, что случилось</button>
+                <button class="secondary-link" id="openLoginBtn" type="button">Войти в личный кабинет</button>
+                <a class="secondary-link" href="#serviceCanTitle">Что умеет сервис</a>
               </div>
+              <p class="hero-support">Бесплатный старт · результат можно сохранить в истории питомца</p>
+              <p class="hero-channel-links">
+                Удобнее в мессенджере?
+                <a href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
+                ·
+                <a href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
+              </p>
               <p class="care-note">
                 Важно: TemichevVet не ставит диагноз и не назначает лечение. Он помогает быстрее
                 сориентироваться и вовремя обратиться в клинику при тревожных признаках.
@@ -169,7 +183,7 @@
           <section class="content-section" aria-labelledby="serviceCanTitle">
             <div class="section-head">
               <p class="section-label">Возможности</p>
-              <h2 id="serviceCanTitle">Что умеет TemichevVet</h2>
+              <h2 id="serviceCanTitle">Что умеет сервис</h2>
             </div>
             <div class="feature-card-grid">
               <article class="feature-card">
@@ -317,8 +331,8 @@
               <div class="auth-card-head">
                 <div>
                   <p class="section-label">Вход в личный кабинет</p>
-                  <h2 id="authDialogTitle">Выберите удобный способ входа</h2>
-                  <p>Один аккаунт работает на сайте, в PWA, Telegram и MAX. Через MAX можно войти в кабинет или открыть его прямо внутри MAX.</p>
+                  <h2 id="authDialogTitle">Войдите или создайте личный кабинет</h2>
+                  <p>Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.</p>
                 </div>
                 <button class="icon-button close-button" id="authCloseBtn" type="button" aria-label="Закрыть окно входа"></button>
               </div>
@@ -415,6 +429,6 @@
     </div>
 
     <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <script src="/static/app.js?v=20260617-max-live-1" type="module"></script>
+    <script src="/static/app.js?v=20260702-notranslate-1" type="module"></script>
   </body>
 </html>

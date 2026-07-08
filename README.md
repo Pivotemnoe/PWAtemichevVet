@@ -80,10 +80,15 @@ Set these values in `.env`:
 ```text
 MAX_BOT_USERNAME=id230210303969_bot
 MAX_BOT_TOKEN=...
+MAX_API_BASE_URL=https://platform-api2.max.ru
+# Set only if the server OS trust store does not already trust the Ministry of Digital Development CA.
+MAX_API_CA_BUNDLE=/path/to/ministry-digital-ca-bundle.pem
 MAX_WEBHOOK_SECRET=long-random-secret-with-letters-digits-dashes-or-underscores
 ```
 
 MAX login confirms identity and opens or connects the same PWA account. The MAX bot is also a lightweight entry point: if `bot_started` arrives without a valid PWA login state, or MAX sends `message_created`/`message_callback`, the bot sends a basic menu with links to the PWA cabinet, triage, pets, reminders, subscription, and help. Telegram remains a separate channel and is not reimplemented in MAX chat.
+
+MAX requires API calls to use `https://platform-api2.max.ru` by July 19, 2026 and authenticates bot API requests with `Authorization: <token>`, not a token query parameter. The app normalizes the legacy `https://platform-api.max.ru` value to the new API host at startup. Python uses the system trust store for MAX API TLS; install the Ministry of Digital Development CA into the OS trust store or set `MAX_API_CA_BUNDLE` to a PEM bundle that includes it.
 
 When the PWA is opened as a MAX mini app, the frontend sends `window.WebApp.initData` to `POST /api/auth/max/init`. The backend validates the MAX signature with `MAX_BOT_TOKEN`, checks `auth_date`, reads the verified MAX `user.id`, and creates the same PWA session used by email, Telegram, and challenge-based MAX login.
 
@@ -133,6 +138,41 @@ curl -X POST "https://temichevvet.ru/api/internal/push/followups/send?limit=50" 
 Run it from cron or a systemd timer. If VAPID keys are absent, the user interface explains that notifications are still being prepared and regular app logic continues to work.
 
 Production uses the templates in `infra/systemd/` and the helper script `scripts/send_pwa_followups.sh`.
+
+## PWA Push Service Broadcast
+
+One-off service broadcasts use only active PWA web-push subscriptions. They do not send Telegram or MAX messages.
+
+Dry-run counts active subscriptions and does not send notifications:
+
+```bash
+curl -X POST "https://temichevvet.ru/api/internal/push/broadcast" \
+  -H "Content-Type: application/json" \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET" \
+  -d '{
+    "title": "TemichevVet: работа восстановлена",
+    "body": "Приносим извинения: был кратковременный сбой в работе серверов из-за повышенной нагрузки. Сейчас сервис доступен, работа восстановлена.",
+    "url": "/app",
+    "dry_run": true,
+    "limit": 500
+  }'
+```
+
+Real delivery requires an explicit confirmation token:
+
+```bash
+curl -X POST "https://temichevvet.ru/api/internal/push/broadcast" \
+  -H "Content-Type: application/json" \
+  -H "X-Temichevvet-Monitoring-Secret: $MONITORING_API_SECRET" \
+  -d '{
+    "title": "TemichevVet: работа восстановлена",
+    "body": "Приносим извинения: был кратковременный сбой в работе серверов из-за повышенной нагрузки. Сейчас сервис доступен, работа восстановлена.",
+    "url": "/app",
+    "dry_run": false,
+    "confirm": "SEND_PUSH_BROADCAST",
+    "limit": 500
+  }'
+```
 
 ## GitHub
 
