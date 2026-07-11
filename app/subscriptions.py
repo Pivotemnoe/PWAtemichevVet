@@ -93,6 +93,7 @@ def _pwa_free_quota_state(conn: sqlite3.Connection, user_id: int) -> tuple[int, 
         FROM triage_logs
         WHERE user_id = ?
           AND COALESCE(NULLIF(urgency_level, ''), '') != 'red'
+          AND COALESCE(NULLIF(subscription_source, ''), '') != 'public_preview'
           AND created_at >= ?
           AND created_at < ?
         """,

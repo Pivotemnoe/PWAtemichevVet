@@ -27,7 +27,7 @@ from app.followups import detect_followup_scenario, followup_due_at, followup_pa
 from app.knowledge import check_food, find_care, find_faq, find_food, food_to_public
 from app.llm_triage import call_triage_llm, extract_urgency, short_summary
 from app.max_auth import complete_max_init_login, complete_max_login, create_max_login_challenge, process_max_update
-from app.medical_safety import detect_red_flags, render_red_flag_response
+from app.medical_safety import RedFlagResult, detect_red_flags, render_red_flag_response
 from app.payments.yookassa import (
     PLUS_DAYS,
     PROVIDER as YOOKASSA_PROVIDER,
@@ -115,6 +115,7 @@ RATE_LIMIT_RULES: tuple[tuple[str, set[str], tuple[str, ...], int, int], ...] = 
     ("auth_provider_status", {"GET"}, ("/api/auth/telegram/status", "/api/auth/max/status"), 150, 600),
     ("payment", {"GET", "POST"}, ("/api/payments",), 60, 3600),
     ("feedback", {"POST"}, ("/api/feedback",), 10, 3600),
+    ("check_preview", {"POST"}, ("/api/check/preview",), 20, 3600),
     ("triage", {"POST"}, ("/api/triage",), 30, 3600),
     ("push", {"POST"}, ("/api/push",), 30, 3600),
     ("account_export", {"GET"}, ("/api/account/export",), 5, 3600),
@@ -170,6 +171,12 @@ def _audit(
 
 FUNNEL_STEPS: list[tuple[str, str, str]] = [
     ("landing", "Открыли сайт", "Человек попал на публичную страницу."),
+    ("check_view", "Открыли быструю проверку", "Открыли рекламную посадочную быстрой проверки."),
+    ("check_start", "Начали быструю проверку", "Нажали старт или начали заполнять пробный разбор."),
+    ("check_submit", "Отправили быструю проверку", "Отправили форму пробного разбора состояния."),
+    ("check_result", "Увидели результат проверки", "Получили пробный разбор и следующий шаг."),
+    ("check_save", "Попробовали сохранить разбор", "Нажали сохранение результата и перешли к входу."),
+    ("check_saved", "Сохранили пробный разбор", "После входа пробный разбор сохранён в кабинете."),
     ("primary_cta", "Нажали главный призыв", "Нажали основную кнопку первого экрана."),
     ("auth_open", "Открыли вход", "Открыли окно входа или регистрации."),
     ("email_code", "Запросили email-код", "Попросили одноразовый код на email."),
@@ -184,6 +191,15 @@ FUNNEL_STEPS: list[tuple[str, str, str]] = [
 
 FUNNEL_EVENT_STEPS = {
     "landing.view": "landing",
+    "check.view": "check_view",
+    "check.start_click": "check_start",
+    "check.pet_selected": "check_start",
+    "check.symptoms_started": "check_start",
+    "check.submit": "check_submit",
+    "check.result_shown": "check_result",
+    "check.red_flag": "check_result",
+    "check.save_click": "check_save",
+    "check.saved_after_login": "check_saved",
     "landing.primary_cta_click": "primary_cta",
     "landing.login_cta_click": "auth_open",
     "landing.service_link_click": "auth_open",
@@ -623,6 +639,32 @@ class TelegramCompleteRequest(BaseModel):
 class TriageRequest(BaseModel):
     pet_id: int | None = None
     text: str = Field(min_length=3, max_length=2000)
+
+
+class PublicCheckPreviewRequest(BaseModel):
+    pet_type: str = Field(default="unknown", max_length=30)
+    age: str | None = Field(default=None, max_length=80)
+    text: str = Field(min_length=3, max_length=1200)
+    red_flags: list[str] = Field(default_factory=list, max_length=10)
+    landing_slug: str | None = Field(default=None, max_length=80)
+    session_id: str | None = Field(default=None, max_length=128)
+    website: str | None = Field(default=None, max_length=120)
+
+
+class PublicCheckPreviewSaveRequest(BaseModel):
+    pet_type: str = Field(default="unknown", max_length=30)
+    age: str | None = Field(default=None, max_length=80)
+    text: str = Field(min_length=3, max_length=1200)
+    answer: str = Field(min_length=20, max_length=12000)
+    urgency: str | None = Field(default=None, max_length=30)
+    urgency_label: str | None = Field(default=None, max_length=80)
+    summary: str | None = Field(default=None, max_length=240)
+    model: str | None = Field(default=None, max_length=80)
+    prompt_tokens: int | None = Field(default=None, ge=0, le=200000)
+    completion_tokens: int | None = Field(default=None, ge=0, le=200000)
+    total_tokens: int | None = Field(default=None, ge=0, le=300000)
+    landing_slug: str | None = Field(default=None, max_length=80)
+    session_id: str | None = Field(default=None, max_length=128)
 
 
 class PetPayload(BaseModel):
@@ -2601,6 +2643,353 @@ def funnel_event(payload: FunnelEventRequest, request: Request) -> dict[str, Any
         metadata=payload.metadata or {},
     )
     return {"ok": True}
+
+
+PUBLIC_CHECK_RED_FLAG_LABELS = {
+    "breathing": "тяжёлое дыхание",
+    "consciousness": "потеря сознания",
+    "poisoning": "подозрение на отравление",
+    "urination": "невозможность мочиться",
+    "bleeding": "кровь или кровотечение",
+}
+PUBLIC_CHECK_MIN_LLM_TEXT_LENGTH = 10
+PUBLIC_CHECK_CLAIM_STALE_MINUTES = 15
+PUBLIC_CHECK_IP_LLM_LIMIT = 6
+PUBLIC_CHECK_IP_LLM_WINDOW_SECONDS = 60 * 60
+PUBLIC_CHECK_IP_BURST_LIMIT = 2
+PUBLIC_CHECK_IP_BURST_WINDOW_SECONDS = 60
+
+
+def _public_check_pet_type(value: str | None) -> str:
+    normalized = _clean_text(value).casefold()
+    if normalized in {"dog", "собака", "пес", "пёс"}:
+        return "собака"
+    if normalized in {"cat", "кошка", "кот"}:
+        return "кошка"
+    return "питомец"
+
+
+def _public_check_landing_slug(value: str | None) -> str:
+    clean = _clean_text(value or "general").lower()
+    clean = re.sub(r"[^a-z0-9_-]+", "-", clean).strip("-")
+    return clean[:80] or "general"
+
+
+def _public_check_rate_limit_key(request: Request, suffix: str) -> str:
+    return f"check_preview_llm:{suffix}:ip:{hash_value(_client_ip(request), settings.session_secret)[:24]}"
+
+
+def _raise_public_check_rate_limited(retry_after: int, detail: str = "check_preview_rate_limited") -> None:
+    raise HTTPException(
+        status_code=429,
+        detail=detail,
+        headers={"Retry-After": str(max(1, int(retry_after)))},
+    )
+
+
+def _enforce_public_check_llm_limits(payload: PublicCheckPreviewRequest, request: Request) -> None:
+    checks = (
+        (
+            _public_check_rate_limit_key(request, "ip_hour"),
+            PUBLIC_CHECK_IP_LLM_LIMIT,
+            PUBLIC_CHECK_IP_LLM_WINDOW_SECONDS,
+            "check_preview_ip_limit",
+        ),
+        (
+            _public_check_rate_limit_key(request, "ip_burst"),
+            PUBLIC_CHECK_IP_BURST_LIMIT,
+            PUBLIC_CHECK_IP_BURST_WINDOW_SECONDS,
+            "check_preview_burst_limit",
+        ),
+    )
+    for key, limit, window_seconds, detail in checks:
+        retry_after = _rate_limit_retry_after(key, limit=limit, window_seconds=window_seconds)
+        if retry_after is not None:
+            _raise_public_check_rate_limited(retry_after, detail)
+
+
+def _public_check_usage_identities(
+    payload: PublicCheckPreviewRequest,
+    request: Request,
+) -> list[tuple[str, str]]:
+    identities: list[tuple[str, str]] = []
+    session_id = _clean_text(payload.session_id)
+    if session_id:
+        identities.append(("session", hash_value(session_id[:128], settings.session_secret)[:32]))
+
+    user_agent = _clean_text(request.headers.get("user-agent", ""))[:240]
+    client_ip = _client_ip(request)
+    if user_agent:
+        identities.append(("client", hash_value(f"{client_ip}\n{user_agent}", settings.session_secret)[:32]))
+    else:
+        identities.append(("ip", hash_value(client_ip, settings.session_secret)[:32]))
+    return identities
+
+
+def _claim_public_check_preview(
+    payload: PublicCheckPreviewRequest,
+    request: Request,
+    *,
+    landing_slug: str,
+) -> list[str]:
+    identities = _public_check_usage_identities(payload, request)
+    existing = db.claim_public_check_preview_usage(
+        settings.database_path,
+        identities=identities,
+        landing_slug=landing_slug,
+        stale_before=(utc_now() - timedelta(minutes=PUBLIC_CHECK_CLAIM_STALE_MINUTES)).isoformat(),
+    )
+    if existing:
+        _audit(
+            request,
+            "check.preview_blocked",
+            status="warning",
+            actor="system",
+            metadata={
+                "reason": "already_used",
+                "identity_type": existing.get("identity_type"),
+                "slug": landing_slug,
+            },
+        )
+        raise HTTPException(status_code=403, detail="check_preview_already_used")
+    return [identity_hash for _, identity_hash in identities]
+
+
+def _public_check_red_flags(text: str, selected_flags: list[str]) -> RedFlagResult:
+    matched = list(detect_red_flags(text).matched)
+    for flag in selected_flags:
+        label = PUBLIC_CHECK_RED_FLAG_LABELS.get(_clean_text(flag).casefold())
+        if label:
+            matched.append(label)
+    return RedFlagResult(matched=tuple(dict.fromkeys(matched)))
+
+
+def _public_check_prompt_text(payload: PublicCheckPreviewRequest, *, pet_type: str, landing_slug: str) -> str:
+    parts = [
+        "Публичная пробная проверка состояния без регистрации.",
+        f"Посадочная: {landing_slug}.",
+        f"Тип питомца: {pet_type}.",
+    ]
+    age = _clean_text(payload.age)
+    if age:
+        parts.append(f"Возраст или описание возраста: {age}.")
+    parts.append(f"Жалоба владельца: {_clean_text(payload.text)}")
+    return "\n".join(parts)
+
+
+def _public_check_save_complaint(
+    payload: PublicCheckPreviewSaveRequest,
+    *,
+    pet_type: str,
+    landing_slug: str,
+) -> str:
+    parts = [
+        "Пробный разбор с посадочной страницы.",
+        f"Посадочная: {landing_slug}.",
+        f"Тип питомца: {pet_type}.",
+    ]
+    age = _clean_text(payload.age)
+    if age:
+        parts.append(f"Возраст или описание возраста: {age}.")
+    parts.append(f"Жалоба владельца: {_clean_text(payload.text)}")
+    return "\n".join(parts)
+
+
+def _public_check_preview_save_pet(user: dict[str, Any], pet_type: str) -> tuple[dict[str, Any] | None, bool]:
+    pets = db.list_pets(settings.database_path, owner_id=int(user["id"]))
+    if len(pets) == 1:
+        existing_type = _public_check_pet_type(pets[0].get("pet_type"))
+        if pet_type == "питомец" or existing_type == pet_type:
+            return pets[0], False
+    if pets:
+        return None, False
+
+    pet_name = {"собака": "Собака", "кошка": "Кошка"}.get(pet_type, "Питомец")
+    pet = db.create_pet(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        pet_type=pet_type,
+        pet_name=pet_name,
+        is_main=True,
+    )
+    return pet, True
+
+
+def _public_check_saved_urgency(payload: PublicCheckPreviewSaveRequest, answer: str) -> str:
+    urgency = _clean_text(payload.urgency).lower()
+    if urgency in {"red", "yellow", "green"}:
+        return urgency
+    _, _, extracted = extract_urgency(answer)
+    return extracted or "yellow"
+
+
+@app.post("/api/check/preview")
+def public_check_preview(payload: PublicCheckPreviewRequest, request: Request) -> dict[str, Any]:
+    text = _clean_text(payload.text)
+    pet_type = _public_check_pet_type(payload.pet_type)
+    landing_slug = _public_check_landing_slug(payload.landing_slug)
+    if _clean_text(payload.website):
+        _audit(
+            request,
+            "check.preview_blocked",
+            status="warning",
+            actor="system",
+            metadata={"reason": "honeypot", "slug": landing_slug},
+        )
+        raise HTTPException(status_code=400, detail="invalid_check_preview")
+
+    red_flags = _public_check_red_flags(text, payload.red_flags)
+    if red_flags.has_red_flags:
+        answer = render_red_flag_response(red_flags)
+        summary = "Красные симптомы: " + ", ".join(red_flags.matched)
+        return {
+            "status": "preview",
+            "preview": True,
+            "urgency": "red",
+            "urgency_label": "Срочно в клинику",
+            "summary": summary,
+            "matched": list(red_flags.matched),
+            "answer": answer,
+            "model": None,
+        }
+
+    if len(text) < PUBLIC_CHECK_MIN_LLM_TEXT_LENGTH:
+        raise HTTPException(status_code=400, detail="check_preview_text_too_short")
+
+    _enforce_public_check_llm_limits(payload, request)
+    usage_hashes = _claim_public_check_preview(payload, request, landing_slug=landing_slug)
+
+    selected_pet = None
+    pets: list[dict[str, Any]] = []
+    if pet_type in {"собака", "кошка"}:
+        selected_pet = {"id": 0, "pet_type": pet_type, "pet_name": "питомец"}
+        pets = [selected_pet]
+    try:
+        llm_result = call_triage_llm(
+            user={"name": "посетитель посадочной страницы", "email": ""},
+            pets=pets,
+            selected_pet=selected_pet,
+            complaint_text=_public_check_prompt_text(payload, pet_type=pet_type, landing_slug=landing_slug),
+            plan_code="plus",
+        )
+    except Exception as exc:
+        db.release_public_check_preview_usage(settings.database_path, identity_hashes=usage_hashes)
+        logger.exception("Public check preview LLM failed: %s", exc)
+        _audit(
+            request,
+            "llm.check_preview_failed",
+            status="error",
+            actor="system",
+            metadata={"error": type(exc).__name__, "plan": "plus", "slug": landing_slug, "pet_type": pet_type},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось получить пробный разбор. Попробуйте позже или войдите через Telegram/MAX.",
+        ) from exc
+
+    urgency_emoji, urgency_label, urgency_level = extract_urgency(llm_result.text)
+    urgency = urgency_level or "yellow"
+    summary = short_summary(llm_result.text) or "Пробный разбор состояния питомца"
+    db.complete_public_check_preview_usage(
+        settings.database_path,
+        identity_hashes=usage_hashes,
+        urgency_level=urgency,
+        model=llm_result.model,
+        total_tokens=llm_result.total_tokens,
+    )
+    return {
+        "status": "preview",
+        "preview": True,
+        "urgency": urgency,
+        "urgency_emoji": urgency_emoji,
+        "urgency_label": urgency_label,
+        "summary": summary,
+        "answer": llm_result.text,
+        "model": llm_result.model,
+        "prompt_tokens": llm_result.prompt_tokens,
+        "completion_tokens": llm_result.completion_tokens,
+        "total_tokens": llm_result.total_tokens,
+    }
+
+
+@app.post("/api/check/preview/save")
+def save_public_check_preview(
+    payload: PublicCheckPreviewSaveRequest,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict[str, Any]:
+    text = _clean_text(payload.text)
+    answer = _clean_text(payload.answer)
+    if len(text) < 3 or len(answer) < 20:
+        raise HTTPException(status_code=400, detail="invalid_check_preview_save")
+
+    pet_type = _public_check_pet_type(payload.pet_type)
+    landing_slug = _public_check_landing_slug(payload.landing_slug)
+    pet, created_pet = _public_check_preview_save_pet(user, pet_type)
+    pet_id = int(pet["id"]) if pet else None
+    urgency = _public_check_saved_urgency(payload, answer)
+    summary = _clean_text(payload.summary) or short_summary(answer) or "Пробный разбор состояния питомца"
+    complaint = _public_check_save_complaint(payload, pet_type=pet_type, landing_slug=landing_slug)
+    sub = get_effective_subscription(settings, user)
+
+    log = db.create_triage_log(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        pet_id=pet_id,
+        complaint_text=complaint,
+        response_text=answer,
+        urgency_level=urgency,
+        quota_before=sub.quota_used,
+        quota_after=sub.quota_used,
+        prompt_tokens=payload.prompt_tokens or 0,
+        completion_tokens=payload.completion_tokens or 0,
+        total_tokens=payload.total_tokens or 0,
+        model=_clean_text(payload.model) or None,
+        subscription_source="public_preview",
+    )
+    if not log:
+        raise HTTPException(status_code=400, detail="invalid_check_preview_save")
+
+    followup = _schedule_pwa_followup(
+        user_id=int(user["id"]),
+        pet_id=pet_id,
+        triage_id=int(log["id"]),
+        urgency=urgency,
+        complaint_text=complaint,
+        summary=summary,
+    )
+    _audit(
+        request,
+        "check.preview_saved",
+        user_id=int(user["id"]),
+        status="ok",
+        actor="user",
+        entity_type="triage",
+        entity_id=str(log["id"]),
+        metadata={
+            "urgency": urgency,
+            "slug": landing_slug,
+            "pet_type": pet_type,
+            "has_pet": bool(pet_id),
+            "created_pet": created_pet,
+            "subscription_source": sub.source,
+        },
+    )
+    _track_funnel(
+        request,
+        "check.saved_after_login",
+        user_id=int(user["id"]),
+        session_id=payload.session_id,
+        metadata={"urgency": urgency, "slug": landing_slug, "pet_type": pet_type, "has_pet": bool(pet_id)},
+    )
+    return {
+        "status": "saved",
+        "triage_id": int(log["id"]),
+        "pet": _pet_public(pet) if pet else None,
+        "created_pet": created_pet,
+        "subscription": sub.to_public(),
+        "followup": followup,
+    }
 
 
 @app.post("/api/auth/email/start", response_model=EmailStartResponse)

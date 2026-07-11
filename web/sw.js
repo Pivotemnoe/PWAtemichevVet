@@ -1,8 +1,14 @@
-const CACHE_NAME = "temichevvet-pwa-20260702-notranslate-1";
+const CACHE_NAME = "temichevvet-pwa-20260711-check-save-1";
 const APP_SHELL = [
   "/",
-  "/static/styles.css?v=20260626-funnel",
-  "/static/app.js?v=20260702-notranslate-1",
+  "/check",
+  "/check/cat-not-eating",
+  "/check/dog-vomiting",
+  "/check/urination",
+  "/check/poisoning",
+  "/check/general",
+  "/static/styles.css?v=20260711-check-save-1",
+  "/static/app.js?v=20260711-check-save-1",
   "/static/manifest.webmanifest?v=20260627-ios-icon-1",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
   "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",
@@ -12,6 +18,9 @@ const APP_SHELL = [
   "/apple-touch-icon-precomposed.png?v=20260627-ios-icon-1",
   "/static/assets/logo_temichevvet.jpg",
   "/static/assets/hero_pets.jpg",
+  "/static/assets/check-ad-general.png",
+  "/static/assets/check-ad-cat.png",
+  "/static/assets/check-ad-dog.png",
   "/static/assets/subscription_banner.jpg",
   "/static/assets/onb_step1_add_pet.jpg"
 ];

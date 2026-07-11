@@ -10,19 +10,19 @@
     <meta name="apple-mobile-web-app-title" content="TemichevVet" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
-    <title>TemichevVet — оценка срочности симптомов у собак и кошек</title>
+    <title>TemichevVet — быстрая проверка состояния собак и кошек</title>
     <meta
       name="description"
-      content="Сервис для владельцев собак и кошек: оценка срочности состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
+      content="Сервис для владельцев собак и кошек: быстрая проверка состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
     />
     <link rel="canonical" href="https://temichevvet.ru/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="ru_RU" />
     <meta property="og:site_name" content="TemichevVet" />
-    <meta property="og:title" content="TemichevVet — понять, что делать, если питомцу плохо" />
+    <meta property="og:title" content="TemichevVet — быстрая проверка состояния питомца" />
     <meta
       property="og:description"
-      content="Оценка срочности состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
+      content="Опишите симптомы собаки или кошки. TemichevVet поможет понять тревожные признаки и следующий шаг."
     />
     <meta property="og:url" content="https://temichevvet.ru/" />
     <meta property="og:image" content="https://temichevvet.ru/static/assets/hero_pets.jpg" />
@@ -30,7 +30,7 @@
     <link rel="icon" href="/static/assets/app-icon-192.png?v=20260627-ios-icon-1" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
     <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-funnel" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260711-check-save-1" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -103,6 +103,8 @@
 
       <main>
         <section class="auth-view" id="authView">
+          <section class="public-check-view" id="publicCheckView" hidden aria-live="polite"></section>
+
           <div class="intro-panel product-hero">
             <div class="hero-brandmark" aria-label="TemichevVet">
               <img src="/static/assets/logo_temichevvet.jpg" alt="" class="hero-brand-logo" />
@@ -332,7 +334,7 @@
                 <div>
                   <p class="section-label">Вход в личный кабинет</p>
                   <h2 id="authDialogTitle">Войдите или создайте личный кабинет</h2>
-                  <p>Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.</p>
+                  <p id="authDialogLead">Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.</p>
                 </div>
                 <button class="icon-button close-button" id="authCloseBtn" type="button" aria-label="Закрыть окно входа"></button>
               </div>
@@ -429,6 +431,6 @@
     </div>
 
     <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <script src="/static/app.js?v=20260702-notranslate-1" type="module"></script>
+    <script src="/static/app.js?v=20260711-check-save-1" type="module"></script>
   </body>
 </html>

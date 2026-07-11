@@ -522,6 +522,36 @@ def init_db(db_path: Path) -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_step_created ON funnel_events(step, created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_user_created ON funnel_events(user_id, created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_session_created ON funnel_events(session_hash, created_at)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public_check_preview_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identity_hash TEXT NOT NULL UNIQUE,
+                identity_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'claimed',
+                landing_slug TEXT,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                completed_at TEXT,
+                urgency_level TEXT,
+                model TEXT,
+                total_tokens INTEGER,
+                block_count INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_public_check_preview_usage_status_created
+            ON public_check_preview_usage(status, created_at)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_public_check_preview_usage_type_created
+            ON public_check_preview_usage(identity_type, created_at)
+            """
+        )
         conn.commit()
 
 
@@ -854,6 +884,133 @@ def list_funnel_events(db_path: Path, *, limit: int = 100) -> list[dict[str, Any
     for item in items:
         item["metadata"] = _json_load(item.get("metadata"))
     return items
+
+
+def _clean_preview_identities(identities: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    cleaned: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for identity_type, identity_hash in identities:
+        clean_type = str(identity_type or "").strip()[:40]
+        clean_hash = str(identity_hash or "").strip()[:80]
+        if not clean_type or not clean_hash or clean_hash in seen:
+            continue
+        seen.add(clean_hash)
+        cleaned.append((clean_type, clean_hash))
+    return cleaned
+
+
+def claim_public_check_preview_usage(
+    db_path: Path,
+    *,
+    identities: list[tuple[str, str]],
+    landing_slug: str | None = None,
+    stale_before: str | None = None,
+) -> dict[str, Any] | None:
+    cleaned = _clean_preview_identities(identities)
+    if not cleaned:
+        return {"identity_type": "missing", "status": "missing"}
+
+    now = utc_now_iso()
+    hashes = [identity_hash for _, identity_hash in cleaned]
+    placeholders = ",".join("?" for _ in hashes)
+    with closing(connect(db_path)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if stale_before:
+            conn.execute(
+                """
+                DELETE FROM public_check_preview_usage
+                WHERE status = 'claimed' AND created_at < ?
+                """,
+                (stale_before,),
+            )
+        existing = conn.execute(
+            f"""
+            SELECT *
+            FROM public_check_preview_usage
+            WHERE identity_hash IN ({placeholders})
+            ORDER BY CASE status WHEN 'completed' THEN 0 ELSE 1 END, id
+            LIMIT 1
+            """,
+            tuple(hashes),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                f"""
+                UPDATE public_check_preview_usage
+                SET last_seen_at = ?, block_count = block_count + 1
+                WHERE identity_hash IN ({placeholders})
+                """,
+                (now, *hashes),
+            )
+            conn.commit()
+            return row_to_dict(existing)
+
+        for identity_type, identity_hash in cleaned:
+            conn.execute(
+                """
+                INSERT INTO public_check_preview_usage (
+                    identity_hash, identity_type, status, landing_slug,
+                    created_at, last_seen_at
+                )
+                VALUES (?, ?, 'claimed', ?, ?, ?)
+                """,
+                (identity_hash, identity_type, landing_slug[:80] if landing_slug else None, now, now),
+            )
+        conn.commit()
+    return None
+
+
+def complete_public_check_preview_usage(
+    db_path: Path,
+    *,
+    identity_hashes: list[str],
+    urgency_level: str | None = None,
+    model: str | None = None,
+    total_tokens: int | None = None,
+) -> None:
+    hashes = [str(item or "").strip()[:80] for item in identity_hashes if str(item or "").strip()]
+    if not hashes:
+        return
+    placeholders = ",".join("?" for _ in hashes)
+    now = utc_now_iso()
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            f"""
+            UPDATE public_check_preview_usage
+            SET status = 'completed',
+                completed_at = COALESCE(completed_at, ?),
+                last_seen_at = ?,
+                urgency_level = COALESCE(?, urgency_level),
+                model = COALESCE(?, model),
+                total_tokens = COALESCE(?, total_tokens)
+            WHERE identity_hash IN ({placeholders})
+            """,
+            (
+                now,
+                now,
+                urgency_level[:40] if urgency_level else None,
+                model[:80] if model else None,
+                int(total_tokens) if total_tokens is not None else None,
+                *hashes,
+            ),
+        )
+        conn.commit()
+
+
+def release_public_check_preview_usage(db_path: Path, *, identity_hashes: list[str]) -> None:
+    hashes = [str(item or "").strip()[:80] for item in identity_hashes if str(item or "").strip()]
+    if not hashes:
+        return
+    placeholders = ",".join("?" for _ in hashes)
+    with closing(connect(db_path)) as conn:
+        conn.execute(
+            f"""
+            DELETE FROM public_check_preview_usage
+            WHERE status = 'claimed' AND identity_hash IN ({placeholders})
+            """,
+            tuple(hashes),
+        )
+        conn.commit()
 
 
 def upsert_push_subscription(

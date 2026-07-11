@@ -59,9 +59,16 @@ class DummyRequest:
     url = types.SimpleNamespace(path="/test")
 
 
-def request(path: str = "/test", method: str = "POST") -> DummyRequest:
+def request(
+    path: str = "/test",
+    method: str = "POST",
+    client_host: str = "127.0.0.1",
+    headers: dict[str, str] | None = None,
+) -> DummyRequest:
     item = DummyRequest()
     item.method = method
+    item.headers = headers or {}
+    item.client = types.SimpleNamespace(host=client_host)
     item.url = types.SimpleNamespace(path=path, hostname="127.0.0.1")
     item.query_params = {}
     item.cookies = {}
@@ -293,6 +300,380 @@ class ApiTests(unittest.TestCase):
         steps = dashboard["conversion_funnel_72h"]["steps"]
         self.assertTrue(any(step["step"] == "primary_cta" and step["count"] >= 1 for step in steps))
         self.assertTrue(any(step["step"] == "triage_success" and step["count"] >= 1 for step in steps))
+
+    def test_public_check_preview_red_flag_does_not_call_llm_or_save_history(self) -> None:
+        original_llm = api.call_triage_llm
+        calls: list[str] = []
+
+        def forbidden_llm(**kwargs):
+            calls.append("llm")
+            raise AssertionError("LLM must not run for public red flags")
+
+        api.call_triage_llm = forbidden_llm
+        try:
+            with db.connect(api.settings.database_path) as conn:
+                before = conn.execute("SELECT COUNT(*) FROM triage_logs").fetchone()[0]
+
+            result = api.public_check_preview(
+                api.PublicCheckPreviewRequest(
+                    pet_type="cat",
+                    text="кот часто сидит в лотке и не может помочиться",
+                    landing_slug="urination",
+                    session_id="public-red-1",
+                ),
+                request("/api/check/preview", client_host="10.10.0.11"),
+            )
+
+            with db.connect(api.settings.database_path) as conn:
+                after = conn.execute("SELECT COUNT(*) FROM triage_logs").fetchone()[0]
+
+            self.assertEqual(calls, [])
+            self.assertEqual(before, after)
+            self.assertEqual(result["urgency"], "red")
+            self.assertIn("невозможность мочиться", result["matched"])
+            self.assertIn("Срочно", result["answer"])
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_honeypot_blocks_without_llm(self) -> None:
+        original_llm = api.call_triage_llm
+        calls: list[str] = []
+
+        def forbidden_llm(**kwargs):
+            calls.append("llm")
+            raise AssertionError("LLM must not run for honeypot submissions")
+
+        api.call_triage_llm = forbidden_llm
+        try:
+            with self.assertRaises(HTTPException) as exc:
+                api.public_check_preview(
+                    api.PublicCheckPreviewRequest(
+                        pet_type="dog",
+                        text="собака кашляет после прогулки, активность чуть ниже обычной",
+                        landing_slug="general",
+                        session_id="public-honeypot-1",
+                        website="https://spam.example",
+                    ),
+                    request("/api/check/preview", client_host="10.10.0.12"),
+                )
+            self.assertEqual(exc.exception.status_code, 400)
+            self.assertEqual(exc.exception.detail, "invalid_check_preview")
+            self.assertEqual(calls, [])
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_short_text_rejects_without_llm(self) -> None:
+        original_llm = api.call_triage_llm
+        calls: list[str] = []
+
+        def forbidden_llm(**kwargs):
+            calls.append("llm")
+            raise AssertionError("LLM must not run for too short public text")
+
+        api.call_triage_llm = forbidden_llm
+        try:
+            with self.assertRaises(HTTPException) as exc:
+                api.public_check_preview(
+                    api.PublicCheckPreviewRequest(
+                        pet_type="dog",
+                        text="рвота",
+                        landing_slug="dog-vomiting",
+                        session_id="public-short-1",
+                    ),
+                    request("/api/check/preview", client_host="10.10.0.13"),
+                )
+            self.assertEqual(exc.exception.status_code, 400)
+            self.assertEqual(exc.exception.detail, "check_preview_text_too_short")
+            self.assertEqual(calls, [])
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_uses_plus_llm_without_auth_or_history_write(self) -> None:
+        original_llm = api.call_triage_llm
+        captured: dict = {}
+
+        def fake_llm(**kwargs):
+            captured.update(kwargs)
+            return types.SimpleNamespace(
+                text=(
+                    "1) Кратко: по описанию есть повод внимательно наблюдать за состоянием.\n"
+                    "2) Уровень срочности: 🟡 Нужна консультация — симптом сохраняется и требует связи с врачом.\n"
+                    "3) Что делать сейчас — запишите время симптома, воду и активность.\n"
+                    "4) Чего делать нельзя — не давайте лекарства без назначения.\n"
+                    "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                    "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+                ),
+                model="gpt-5.1-mini",
+                prompt_tokens=100,
+                completion_tokens=120,
+                total_tokens=220,
+            )
+
+        api.call_triage_llm = fake_llm
+        try:
+            with db.connect(api.settings.database_path) as conn:
+                before = conn.execute("SELECT COUNT(*) FROM triage_logs").fetchone()[0]
+
+            result = api.public_check_preview(
+                api.PublicCheckPreviewRequest(
+                    pet_type="cat",
+                    age="7 лет",
+                    text="кошка не ест второй день, стала вялая",
+                    landing_slug="cat-not-eating",
+                    session_id="public-llm-1",
+                ),
+                request("/api/check/preview", client_host="10.10.0.14"),
+            )
+
+            with db.connect(api.settings.database_path) as conn:
+                after = conn.execute("SELECT COUNT(*) FROM triage_logs").fetchone()[0]
+
+            self.assertEqual(captured["plan_code"], "plus")
+            self.assertEqual(captured["selected_pet"]["pet_type"], "кошка")
+            self.assertIn("7 лет", captured["complaint_text"])
+            self.assertIn("кошка не ест второй день", captured["complaint_text"])
+            self.assertEqual(before, after)
+            self.assertEqual(result["urgency"], "yellow")
+            self.assertEqual(result["model"], "gpt-5.1-mini")
+            self.assertEqual(result["total_tokens"], 220)
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_allows_only_one_successful_llm_preview(self) -> None:
+        original_llm = api.call_triage_llm
+        calls: list[str] = []
+
+        def fake_llm(**kwargs):
+            calls.append(kwargs["complaint_text"])
+            return types.SimpleNamespace(
+                text=(
+                    "1) Кратко: по описанию состояние требует наблюдения.\n"
+                    "2) Уровень срочности: 🟡 Нужна консультация — симптом лучше обсудить с врачом.\n"
+                    "3) Что делать сейчас — записать время симптома и общее поведение.\n"
+                    "4) Чего делать нельзя — не давать лекарства без назначения.\n"
+                    "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                    "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+                ),
+                model="gpt-5.1-mini",
+                prompt_tokens=40,
+                completion_tokens=80,
+                total_tokens=120,
+            )
+
+        api.call_triage_llm = fake_llm
+        try:
+            result = api.public_check_preview(
+                api.PublicCheckPreviewRequest(
+                    pet_type="dog",
+                    text="собака кашляет после прогулки, ест и пьет обычно",
+                    landing_slug="general",
+                    session_id="public-limit-session-1",
+                ),
+                request("/api/check/preview", client_host="10.10.0.15"),
+            )
+            self.assertEqual(result["status"], "preview")
+
+            with self.assertRaises(HTTPException) as exc:
+                api.public_check_preview(
+                    api.PublicCheckPreviewRequest(
+                        pet_type="dog",
+                        text="собака снова кашляет, хочется проверить ещё раз бесплатно",
+                        landing_slug="general",
+                        session_id="public-limit-session-1",
+                    ),
+                    request("/api/check/preview", client_host="10.10.0.15"),
+                )
+            self.assertEqual(exc.exception.status_code, 403)
+            self.assertEqual(exc.exception.detail, "check_preview_already_used")
+            self.assertEqual(len(calls), 1)
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_blocks_same_client_after_session_reset(self) -> None:
+        original_llm = api.call_triage_llm
+        calls: list[str] = []
+
+        def fake_llm(**kwargs):
+            calls.append(kwargs["complaint_text"])
+            return types.SimpleNamespace(
+                text=(
+                    "1) Кратко: по описанию состояние требует наблюдения.\n"
+                    "2) Уровень срочности: 🟡 Нужна консультация — симптом лучше обсудить с врачом.\n"
+                    "3) Что делать сейчас — записать время симптома и общее поведение.\n"
+                    "4) Чего делать нельзя — не давать лекарства без назначения.\n"
+                    "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                    "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+                ),
+                model="gpt-5.1-mini",
+                prompt_tokens=40,
+                completion_tokens=80,
+                total_tokens=120,
+            )
+
+        api.call_triage_llm = fake_llm
+        headers = {"user-agent": "Mozilla/5.0 TemichevVetPublicCheckTest/1.0"}
+        try:
+            first = api.public_check_preview(
+                api.PublicCheckPreviewRequest(
+                    pet_type="cat",
+                    text="кошка стала вялая вечером, ест меньше обычного",
+                    landing_slug="general",
+                    session_id="public-client-session-1",
+                ),
+                request("/api/check/preview", client_host="10.10.0.17", headers=headers),
+            )
+            self.assertEqual(first["status"], "preview")
+
+            with self.assertRaises(HTTPException) as exc:
+                api.public_check_preview(
+                    api.PublicCheckPreviewRequest(
+                        pet_type="cat",
+                        text="кошка стала вялая утром, хочу второй пробник",
+                        landing_slug="general",
+                        session_id="public-client-session-2",
+                    ),
+                    request("/api/check/preview", client_host="10.10.0.17", headers=headers),
+                )
+            self.assertEqual(exc.exception.status_code, 403)
+            self.assertEqual(exc.exception.detail, "check_preview_already_used")
+            self.assertEqual(len(calls), 1)
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_public_check_preview_llm_failure_audit_excludes_medical_text(self) -> None:
+        original_llm = api.call_triage_llm
+
+        def failing_llm(**kwargs):
+            raise RuntimeError("openai_down")
+
+        api.call_triage_llm = failing_llm
+        try:
+            with self.assertRaises(HTTPException) as exc:
+                api.public_check_preview(
+                    api.PublicCheckPreviewRequest(
+                        pet_type="dog",
+                        age="3 года",
+                        text="секретный медицинский текст: собаку тошнит после еды",
+                        landing_slug="dog-vomiting",
+                        session_id="public-failure-1",
+                    ),
+                    request("/api/check/preview", client_host="10.10.0.16"),
+                )
+            self.assertEqual(exc.exception.status_code, 503)
+        finally:
+            api.call_triage_llm = original_llm
+
+        def fake_llm_after_failure(**kwargs):
+            return types.SimpleNamespace(
+                text=(
+                    "1) Кратко: по описанию состояние требует наблюдения.\n"
+                    "2) Уровень срочности: 🟡 Нужна консультация — симптом лучше обсудить с врачом.\n"
+                    "3) Что делать сейчас — записать время симптома и общее поведение.\n"
+                    "4) Чего делать нельзя — не давать лекарства без назначения.\n"
+                    "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                    "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+                ),
+                model="gpt-5.1-mini",
+                prompt_tokens=40,
+                completion_tokens=80,
+                total_tokens=120,
+            )
+
+        api.call_triage_llm = fake_llm_after_failure
+        try:
+            retry_result = api.public_check_preview(
+                api.PublicCheckPreviewRequest(
+                    pet_type="dog",
+                    age="3 года",
+                    text="секретный медицинский текст: собаку тошнит после еды",
+                    landing_slug="dog-vomiting",
+                    session_id="public-failure-1",
+                ),
+                request("/api/check/preview", client_host="10.10.0.16"),
+            )
+            self.assertEqual(retry_result["status"], "preview")
+        finally:
+            api.call_triage_llm = original_llm
+
+        events = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="llm.check_preview_failed",
+        )
+        self.assertGreaterEqual(len(events), 1)
+        serialized = json.dumps(events[0].get("metadata") or {}, ensure_ascii=False)
+        self.assertIn("RuntimeError", serialized)
+        self.assertNotIn("секретный медицинский текст", serialized)
+        self.assertNotIn("собаку тошнит", serialized)
+
+    def test_public_check_preview_save_after_login_creates_pet_history_without_quota_spend(self) -> None:
+        user, _ = login("preview-save@example.ru")
+        sub_before = api.get_effective_subscription(api.settings, user)
+        with db.connect(api.settings.database_path) as conn:
+            before_logs = conn.execute("SELECT COUNT(*) FROM triage_logs WHERE user_id = ?", (int(user["id"]),)).fetchone()[0]
+
+        result = api.save_public_check_preview(
+            api.PublicCheckPreviewSaveRequest(
+                pet_type="cat",
+                age="7 лет",
+                text="кошка не ест второй день, стала вялая",
+                answer=(
+                    "1) Кратко: по описанию нужно внимательно наблюдать за состоянием.\n"
+                    "2) Уровень срочности: 🟡 Нужна консультация — симптом сохраняется.\n"
+                    "3) Что делать сейчас — запишите воду, аппетит и активность.\n"
+                    "4) Чего делать нельзя — не давайте лекарства без назначения.\n"
+                    "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                    "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+                ),
+                urgency="yellow",
+                summary="Кошка не ест второй день",
+                model="gpt-5.1-mini",
+                prompt_tokens=50,
+                completion_tokens=80,
+                total_tokens=130,
+                landing_slug="cat-not-eating",
+                session_id="preview-save-session-1",
+            ),
+            request("/api/check/preview/save", client_host="10.10.0.18"),
+            user,
+        )
+
+        self.assertEqual(result["status"], "saved")
+        self.assertEqual(result["pet"]["pet_type"], "кошка")
+        self.assertEqual(result["pet"]["pet_name"], "Кошка")
+        self.assertEqual(result["created_pet"], True)
+        sub_after = api.get_effective_subscription(api.settings, user)
+        self.assertEqual(sub_before.quota_total, sub_after.quota_total)
+        self.assertEqual(sub_before.quota_used, sub_after.quota_used)
+
+        with db.connect(api.settings.database_path) as conn:
+            after_logs = conn.execute("SELECT COUNT(*) FROM triage_logs WHERE user_id = ?", (int(user["id"]),)).fetchone()[0]
+            log = conn.execute("SELECT * FROM triage_logs WHERE id = ?", (int(result["triage_id"]),)).fetchone()
+            history = conn.execute(
+                "SELECT * FROM pet_history WHERE triage_id = ?",
+                (int(result["triage_id"]),),
+            ).fetchone()
+
+        self.assertEqual(after_logs, before_logs + 1)
+        self.assertIsNotNone(log)
+        self.assertIsNotNone(history)
+        self.assertEqual(log["subscription_source"], "public_preview")
+        self.assertEqual(log["quota_before"], sub_before.quota_used)
+        self.assertEqual(log["quota_after"], sub_before.quota_used)
+        self.assertEqual(log["model"], "gpt-5.1-mini")
+        self.assertIn("кошка не ест второй день", log["complaint_text"])
+
+        audit_items = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="check.preview_saved",
+            user_id=int(user["id"]),
+        )
+        self.assertGreaterEqual(len(audit_items), 1)
+        audit_metadata = json.dumps(audit_items[0].get("metadata") or {}, ensure_ascii=False)
+        self.assertIn("cat-not-eating", audit_metadata)
+        self.assertNotIn("кошка не ест", audit_metadata)
+        self.assertNotIn("запишите воду", audit_metadata)
+        funnel_items = db.list_funnel_events(api.settings.database_path, limit=10)
+        self.assertTrue(any(item["event_type"] == "check.saved_after_login" and item["step"] == "check_saved" for item in funnel_items))
 
     def test_email_code_is_single_use(self) -> None:
         email = "single-use@example.ru"

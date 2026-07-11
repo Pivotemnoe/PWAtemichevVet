@@ -27,6 +27,82 @@ let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more"]);
 let consumedStartupAction = "";
+let checkLandingViewTrackedPath = "";
+
+const METRIKA_GOALS = {
+  "check.view": "check_view",
+  "check.start_click": "check_start_click",
+  "check.pet_selected": "check_pet_selected",
+  "check.symptoms_started": "check_symptoms_started",
+  "check.submit": "check_submit",
+  "check.result_shown": "check_result_shown",
+  "check.red_flag": "check_red_flag",
+  "check.save_click": "check_save_click",
+  "check.saved_after_login": "check_saved_after_login",
+  "auth.dialog_open": "auth_dialog_open",
+  "auth.provider_start": "auth_provider_start",
+  "auth.login_success": "auth_login_success",
+  "subscription.open_click": "subscription_open",
+  "payment.succeeded": "payment_success"
+};
+
+const CHECK_LANDING_VARIANTS = {
+  general: {
+    slug: "general",
+    title: "Быстрая проверка состояния питомца",
+    lead: "Опишите симптомы собаки или кошки. TemichevVet покажет тревожные признаки и поможет понять, что сделать сейчас.",
+    label: "Пробный разбор без регистрации",
+    image: "/static/assets/check-ad-general.png",
+    imageAlt: "Проверка состояния собаки и кошки в TemichevVet",
+    defaultPet: "",
+    placeholder: "Например: кошка не ест второй день, собака хромает после прогулки, была рвота после еды",
+    examples: ["кошка не ест", "собаку рвёт", "питомец вялый", "хромает после прогулки"]
+  },
+  "cat-not-eating": {
+    slug: "cat-not-eating",
+    title: "Кошка не ест? Быстро проверьте состояние",
+    lead: "Ответьте на несколько вопросов и получите понятный ориентир: можно наблюдать, нужна консультация или лучше не откладывать клинику.",
+    label: "Для тревожных кошачьих симптомов",
+    image: "/static/assets/check-ad-cat.png",
+    imageAlt: "Владелец кошки проверяет состояние питомца",
+    defaultPet: "cat",
+    placeholder: "Например: кошка не ест второй день, прячется, пьёт меньше обычного, была рвота",
+    examples: ["не ест второй день", "прячется", "вялая", "была рвота"]
+  },
+  "dog-vomiting": {
+    slug: "dog-vomiting",
+    title: "Собаку рвёт? Проверьте тревожные признаки",
+    lead: "Короткий пробный разбор поможет понять, на что обратить внимание и когда лучше сразу ехать в клинику.",
+    label: "Для ситуаций с рвотой и слабостью",
+    image: "/static/assets/check-ad-dog.png",
+    imageAlt: "Владелец собаки проверяет состояние питомца",
+    defaultPet: "dog",
+    placeholder: "Например: собаку вырвало два раза после еды, вялая, воду пьёт, температуры не знаю",
+    examples: ["рвота после еды", "вялая", "пьёт воду", "отказывается от корма"]
+  },
+  urination: {
+    slug: "urination",
+    title: "Питомец не может нормально помочиться?",
+    lead: "Это может быть срочным симптомом. Пробная проверка поможет быстро отделить тревожные признаки от менее опасной ситуации.",
+    label: "Для проблем с мочеиспусканием",
+    image: "/static/assets/check-ad-general.png",
+    imageAlt: "Быстрая проверка состояния питомца",
+    defaultPet: "",
+    placeholder: "Например: кот часто ходит в лоток, сидит долго, мочи мало или совсем нет",
+    examples: ["часто ходит в лоток", "мочи мало", "плачет", "живот напряжён"]
+  },
+  poisoning: {
+    slug: "poisoning",
+    title: "Питомец мог съесть опасное?",
+    lead: "Укажите, что именно произошло. Сервис подсветит признаки, при которых нельзя ждать и нужно обращаться в клинику.",
+    label: "Для подозрения на отравление",
+    image: "/static/assets/check-ad-general.png",
+    imageAlt: "Проверка опасных признаков у питомца",
+    defaultPet: "",
+    placeholder: "Например: собака съела шоколад, прошло около часа, пока ведёт себя обычно",
+    examples: ["шоколад", "виноград", "лекарство", "бытовая химия"]
+  }
+};
 
 function isAuthLinkRequested() {
   const value = new URLSearchParams(window.location.search).get("auth") || "";
@@ -41,6 +117,10 @@ function clearAuthLinkRequest() {
 }
 
 const FUNNEL_SESSION_KEY = "tvv_funnel_session";
+const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
+const CHECK_SAVE_CTA = "Сохранить разбор и получить 5 бесплатных проверок";
+const AUTH_DIALOG_DEFAULT_LEAD =
+  "Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.";
 
 function getFunnelSessionId() {
   let value = localStorage.getItem(FUNNEL_SESSION_KEY) || "";
@@ -50,8 +130,31 @@ function getFunnelSessionId() {
   return value;
 }
 
+function safeMetrikaParams(metadata = {}) {
+  const allowedKeys = new Set(["slug", "pet_type", "level", "urgency", "target", "provider", "path", "has_pet"]);
+  const params = {};
+  for (const [key, value] of Object.entries(metadata || {})) {
+    if (!allowedKeys.has(key)) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      params[key] = value;
+    }
+  }
+  return params;
+}
+
+function trackMetrikaGoal(eventType, metadata = {}) {
+  const goal = METRIKA_GOALS[eventType];
+  if (!goal || typeof window.ym !== "function") return;
+  try {
+    window.ym(METRIKA_ID, "reachGoal", goal, safeMetrikaParams(metadata));
+  } catch {
+    // Metrics must never break the product flow.
+  }
+}
+
 function trackFunnel(eventType, metadata = {}) {
   if (isAdminRoute) return;
+  trackMetrikaGoal(eventType, metadata);
   fetch("/api/funnel/event", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -91,6 +194,7 @@ function getStartupAction() {
 let maxMiniAppAuthTried = false;
 
 const authView = document.querySelector("#authView");
+const publicCheckView = document.querySelector("#publicCheckView");
 const mainView = document.querySelector("main");
 let dashboardView = document.querySelector("#dashboardView");
 let adminView = document.querySelector("#adminView");
@@ -109,9 +213,22 @@ let adminRefreshBtn = null;
 let adminLogoutBtn = null;
 let adminContent = null;
 let adminMarkupReady = false;
+const ADMIN_PAGES = [
+  { id: "overview", label: "Обзор" },
+  { id: "funnel", label: "Воронка" },
+  { id: "traffic", label: "Посещения" },
+  { id: "system", label: "Система" },
+  { id: "payments", label: "Платежи" },
+  { id: "users", label: "Пользователи" },
+  { id: "audit", label: "Журнал" }
+];
+let adminDashboardData = null;
+let adminSystemData = null;
+let adminCurrentPage = "overview";
 const openAuthBtn = document.querySelector("#openAuthBtn");
 const openLoginBtn = document.querySelector("#openLoginBtn");
 const authDialog = document.querySelector("#authDialog");
+const authDialogLead = document.querySelector("#authDialogLead");
 const authCloseBtn = document.querySelector("#authCloseBtn");
 const emailForm = document.querySelector("#emailForm");
 const emailInput = document.querySelector("#emailInput");
@@ -276,9 +393,11 @@ function setAdminMode(isAuthed) {
 
 function openAuthDialog() {
   trackFunnel("auth.dialog_open", { source: "dialog" });
+  updateAuthDialogForPendingCheck();
   authDialog.hidden = false;
   authDialog.setAttribute("aria-hidden", "false");
-  setTimeout(() => emailInput?.focus(), 0);
+  const focusTarget = pendingPublicCheckSave() ? telegramBtn || maxBtn || emailInput : emailInput;
+  setTimeout(() => focusTarget?.focus(), 0);
 }
 
 function openAuthDialogFromLink() {
@@ -328,6 +447,13 @@ function readableError(message) {
     push_unsupported: "Этот браузер не поддерживает PWA-уведомления.",
     push_permission_denied: "Браузер не дал разрешение на уведомления.",
     rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
+    check_preview_already_used: "Пробный разбор уже использован. Войдите или зарегистрируйтесь, чтобы делать следующие разборы в личном кабинете.",
+    check_preview_rate_limited: "Пробные проверки временно ограничены. Войдите через Telegram или MAX, чтобы продолжить в личном кабинете.",
+    check_preview_ip_limit: "Слишком много пробных проверок с этой сети. Попробуйте позже или войдите через Telegram/MAX.",
+    check_preview_burst_limit: "Слишком много быстрых запросов подряд. Подождите минуту и попробуйте снова.",
+    check_preview_text_too_short: "Опишите состояние чуть подробнее: что произошло, когда началось и как питомец ведёт себя сейчас.",
+    invalid_check_preview: "Не удалось принять форму. Обновите страницу и попробуйте ещё раз.",
+    invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте следующую проверку там.",
     invalid_deletion_confirmation: "Для запроса удаления нужно ввести слово УДАЛИТЬ."
   };
   return messages[text] || text || "Не удалось выполнить действие.";
@@ -344,6 +470,407 @@ function escapeHtml(value) {
 
 function nl2br(value) {
   return escapeHtml(value).replace(/\n/g, "<br>");
+}
+
+function pendingPublicCheckSave() {
+  try {
+    const raw = localStorage.getItem(PENDING_CHECK_SAVE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== "object") return null;
+    if (!payload.text || !payload.answer) return null;
+    return payload;
+  } catch {
+    localStorage.removeItem(PENDING_CHECK_SAVE_KEY);
+    return null;
+  }
+}
+
+function storePendingPublicCheckSave(payload) {
+  if (!payload?.text || !payload?.answer) return;
+  localStorage.setItem(PENDING_CHECK_SAVE_KEY, JSON.stringify(payload));
+  publicCheckView?.classList.add("has-pending-save");
+}
+
+function clearPendingPublicCheckSave() {
+  localStorage.removeItem(PENDING_CHECK_SAVE_KEY);
+  publicCheckView?.classList.remove("has-pending-save");
+  updateAuthDialogForPendingCheck();
+}
+
+function publicCheckSavePayload(data, variant, formValues) {
+  return {
+    pet_type: formValues.pet_type || "unknown",
+    age: formValues.age || "",
+    text: formValues.text || "",
+    answer: data.answer || "",
+    urgency: data.urgency || "",
+    urgency_label: data.urgency_label || "",
+    summary: data.summary || "",
+    model: data.model || "",
+    prompt_tokens: data.prompt_tokens || 0,
+    completion_tokens: data.completion_tokens || 0,
+    total_tokens: data.total_tokens || 0,
+    landing_slug: variant.slug,
+    session_id: getFunnelSessionId(),
+    created_at: new Date().toISOString()
+  };
+}
+
+function renderCheckSaveCallout() {
+  return `
+    <div class="check-save-callout">
+      <div>
+        <strong>Разбор готов — сохраните его в личном кабинете</strong>
+        <p>После входа он появится в истории питомца. Там можно продолжить проверку и использовать следующие бесплатные разборы.</p>
+      </div>
+      <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
+    </div>
+  `;
+}
+
+function renderCheckStickySave() {
+  return `
+    <div class="check-sticky-save" role="region" aria-label="Сохранить разбор">
+      <span>Разбор готов</span>
+      <button class="primary-button compact" data-check-save type="button">Сохранить</button>
+    </div>
+  `;
+}
+
+function updateAuthDialogForPendingCheck() {
+  const hasPendingCheck = Boolean(pendingPublicCheckSave());
+  authDialog?.classList.toggle("auth-save-intent", hasPendingCheck);
+  if (!authDialogLead) return;
+  authDialogLead.textContent = hasPendingCheck
+    ? "Войдите через Telegram, MAX или российскую почту. Сразу после входа мы сохраним текущий разбор в кабинет."
+    : AUTH_DIALOG_DEFAULT_LEAD;
+}
+
+async function completePendingPublicCheckAfterLogin() {
+  const pending = pendingPublicCheckSave();
+  if (!pending) return false;
+  ensureDashboardView();
+  setWorkspace(`<div class="notice check-saved-state">Сохраняю пробный разбор в личный кабинет...</div>`);
+  try {
+    const data = await api("/api/check/preview/save", {
+      method: "POST",
+      body: JSON.stringify(pending)
+    });
+    clearPendingPublicCheckSave();
+    await refreshAccountState();
+    await refreshPets();
+    if (data.pet?.id) state.currentPetId = data.pet.id;
+    const petName = data.pet?.pet_name ? `«${escapeHtml(data.pet.pet_name)}»` : "питомца";
+    trackMetrikaGoal("check.saved_after_login", {
+      slug: pending.landing_slug || "general",
+      pet_type: pending.pet_type || "unknown",
+      urgency: pending.urgency || "",
+      has_pet: Boolean(data.pet)
+    });
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>Разбор сохранён</h2>
+        <button class="secondary-button compact" data-action="home" type="button">В меню</button>
+      </div>
+      <div class="notice success check-saved-state">
+        <strong>Готово: первый разбор уже в истории ${petName}.</strong>
+        <p>В кабинете доступны следующие проверки состояния, карточки питомцев, история и напоминания.</p>
+        <div class="next-actions">
+          <button class="primary-button" data-action="triage" type="button">Проверить симптомы</button>
+          <button class="secondary-button" data-action="pets" type="button">Открыть питомцев</button>
+          <button class="secondary-button" data-action="home" type="button">На главную</button>
+        </div>
+      </div>
+    `);
+    return true;
+  } catch (error) {
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>Личный кабинет открыт</h2>
+        <button class="secondary-button compact" data-action="home" type="button">В меню</button>
+      </div>
+      <div class="notice danger check-saved-state">
+        <strong>Не удалось автоматически сохранить пробный разбор.</strong>
+        <p>${escapeHtml(readableError(error.message))}</p>
+        <div class="next-actions">
+          <button class="primary-button" data-action="triage" type="button">Сделать проверку в кабинете</button>
+          <button class="secondary-button" data-action="home" type="button">На главную</button>
+        </div>
+      </div>
+    `);
+    return true;
+  }
+}
+
+function isCheckLandingRoute() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  return path === "/check" || path.startsWith("/check/");
+}
+
+function getCheckLandingVariant() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const slug = path.startsWith("/check/") ? path.slice("/check/".length) : "general";
+  return CHECK_LANDING_VARIANTS[slug] || CHECK_LANDING_VARIANTS.general;
+}
+
+function renderExampleChips(examples) {
+  return (examples || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("");
+}
+
+function publicCheckResultLabel(data) {
+  if (data.urgency_label) return data.urgency_label;
+  if (data.urgency === "red") return "Срочно в клинику";
+  if (data.urgency === "green") return "Можно наблюдать";
+  return "Нужна консультация";
+}
+
+function publicCheckResultClass(data) {
+  if (data.urgency === "red") return "danger";
+  if (data.urgency === "green") return "success";
+  return "warning";
+}
+
+function renderPublicCheckAuthPrompt(message) {
+  const resultEl = publicCheckView?.querySelector("#publicCheckResult");
+  if (!resultEl) return;
+  publicCheckView?.classList.remove("has-pending-save");
+  resultEl.innerHTML = `
+    <div class="notice check-auth-notice">
+      <strong>${escapeHtml(message)}</strong>
+      <p>Чтобы продолжить, войдите через Telegram, MAX или российскую почту. В кабинете доступны следующие проверки и история питомца.</p>
+      <div class="next-actions check-result-actions">
+        <button class="primary-button" data-check-save type="button">Войти и продолжить в кабинете</button>
+        <a class="secondary-link compact" href="/">На главную TemichevVet</a>
+        <a class="secondary-link compact" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
+        <a class="secondary-link compact" href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
+      </div>
+    </div>
+  `;
+  resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderPublicCheckResult(data, variant, petType, formValues) {
+  const resultEl = publicCheckView?.querySelector("#publicCheckResult");
+  if (!resultEl) return;
+  const level = data.urgency || "yellow";
+  const className = publicCheckResultClass(data);
+  const label = publicCheckResultLabel(data);
+  const answer = data.answer || "Не удалось сформировать разбор.";
+  storePendingPublicCheckSave(publicCheckSavePayload(data, variant, formValues));
+  resultEl.innerHTML = `
+    ${renderCheckSaveCallout()}
+    <div class="result-box check-result ${className}" data-triage-answer="${escapeHtml(answer)}">
+      <span class="check-result-badge">${escapeHtml(label)}</span>
+      ${formatTriageAnswer(answer)}
+      <div class="next-actions check-result-actions">
+        <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
+        <a class="secondary-link compact" href="/">На главную TemichevVet</a>
+        <a class="secondary-link compact" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
+        <a class="secondary-link compact" href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
+      </div>
+    </div>
+    ${renderCheckStickySave()}
+  `;
+  trackFunnel("check.result_shown", { slug: variant.slug, pet_type: petType || "unknown", level });
+  if (level === "red") {
+    trackFunnel("check.red_flag", { slug: variant.slug, pet_type: petType || "unknown", level });
+  }
+  resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderPublicCheckLanding() {
+  if (!publicCheckView || !isCheckLandingRoute()) return false;
+  const variant = getCheckLandingVariant();
+  document.body.classList.add("is-check-landing");
+  publicCheckView.hidden = false;
+  publicCheckView.classList.remove("has-pending-save");
+  publicCheckView.innerHTML = `
+    <div class="intro-panel check-hero">
+      <div class="check-hero-copy">
+        <p class="section-label">${escapeHtml(variant.label)}</p>
+        <h1>${escapeHtml(variant.title)}</h1>
+        <p class="lead">${escapeHtml(variant.lead)}</p>
+        <div class="check-hero-actions">
+          <button class="primary-link" data-check-scroll type="button">Быстрая проверка состояния</button>
+        </div>
+        <div class="trust-row check-trust-row" aria-label="Преимущества проверки">
+          <span>Без регистрации до результата</span>
+          <span>Собаки и кошки</span>
+          <span>Тревожные признаки отдельно</span>
+        </div>
+      </div>
+      <div class="check-hero-media">
+        <img src="${escapeHtml(variant.image)}" alt="${escapeHtml(variant.imageAlt)}" />
+      </div>
+      <p class="care-note check-care-note">
+        TemichevVet не ставит диагноз и не назначает лечение. Если есть тяжёлое дыхание,
+        судороги, потеря сознания, признаки отравления, кровь, невозможность мочиться
+        или резкое ухудшение — обращайтесь в клинику срочно.
+      </p>
+    </div>
+
+    <section class="content-section check-panel" id="checkFormPanel" aria-labelledby="checkFormTitle">
+      <div class="section-head">
+        <p class="section-label">Пробный разбор</p>
+        <h2 id="checkFormTitle">Опишите состояние простыми словами</h2>
+        <p>Проверка займёт меньше минуты. Текст не нужен идеальный: достаточно симптомов, срока и того, как питомец ведёт себя сейчас.</p>
+      </div>
+      <div class="check-examples" aria-label="Примеры запросов">
+        ${renderExampleChips(variant.examples)}
+      </div>
+      <form class="form-grid one-column check-form" id="publicCheckForm">
+        <div class="check-species-control" role="radiogroup" aria-label="Тип питомца">
+          <label>
+            <input type="radio" name="pet_type" value="dog" ${variant.defaultPet === "dog" ? "checked" : ""} />
+            <span>Собака</span>
+          </label>
+          <label>
+            <input type="radio" name="pet_type" value="cat" ${variant.defaultPet === "cat" ? "checked" : ""} />
+            <span>Кошка</span>
+          </label>
+          <label>
+            <input type="radio" name="pet_type" value="unknown" ${variant.defaultPet ? "" : "checked"} />
+            <span>Пока не важно</span>
+          </label>
+        </div>
+        <label>
+          <span>Возраст или примерный возраст</span>
+          <input name="age" placeholder="Например: 3 года, щенок, пожилая кошка" />
+        </label>
+        <label>
+          <span>Что происходит</span>
+          <textarea name="text" placeholder="${escapeHtml(variant.placeholder)}" required></textarea>
+        </label>
+        <label class="check-honeypot" aria-hidden="true" tabindex="-1">
+          <span>Сайт</span>
+          <input name="website" autocomplete="off" tabindex="-1" />
+        </label>
+        <fieldset class="check-red-flags">
+          <legend>Есть что-то из этого?</legend>
+          <label class="checkbox-row"><input name="red_flags" value="breathing" type="checkbox" /> Тяжело дышит или задыхается</label>
+          <label class="checkbox-row"><input name="red_flags" value="consciousness" type="checkbox" /> Судороги, обморок или потеря сознания</label>
+          <label class="checkbox-row"><input name="red_flags" value="poisoning" type="checkbox" /> Мог съесть опасное: лекарство, яд, шоколад, виноград</label>
+          <label class="checkbox-row"><input name="red_flags" value="urination" type="checkbox" /> Не может помочиться или мочи почти нет</label>
+          <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
+        </fieldset>
+        <button class="primary-button" type="submit">Показать результат проверки</button>
+      </form>
+      <div id="publicCheckResult"></div>
+    </section>
+
+    <section class="content-section check-benefits" aria-labelledby="checkBenefitsTitle">
+      <div class="section-head">
+        <p class="section-label">Зачем это владельцу</p>
+        <h2 id="checkBenefitsTitle">Сначала польза, потом регистрация</h2>
+      </div>
+      <div class="feature-card-grid">
+        <article class="feature-card">
+          <strong>Понять уровень риска</strong>
+          <p>Сервис отделяет тревожные признаки от ситуаций, где можно спокойно собрать данные и наблюдать.</p>
+        </article>
+        <article class="feature-card">
+          <strong>Подготовиться к врачу</strong>
+          <p>Разбор помогает вспомнить важное: когда началось, как часто повторяется, что изменилось в поведении.</p>
+        </article>
+        <article class="feature-card">
+          <strong>Сохранить динамику</strong>
+          <p>После результата можно войти через Telegram, MAX или российскую почту и сохранить разбор в истории питомца.</p>
+        </article>
+      </div>
+    </section>
+  `;
+
+  if (checkLandingViewTrackedPath !== window.location.pathname) {
+    checkLandingViewTrackedPath = window.location.pathname;
+    trackFunnel("check.view", { slug: variant.slug, path: window.location.pathname });
+  }
+
+  const form = publicCheckView.querySelector("#publicCheckForm");
+  const symptomsInput = form?.querySelector("textarea[name='text']");
+  let symptomsTracked = false;
+
+  publicCheckView.querySelector("[data-check-scroll]")?.addEventListener("click", () => {
+    trackFunnel("check.start_click", { slug: variant.slug, target: "hero" });
+    publicCheckView.querySelector("#checkFormPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => symptomsInput?.focus(), 250);
+  });
+  publicCheckView.querySelectorAll("input[name='pet_type']").forEach((input) => {
+    input.addEventListener("change", () => {
+      trackFunnel("check.pet_selected", { slug: variant.slug, pet_type: input.value });
+    });
+  });
+  symptomsInput?.addEventListener("input", () => {
+    if (symptomsTracked || symptomsInput.value.trim().length < 3) return;
+    symptomsTracked = true;
+    trackFunnel("check.symptoms_started", { slug: variant.slug });
+  });
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const text = String(formData.get("text") || "");
+    const redFlags = formData.getAll("red_flags").map(String);
+    const petType = String(formData.get("pet_type") || "unknown");
+    const age = String(formData.get("age") || "");
+    const website = String(formData.get("website") || "");
+    const previewInput = {
+      pet_type: petType,
+      age,
+      text,
+      red_flags: redFlags,
+      landing_slug: variant.slug,
+      session_id: getFunnelSessionId()
+    };
+    const resultEl = publicCheckView.querySelector("#publicCheckResult");
+    const submitButton = event.currentTarget.querySelector("button[type='submit']");
+    trackFunnel("check.submit", { slug: variant.slug, pet_type: petType });
+    if (resultEl) {
+      resultEl.innerHTML = `<div class="notice check-loading">Проверяю состояние...</div>`;
+      resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const data = await api("/api/check/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          ...previewInput,
+          website
+        })
+      });
+      renderPublicCheckResult(data, variant, petType, previewInput);
+    } catch (error) {
+      if (resultEl) {
+        const authRequired = [
+          "check_preview_already_used",
+          "check_preview_rate_limited",
+          "check_preview_ip_limit",
+          "check_preview_burst_limit"
+        ].includes(error.message);
+        if (authRequired) {
+          renderPublicCheckAuthPrompt(readableError(error.message));
+        } else {
+          resultEl.innerHTML = `<div class="notice danger">Не удалось получить пробный разбор: ${escapeHtml(readableError(error.message))}</div>`;
+        }
+      }
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+  publicCheckView.addEventListener("click", async (event) => {
+    const saveButton = event.target.closest("[data-check-save]");
+    if (saveButton) {
+      trackFunnel("check.save_click", { slug: variant.slug });
+      if (state.user) {
+        saveButton.disabled = true;
+        await completePendingPublicCheckAfterLogin();
+        saveButton.disabled = false;
+        return;
+      }
+      openAuthDialog();
+      return;
+    }
+  });
+  return true;
 }
 
 function legalEmailLink() {
@@ -914,6 +1441,13 @@ function bindAdminEvents() {
     }
     setAdminMode(false);
   });
+
+  adminContent?.addEventListener("click", (event) => {
+    const pageButton = event.target.closest("[data-admin-page]");
+    if (!pageButton) return;
+    event.preventDefault();
+    setAdminPage(pageButton.dataset.adminPage || "overview");
+  });
 }
 
 function setAdminHint(text, danger = false) {
@@ -1128,24 +1662,66 @@ function renderAdminTable(title, rows, columns, emptyText = "Данных пок
   `;
 }
 
-function renderAdminDashboard(data, system = null) {
+function normalizeAdminPage(pageId) {
+  return ADMIN_PAGES.some((page) => page.id === pageId) ? pageId : "overview";
+}
+
+function adminPageFromLocation() {
+  const hash = window.location.hash.replace(/^#/, "");
+  return normalizeAdminPage(hash || "overview");
+}
+
+function setAdminPage(pageId, options = {}) {
+  const nextPage = normalizeAdminPage(pageId);
+  adminCurrentPage = nextPage;
+  if (isAdminRoute) {
+    const url = new URL(window.location.href);
+    url.hash = nextPage;
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    if (nextUrl !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      if (options.replace) {
+        window.history.replaceState(null, "", nextUrl);
+      } else {
+        window.history.pushState(null, "", nextUrl);
+      }
+    }
+  }
+  renderAdminActivePage();
+}
+
+function syncAdminPageFromLocation() {
+  if (!isAdminRoute || !adminDashboardData) return;
+  const nextPage = adminPageFromLocation();
+  if (nextPage === adminCurrentPage) return;
+  adminCurrentPage = nextPage;
+  renderAdminActivePage();
+}
+
+function renderAdminNav() {
+  return `
+    <nav class="admin-page-nav" aria-label="Разделы админки">
+      ${ADMIN_PAGES.map((page) => `
+        <button class="admin-page-tab${page.id === adminCurrentPage ? " active" : ""}" type="button" data-admin-page="${escapeHtml(page.id)}" aria-pressed="${page.id === adminCurrentPage ? "true" : "false"}">
+          ${escapeHtml(page.label)}
+        </button>
+      `).join("")}
+    </nav>
+  `;
+}
+
+function renderAdminPageHead(title, text) {
+  return `
+    <div class="admin-page-head">
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(text)}</p>
+    </div>
+  `;
+}
+
+function renderAdminOverviewPage(data) {
   const overview = data.overview || {};
-  const checks = system?.checks || {};
-  const statusHelp = system?.status_help || {};
-  const events1h = system?.events_1h || {};
-  const events24h = system?.events_24h || {};
-  const integrationEvents = system?.integration_events_24h || [];
-  const statusItems = [
-    ["database", "База", system?.checks?.database?.ok],
-    ["email_configured", "Email", checks.email_configured],
-    ["telegram_login_configured", "Telegram-вход", checks.telegram_login_configured],
-    ["max_login_configured", "MAX-вход", checks.max_login_configured],
-    ["yookassa_configured", "YooKassa", checks.yookassa_configured],
-    ["llm_configured", "LLM-разбор", checks.llm_configured],
-    ["core_api_configured", "Core API синхронизации", checks.core_api_configured]
-  ];
-  adminContent.innerHTML = `
-    <div class="admin-generated">Обновлено: ${formatDateTime(data.generated_at)}</div>
+  return `
+    ${renderAdminPageHead("Обзор", "Главные числа по сервису без длинных журналов и технических таблиц.")}
     <div class="summary-grid admin-summary">
       ${renderAdminMetric("Пользователей", overview.users_total, `+${overview.users_today || 0} сегодня`)}
       ${renderAdminMetric("Питомцев", overview.pets_total)}
@@ -1158,9 +1734,14 @@ function renderAdminDashboard(data, system = null) {
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
       ${renderAdminMetric("Событий защиты 24ч", overview.security_events_24h, `${overview.security_warnings_24h || 0} предупреждений / ${overview.security_errors_24h || 0} ошибок`)}
     </div>
+  `;
+}
+
+function renderAdminFunnelPage(data) {
+  return `
+    ${renderAdminPageHead("Воронка", "Путь от первого открытия сайта до входа, проверки симптомов и оплаты.")}
     <section class="admin-section">
-      <h2>Воронка за 72 часа</h2>
-      <p class="admin-explain">Показывает путь от первого открытия сайта до входа, проверки симптомов и оплаты. Уникальность считается по обезличенной сессии или пользователю. Email, IP и медицинский текст здесь не хранятся.</p>
+      <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Email, IP и медицинский текст здесь не хранятся.</p>
     </section>
     ${renderAdminTable("Шаги воронки", data.conversion_funnel_72h?.steps || [], [
       { key: "label", label: "Шаг", render: (row) => `<strong>${escapeHtml(row.label || row.step)}</strong><br><small>${escapeHtml(row.step || "")}</small>` },
@@ -1180,9 +1761,14 @@ function renderAdminDashboard(data, system = null) {
       { key: "source", label: "Источник" },
       { key: "device", label: "Устройство" }
     ], "Событий воронки пока нет.")}
+  `;
+}
+
+function renderAdminTrafficPage(data) {
+  return `
+    ${renderAdminPageHead("Посещения", "Технические заходы на сайт: страница, источник, устройство и авторизация.")}
     <section class="admin-section">
-      <h2>Посещения сайта</h2>
-      <p class="admin-explain">Здесь показаны технические заходы на сайт: время, страница, источник и устройство. Если человек не вошёл в кабинет, он отображается как «Анонимно». IP не хранится в открытом виде, используется только обезличенный хэш для подсчёта уникальных посетителей.</p>
+      <p class="admin-explain">Если человек не вошёл в кабинет, он отображается как «Анонимно». IP не хранится в открытом виде, используется только обезличенный хэш для подсчёта уникальных посетителей.</p>
     </section>
     ${renderAdminTable("Источники за 24 часа", data.site_sources_24h || [], [
       { key: "source", label: "Источник" },
@@ -1204,9 +1790,19 @@ function renderAdminDashboard(data, system = null) {
       { key: "device", label: "Устройство", render: renderSiteVisitDevice },
       { key: "status_code", label: "HTTP" }
     ], "Посещения ещё не записаны.")}
+  `;
+}
+
+function renderAdminSystemPage(data, system, statusItems) {
+  const events1h = system?.events_1h || {};
+  const events24h = system?.events_24h || {};
+  const integrationEvents = system?.integration_events_24h || [];
+  const statusHelp = system?.status_help || {};
+  return `
+    ${renderAdminPageHead("Система", "Подключения, серверные ошибки, интеграции и короткая сводка безопасности.")}
     <section class="admin-section">
       <h2>Системный статус</h2>
-      <p class="admin-explain">Статусы ниже показывают, какие интеграции подключены именно на этом сервере. «Не подключено» не означает взлом или потерю данных: функция просто не будет доступна, пока не добавлены нужные ключи или секреты. Критично только если «Проблема» у базы.</p>
+      <p class="admin-explain">«Не подключено» не означает взлом или потерю данных: функция просто не будет доступна, пока не добавлены нужные ключи или секреты. Критично только если «Проблема» у базы.</p>
       <div class="admin-status-grid">
         ${statusItems.map(([key, label, ok]) => `
           <div class="admin-status ${adminIntegrationStatusClass(key, ok)}">
@@ -1219,7 +1815,7 @@ function renderAdminDashboard(data, system = null) {
     </section>
     <section class="admin-section">
       <h2>Как читать ошибки</h2>
-      <p class="admin-explain">«События с ошибкой» — это не всегда взлом. Сюда попадают неверные коды входа, истёкшие сессии, частые запросы, попытки открыть чужие данные и технические ошибки API. Смотрите «Журнал безопасности»: там видно тип события, канал и время, но без лишнего медицинского текста.</p>
+      <p class="admin-explain">«События с ошибкой» — это не всегда взлом. Сюда попадают неверные коды входа, истёкшие сессии, частые запросы, попытки открыть чужие данные и технические ошибки API.</p>
       <div class="admin-error-grid">
         ${renderAdminMetric("API/сервер за 1ч", events1h.server_5xx ?? "—", "Если 0, сайт сейчас отвечает; число за 24ч может быть старой историей после перезапуска.")}
         ${renderAdminMetric("API/сервер за 24ч", events24h.server_5xx ?? "—", "5xx: серверная ошибка или временная недоступность API.")}
@@ -1243,6 +1839,12 @@ function renderAdminDashboard(data, system = null) {
       { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
       { key: "help", label: "Что это значит", render: renderAuditHelpCell }
     ], "За последние 24 часа предупреждений и ошибок не было.")}
+  `;
+}
+
+function renderAdminPaymentsPage(data) {
+  return `
+    ${renderAdminPageHead("Платежи", "Статусы оплат, сумма и последние события YooKassa.")}
     ${renderAdminTable("Платежи по статусам", data.payments_by_status || [], [
       { key: "status", label: "Статус" },
       { key: "count", label: "Кол-во" },
@@ -1258,6 +1860,12 @@ function renderAdminDashboard(data, system = null) {
       { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) },
       { key: "paid_at", label: "Оплачен", render: (row) => formatDateTime(row.paid_at) }
     ])}
+  `;
+}
+
+function renderAdminUsersPage(data) {
+  return `
+    ${renderAdminPageHead("Пользователи", "Новые аккаунты, проверки состояния и обратная связь.")}
     ${renderAdminTable("Последние пользователи", data.recent_users || [], [
       { key: "id", label: "ID" },
       { key: "email", label: "Email" },
@@ -1283,6 +1891,12 @@ function renderAdminDashboard(data, system = null) {
       { key: "preview", label: "Кратко" },
       { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
     ])}
+  `;
+}
+
+function renderAdminAuditPage(data) {
+  return `
+    ${renderAdminPageHead("Журнал", "Безопасность, входы, ошибки API и служебные события без медицинского текста.")}
     ${renderAdminTable("Журнал безопасности", data.recent_audit || [], [
       { key: "id", label: "ID" },
       { key: "event_type", label: "Событие", render: renderAuditEventCell },
@@ -1294,6 +1908,48 @@ function renderAdminDashboard(data, system = null) {
       { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
     ])}
   `;
+}
+
+function renderAdminPageContent(data, system, statusItems) {
+  if (adminCurrentPage === "funnel") return renderAdminFunnelPage(data);
+  if (adminCurrentPage === "traffic") return renderAdminTrafficPage(data);
+  if (adminCurrentPage === "system") return renderAdminSystemPage(data, system, statusItems);
+  if (adminCurrentPage === "payments") return renderAdminPaymentsPage(data);
+  if (adminCurrentPage === "users") return renderAdminUsersPage(data);
+  if (adminCurrentPage === "audit") return renderAdminAuditPage(data);
+  return renderAdminOverviewPage(data);
+}
+
+function renderAdminActivePage() {
+  if (!adminContent || !adminDashboardData) return;
+  const data = adminDashboardData;
+  const system = adminSystemData || {};
+  const checks = system?.checks || {};
+  const statusItems = [
+    ["database", "База", system?.checks?.database?.ok],
+    ["email_configured", "Email", checks.email_configured],
+    ["telegram_login_configured", "Telegram-вход", checks.telegram_login_configured],
+    ["max_login_configured", "MAX-вход", checks.max_login_configured],
+    ["yookassa_configured", "YooKassa", checks.yookassa_configured],
+    ["llm_configured", "LLM-разбор", checks.llm_configured],
+    ["core_api_configured", "Core API синхронизации", checks.core_api_configured]
+  ];
+  adminContent.innerHTML = `
+    <div class="admin-toolbar">
+      <div class="admin-generated">Обновлено: ${formatDateTime(data.generated_at)}</div>
+      ${renderAdminNav()}
+    </div>
+    <div class="admin-page">
+      ${renderAdminPageContent(data, system, statusItems)}
+    </div>
+  `;
+}
+
+function renderAdminDashboard(data, system = null) {
+  adminDashboardData = data;
+  adminSystemData = system;
+  adminCurrentPage = adminPageFromLocation();
+  renderAdminActivePage();
 }
 
 async function loadAdminDashboard() {
@@ -1407,6 +2063,7 @@ async function bootstrap() {
         return;
       }
       clearAuthLinkRequest();
+      if (await completePendingPublicCheckAfterLogin()) return;
       await renderStartupView();
       return;
     } catch {
@@ -1436,6 +2093,7 @@ async function bootstrap() {
       return;
     }
     clearAuthLinkRequest();
+    if (await completePendingPublicCheckAfterLogin()) return;
     await renderStartupView();
   } catch {
     localStorage.removeItem("tvv_token");
@@ -3032,6 +3690,7 @@ async function verifyEmailCode() {
     await refreshAccountState();
     setAuthMode(true);
     emailHint.textContent = "";
+    if (await completePendingPublicCheckAfterLogin()) return;
     await renderStartupView();
   } catch (error) {
     emailHint.textContent = readableError(error.message);
@@ -3111,6 +3770,7 @@ async function tryMaxMiniAppLogin() {
       clearMaxLogin();
       await refreshAccountState();
       setAuthMode(true);
+      if (await completePendingPublicCheckAfterLogin()) return true;
       await renderStartupView();
       return true;
     }
@@ -3182,6 +3842,7 @@ async function pollTelegramLogin(loginState, attempt = 0) {
       messengerHint.textContent = "Telegram-вход подтвержден.";
       setAuthMode(true);
       stopTelegramPolling();
+      if (await completePendingPublicCheckAfterLogin()) return;
       await renderStartupView();
       return;
     }
@@ -3261,6 +3922,7 @@ async function pollMaxLogin(loginState, attempt = 0) {
       messengerHint.textContent = "MAX-вход подтвержден.";
       setAuthMode(true);
       stopMaxPolling();
+      if (await completePendingPublicCheckAfterLogin()) return;
       await renderStartupView();
       return;
     }
@@ -3312,6 +3974,11 @@ window.addEventListener("focus", () => {
 
 window.addEventListener("popstate", () => {
   if (!openLegalFromCurrentPath()) closeLegalModal();
+  syncAdminPageFromLocation();
+});
+
+window.addEventListener("hashchange", () => {
+  syncAdminPageFromLocation();
 });
 
 document.addEventListener("visibilitychange", () => {
@@ -3463,6 +4130,7 @@ if ("serviceWorker" in navigator) {
 }
 
 showCookieBannerIfNeeded();
+renderPublicCheckLanding();
 trackFunnel("landing.view", { path: location.pathname, search: location.search.slice(0, 80) });
 bootstrap();
 openLegalFromCurrentPath();
