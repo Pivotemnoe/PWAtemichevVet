@@ -49,33 +49,33 @@ const METRIKA_GOALS = {
 const CHECK_LANDING_VARIANTS = {
   general: {
     slug: "general",
-    title: "Быстрая проверка состояния питомца",
+    title: "Быстрая оценка состояния питомца",
     lead: "Опишите симптомы собаки или кошки. TemichevVet покажет тревожные признаки и поможет понять, что сделать сейчас.",
     label: "Пробный разбор без регистрации",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Проверка состояния собаки и кошки в TemichevVet",
+    imageAlt: "Оценка состояния собаки и кошки в TemichevVet",
     defaultPet: "",
     placeholder: "Например: кошка не ест второй день, собака хромает после прогулки, была рвота после еды",
     examples: ["кошка не ест", "собаку рвёт", "питомец вялый", "хромает после прогулки"]
   },
   "cat-not-eating": {
     slug: "cat-not-eating",
-    title: "Кошка не ест? Быстро проверьте состояние",
+    title: "Кошка не ест? Быстро оцените состояние",
     lead: "Ответьте на несколько вопросов и получите понятный ориентир: можно наблюдать, нужна консультация или лучше не откладывать клинику.",
     label: "Для тревожных кошачьих симптомов",
     image: "/static/assets/check-ad-cat.png",
-    imageAlt: "Владелец кошки проверяет состояние питомца",
+    imageAlt: "Владелец кошки оценивает состояние питомца",
     defaultPet: "cat",
     placeholder: "Например: кошка не ест второй день, прячется, пьёт меньше обычного, была рвота",
     examples: ["не ест второй день", "прячется", "вялая", "была рвота"]
   },
   "dog-vomiting": {
     slug: "dog-vomiting",
-    title: "Собаку рвёт? Проверьте тревожные признаки",
+    title: "Собаку рвёт? Оцените тревожные признаки",
     lead: "Короткий пробный разбор поможет понять, на что обратить внимание и когда лучше сразу ехать в клинику.",
     label: "Для ситуаций с рвотой и слабостью",
     image: "/static/assets/check-ad-dog.png",
-    imageAlt: "Владелец собаки проверяет состояние питомца",
+    imageAlt: "Владелец собаки оценивает состояние питомца",
     defaultPet: "dog",
     placeholder: "Например: собаку вырвало два раза после еды, вялая, воду пьёт, температуры не знаю",
     examples: ["рвота после еды", "вялая", "пьёт воду", "отказывается от корма"]
@@ -83,10 +83,10 @@ const CHECK_LANDING_VARIANTS = {
   urination: {
     slug: "urination",
     title: "Питомец не может нормально помочиться?",
-    lead: "Это может быть срочным симптомом. Пробная проверка поможет быстро отделить тревожные признаки от менее опасной ситуации.",
+    lead: "Это может быть срочным симптомом. Пробная оценка поможет быстро отделить тревожные признаки от менее опасной ситуации.",
     label: "Для проблем с мочеиспусканием",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Быстрая проверка состояния питомца",
+    imageAlt: "Быстрая оценка состояния питомца",
     defaultPet: "",
     placeholder: "Например: кот часто ходит в лоток, сидит долго, мочи мало или совсем нет",
     examples: ["часто ходит в лоток", "мочи мало", "плачет", "живот напряжён"]
@@ -97,7 +97,7 @@ const CHECK_LANDING_VARIANTS = {
     lead: "Укажите, что именно произошло. Сервис подсветит признаки, при которых нельзя ждать и нужно обращаться в клинику.",
     label: "Для подозрения на отравление",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Проверка опасных признаков у питомца",
+    imageAlt: "Оценка опасных признаков у питомца",
     defaultPet: "",
     placeholder: "Например: собака съела шоколад, прошло около часа, пока ведёт себя обычно",
     examples: ["шоколад", "виноград", "лекарство", "бытовая химия"]
@@ -118,7 +118,7 @@ function clearAuthLinkRequest() {
 
 const FUNNEL_SESSION_KEY = "tvv_funnel_session";
 const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
-const CHECK_SAVE_CTA = "Сохранить разбор и получить 5 бесплатных проверок";
+const CHECK_SAVE_CTA = "Сохранить разбор и получить 5 бесплатных оценок состояния";
 const AUTH_DIALOG_DEFAULT_LEAD =
   "Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.";
 
@@ -262,7 +262,7 @@ const DASHBOARD_VIEW_HTML = `
     <div class="action-grid">
       <button class="action-tile" data-action="triage" type="button">
         <span class="tile-icon">🩺</span>
-        <span>Проверить симптомы</span>
+        <span>Оценить состояние питомца</span>
       </button>
       <button class="action-tile" data-action="pets" type="button">
         <span class="tile-icon">🐾</span>
@@ -448,12 +448,12 @@ function readableError(message) {
     push_permission_denied: "Браузер не дал разрешение на уведомления.",
     rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
     check_preview_already_used: "Пробный разбор уже использован. Войдите или зарегистрируйтесь, чтобы делать следующие разборы в личном кабинете.",
-    check_preview_rate_limited: "Пробные проверки временно ограничены. Войдите через Telegram или MAX, чтобы продолжить в личном кабинете.",
-    check_preview_ip_limit: "Слишком много пробных проверок с этой сети. Попробуйте позже или войдите через Telegram/MAX.",
+    check_preview_rate_limited: "Пробные оценки временно ограничены. Войдите через Telegram или MAX, чтобы продолжить в личном кабинете.",
+    check_preview_ip_limit: "Слишком много пробных оценок с этой сети. Попробуйте позже или войдите через Telegram/MAX.",
     check_preview_burst_limit: "Слишком много быстрых запросов подряд. Подождите минуту и попробуйте снова.",
     check_preview_text_too_short: "Опишите состояние чуть подробнее: что произошло, когда началось и как питомец ведёт себя сейчас.",
     invalid_check_preview: "Не удалось принять форму. Обновите страницу и попробуйте ещё раз.",
-    invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте следующую проверку там.",
+    invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте следующую оценку там.",
     invalid_deletion_confirmation: "Для запроса удаления нужно ввести слово УДАЛИТЬ."
   };
   return messages[text] || text || "Не удалось выполнить действие.";
@@ -522,7 +522,7 @@ function renderCheckSaveCallout() {
     <div class="check-save-callout">
       <div>
         <strong>Разбор готов — сохраните его в личном кабинете</strong>
-        <p>После входа он появится в истории питомца. Там можно продолжить проверку и использовать следующие бесплатные разборы.</p>
+        <p>После входа он появится в истории питомца. Там можно продолжить оценку и использовать следующие бесплатные разборы.</p>
       </div>
       <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
@@ -575,9 +575,9 @@ async function completePendingPublicCheckAfterLogin() {
       </div>
       <div class="notice success check-saved-state">
         <strong>Готово: первый разбор уже в истории ${petName}.</strong>
-        <p>В кабинете доступны следующие проверки состояния, карточки питомцев, история и напоминания.</p>
+        <p>В кабинете доступны следующие оценки состояния, карточки питомцев, история и напоминания.</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Проверить симптомы</button>
+          <button class="primary-button" data-action="triage" type="button">Оценить состояние питомца</button>
           <button class="secondary-button" data-action="pets" type="button">Открыть питомцев</button>
           <button class="secondary-button" data-action="home" type="button">На главную</button>
         </div>
@@ -594,7 +594,7 @@ async function completePendingPublicCheckAfterLogin() {
         <strong>Не удалось автоматически сохранить пробный разбор.</strong>
         <p>${escapeHtml(readableError(error.message))}</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Сделать проверку в кабинете</button>
+          <button class="primary-button" data-action="triage" type="button">Оценить состояние в кабинете</button>
           <button class="secondary-button" data-action="home" type="button">На главную</button>
         </div>
       </div>
@@ -638,7 +638,7 @@ function renderPublicCheckAuthPrompt(message) {
   resultEl.innerHTML = `
     <div class="notice check-auth-notice">
       <strong>${escapeHtml(message)}</strong>
-      <p>Чтобы продолжить, войдите через Telegram, MAX или российскую почту. В кабинете доступны следующие проверки и история питомца.</p>
+      <p>Чтобы продолжить, войдите через Telegram, MAX или российскую почту. В кабинете доступны следующие оценки состояния и история питомца.</p>
       <div class="next-actions check-result-actions">
         <button class="primary-button" data-check-save type="button">Войти и продолжить в кабинете</button>
         <a class="secondary-link compact" href="/">На главную TemichevVet</a>
@@ -692,9 +692,9 @@ function renderPublicCheckLanding() {
         <h1>${escapeHtml(variant.title)}</h1>
         <p class="lead">${escapeHtml(variant.lead)}</p>
         <div class="check-hero-actions">
-          <button class="primary-link" data-check-scroll type="button">Быстрая проверка состояния</button>
+          <button class="primary-link" data-check-scroll type="button">Быстрая оценка состояния</button>
         </div>
-        <div class="trust-row check-trust-row" aria-label="Преимущества проверки">
+        <div class="trust-row check-trust-row" aria-label="Преимущества оценки">
           <span>Без регистрации до результата</span>
           <span>Собаки и кошки</span>
           <span>Тревожные признаки отдельно</span>
@@ -714,7 +714,7 @@ function renderPublicCheckLanding() {
       <div class="section-head">
         <p class="section-label">Пробный разбор</p>
         <h2 id="checkFormTitle">Опишите состояние простыми словами</h2>
-        <p>Проверка займёт меньше минуты. Текст не нужен идеальный: достаточно симптомов, срока и того, как питомец ведёт себя сейчас.</p>
+        <p>Оценка займёт меньше минуты. Текст не нужен идеальный: достаточно симптомов, срока и того, как питомец ведёт себя сейчас.</p>
       </div>
       <div class="check-examples" aria-label="Примеры запросов">
         ${renderExampleChips(variant.examples)}
@@ -754,7 +754,7 @@ function renderPublicCheckLanding() {
           <label class="checkbox-row"><input name="red_flags" value="urination" type="checkbox" /> Не может помочиться или мочи почти нет</label>
           <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
         </fieldset>
-        <button class="primary-button" type="submit">Показать результат проверки</button>
+        <button class="primary-button" type="submit">Показать результат оценки</button>
       </form>
       <div id="publicCheckResult"></div>
     </section>
@@ -825,7 +825,7 @@ function renderPublicCheckLanding() {
     const submitButton = event.currentTarget.querySelector("button[type='submit']");
     trackFunnel("check.submit", { slug: variant.slug, pet_type: petType });
     if (resultEl) {
-      resultEl.innerHTML = `<div class="notice check-loading">Проверяю состояние...</div>`;
+      resultEl.innerHTML = `<div class="notice check-loading">Оцениваю состояние...</div>`;
       resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     if (submitButton) submitButton.disabled = true;
@@ -895,7 +895,7 @@ const legalDocuments = {
         <ul>
           <li>email, внешние идентификаторы Telegram и MAX, сведения о способе входа;</li>
           <li>данные о питомцах: кличка, вид, возраст, вес, порода, пол, наблюдения, напоминания, история обращений;</li>
-          <li>тексты симптомов и вопросов, которые пользователь вводит для проверки состояния или питания;</li>
+          <li>тексты симптомов и вопросов, которые пользователь вводит для оценки состояния или проверки питания;</li>
           <li>данные подписки, лимитов и платежных событий без хранения полных реквизитов банковской карты;</li>
           <li>технические данные: IP-адрес, время запроса, ошибки, данные сессии, cookie/localStorage, записи безопасности.</li>
         </ul>
@@ -905,7 +905,7 @@ const legalDocuments = {
         <ul>
           <li>создание и защита личного кабинета;</li>
           <li>ведение карточек питомцев, истории, наблюдений, веса и напоминаний;</li>
-          <li>оценка срочности ситуации и подготовка понятных рекомендаций владельцу;</li>
+          <li>оценка состояния питомца, подсказка по срочности ситуации и подготовка понятных рекомендаций владельцу;</li>
           <li>синхронизация одного аккаунта между сайтом, PWA, Telegram и MAX;</li>
           <li>поддержка пользователей, обработка обратной связи, улучшение безопасности и качества сервиса;</li>
           <li>учет подписки, лимитов и платежей.</li>
@@ -965,7 +965,7 @@ const legalDocuments = {
       <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Используя сайт, PWA или подключённые мессенджеры, пользователь принимает это соглашение.</div>
       <section>
         <h3>1. Предмет</h3>
-        <p>TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, проверку симптомов, проверку питания, подписку и синхронизацию входов.</p>
+        <p>TemichevVet предоставляет информационный сервис для владельцев собак и кошек: карточки питомцев, историю, напоминания, оценку состояния питомца, проверку питания, подписку и синхронизацию входов.</p>
       </section>
       <section>
         <h3>2. Один аккаунт</h3>
@@ -1005,7 +1005,7 @@ const legalDocuments = {
       <section>
         <h3>2. Что входит в Plus</h3>
         <ul>
-          <li>до 10 проверок по здоровью питомца в месяц;</li>
+          <li>до 10 оценок состояния питомца в месяц;</li>
           <li>расширенная история обращений по питомцам;</li>
           <li>до 20 активных напоминаний;</li>
           <li>ведение до 3 питомцев в личном кабинете;</li>
@@ -1040,7 +1040,7 @@ const legalDocuments = {
       <div class="legal-meta">TemichevVet — информационный помощник, а не ветеринарная клиника.</div>
       <section>
         <h3>Что важно понимать</h3>
-        <p>Сервис помогает быстрее сориентироваться по срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.</p>
+        <p>Сервис помогает быстрее сориентироваться по состоянию питомца и срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.</p>
       </section>
       <section>
         <h3>Когда срочно в клинику</h3>
@@ -1583,7 +1583,7 @@ function adminAuditEventInfo(eventType) {
     ["admin.", "Админка", "Событие входа, выхода, смены пароля или просмотра админки."],
     ["payment.", "Оплата", "Событие создания, проверки, ошибки или успешной оплаты."],
     ["subscription.", "Подписка", "Изменение тарифа или лимитов пользователя."],
-    ["llm.", "LLM-разбор", "Событие проверки симптомов через модель или LLM-шлюз."],
+    ["llm.", "LLM-разбор", "Событие оценки состояния через модель или LLM-шлюз."],
     ["sync.", "Синхронизация", "Обмен данными между PWA, Telegram-ботом и Core API."],
     ["push.", "PWA-уведомления", "Подписка, отправка или ошибка push-напоминаний."],
     ["http.", "API/сервер", "Техническое событие HTTP-запроса или серверной ошибки."]
@@ -1729,7 +1729,7 @@ function renderAdminOverviewPage(data) {
       ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
       ${renderAdminMetric("Заходов на сайт 24ч", overview.site_visits_24h, `${overview.site_visitors_24h || 0} уникальных`)}
       ${renderAdminMetric("Авторизованных заходов 24ч", overview.site_logged_in_visits_24h)}
-      ${renderAdminMetric("Проверок за 24 часа", overview.triage_24h)}
+      ${renderAdminMetric("Оценок за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
       ${renderAdminMetric("Событий защиты 24ч", overview.security_events_24h, `${overview.security_warnings_24h || 0} предупреждений / ${overview.security_errors_24h || 0} ошибок`)}
@@ -1739,7 +1739,7 @@ function renderAdminOverviewPage(data) {
 
 function renderAdminFunnelPage(data) {
   return `
-    ${renderAdminPageHead("Воронка", "Путь от первого открытия сайта до входа, проверки симптомов и оплаты.")}
+    ${renderAdminPageHead("Воронка", "Путь от первого открытия сайта до входа, оценки состояния и оплаты.")}
     <section class="admin-section">
       <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Email, IP и медицинский текст здесь не хранятся.</p>
     </section>
@@ -1820,7 +1820,7 @@ function renderAdminSystemPage(data, system, statusItems) {
         ${renderAdminMetric("API/сервер за 1ч", events1h.server_5xx ?? "—", "Если 0, сайт сейчас отвечает; число за 24ч может быть старой историей после перезапуска.")}
         ${renderAdminMetric("API/сервер за 24ч", events24h.server_5xx ?? "—", "5xx: серверная ошибка или временная недоступность API.")}
         ${renderAdminMetric("Оплата за 24ч", events24h.payment_errors ?? "—", "Сбои создания/проверки платежа YooKassa.")}
-        ${renderAdminMetric("LLM за 24ч", events24h.llm_errors ?? "—", "Сбои проверки симптомов через модель или шлюз OpenAI.")}
+        ${renderAdminMetric("LLM за 24ч", events24h.llm_errors ?? "—", "Сбои оценки состояния через модель или шлюз OpenAI.")}
         ${renderAdminMetric("Синхронизация за 24ч", events24h.sync_errors ?? "—", "Сбои обмена данными между Telegram-ботом и PWA.")}
       </div>
     </section>
@@ -1865,17 +1865,17 @@ function renderAdminPaymentsPage(data) {
 
 function renderAdminUsersPage(data) {
   return `
-    ${renderAdminPageHead("Пользователи", "Новые аккаунты, проверки состояния и обратная связь.")}
+    ${renderAdminPageHead("Пользователи", "Новые аккаунты, оценки состояния и обратная связь.")}
     ${renderAdminTable("Последние пользователи", data.recent_users || [], [
       { key: "id", label: "ID" },
       { key: "email", label: "Email" },
       { key: "providers", label: "Входы" },
       { key: "plan", label: "Тариф" },
       { key: "pets_count", label: "Питомцы" },
-      { key: "triage_count", label: "Проверки" },
+      { key: "triage_count", label: "Оценки" },
       { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
     ])}
-    ${renderAdminTable("Последние проверки без медицинского текста", data.recent_triage || [], [
+    ${renderAdminTable("Последние оценки без медицинского текста", data.recent_triage || [], [
       { key: "id", label: "ID" },
       { key: "user_id", label: "User" },
       { key: "pet_name", label: "Питомец", render: (row) => adminCell(row.pet_name ? `${row.pet_type || "питомец"} — ${row.pet_name}` : "—") },
@@ -2212,11 +2212,11 @@ function renderHomeGuide(hasPets) {
       <div class="guide-steps">
         <button class="guide-step" data-action="pets" type="button">
           <strong>${hasPets ? "1. Проверьте карточку" : "1. Добавьте питомца"}</strong>
-          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают проверке." : "Так проверки, вес и напоминания будут храниться в одном месте."}</span>
+          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают оценке." : "Так оценки состояния, вес и напоминания будут храниться в одном месте."}</span>
         </button>
         <button class="guide-step" data-action="triage" type="button">
-          <strong>2. Проверьте симптомы</strong>
-          <span>Опишите симптомы простыми словами, чтобы получить уровень срочности.</span>
+          <strong>2. Оцените состояние</strong>
+          <span>Опишите, что происходит с питомцем, чтобы получить понятный разбор состояния.</span>
         </button>
         <button class="guide-step" data-action="reminders" type="button">
           <strong>3. Поставьте напоминание</strong>
@@ -2302,7 +2302,7 @@ async function copyTextToClipboard(text) {
 }
 
 const historyEventLabels = {
-  triage: "Проверка симптомов",
+  triage: "Оценка состояния",
   reminder: "Напоминание",
   weight: "Вес",
   profile: "Карточка питомца",
@@ -2312,10 +2312,10 @@ const historyEventLabels = {
 
 function humanizeUiText(value) {
   return String(value || "")
-    .replace(/\btriage\b/gi, "Проверка симптомов")
+    .replace(/\btriage\b/gi, "Оценка состояния")
     .replace(/REMINDER_VACCINATION_CREATED/g, "Создано напоминание: вакцинация")
     .replace(/REMINDER_CREATED/g, "Создано напоминание")
-    .replace(/Разбор жалобы/g, "Проверка симптомов")
+    .replace(/Разбор жалобы/g, "Оценка состояния")
     .replace(/красные симптомы/g, "опасные признаки")
     .replace(/онлайн-ответ/g, "ответ сервиса");
 }
@@ -2413,13 +2413,13 @@ function renderDueFollowups(items) {
             <button class="secondary-button compact" data-followup-answer="better" data-followup-id="${item.id}" type="button">Стало лучше</button>
             <button class="secondary-button compact" data-followup-answer="same" data-followup-id="${item.id}" type="button">Без изменений</button>
             <button class="secondary-button compact danger-text" data-followup-answer="worse" data-followup-id="${item.id}" type="button">Стало хуже</button>
-            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новая проверка</button>
+            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новая оценка</button>
           </div>
         </article>
       `;
     })
     .join("");
-  return `<section class="profile-card due-followups"><h3>Нужно проверить динамику</h3><div class="list-stack">${cards}</div></section>`;
+  return `<section class="profile-card due-followups"><h3>Нужно оценить динамику</h3><div class="list-stack">${cards}</div></section>`;
 }
 
 async function renderHome() {
@@ -2434,7 +2434,7 @@ async function renderHome() {
     <div class="workspace-head">
       <div>
         <h2>Личный кабинет TemichevVet</h2>
-        <p>Питомцы, проверки симптомов, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
+        <p>Питомцы, оценки состояния, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
       </div>
       <button class="secondary-button compact" data-action="pets" type="button">🐾 Мои питомцы</button>
     </div>
@@ -2456,7 +2456,7 @@ async function renderHome() {
       </div>
       <div class="summary-card">
         <strong>${escapeHtml(sub.planTitle)}</strong>
-        <span>${sub.quotaLeft} из ${sub.quotaTotal} проверок доступно</span>
+        <span>${sub.quotaLeft} из ${sub.quotaTotal} оценок доступно</span>
       </div>
       <div class="summary-card">
         <strong>${escapeHtml(providerLabels)}</strong>
@@ -2468,13 +2468,13 @@ async function renderHome() {
       </div>
       <div class="summary-card">
         <strong>${dueFollowups.length}</strong>
-        <span>проверок в обработке</span>
+        <span>оценок в обработке</span>
       </div>
     </div>
     ${renderHomeGuide(Boolean(petCount))}
     ${renderPwaInstallGuide()}
     <div class="next-actions">
-      <button class="primary-button" data-action="triage" type="button">🩺 Проверить симптомы</button>
+      <button class="primary-button" data-action="triage" type="button">🩺 Оценить состояние питомца</button>
       <button class="secondary-button" data-action="pets" type="button">🐾 Мои питомцы</button>
       <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
       <button class="secondary-button" data-action="history" type="button">📜 История здоровья</button>
@@ -2508,7 +2508,7 @@ function renderMore() {
       <button class="secondary-button" data-action="feedback" type="button">✉️ Обратная связь</button>
     </div>
     <div class="care-note">
-      Питание, уход и вопросы-ответы не расходуют лимит проверок симптомов. Для срочной ситуации используйте «Проверить симптомы».
+      Питание, уход и вопросы-ответы не расходуют лимит оценок состояния. Для срочной ситуации используйте «Оценить состояние питомца».
     </div>
   `);
 }
@@ -2591,7 +2591,7 @@ function renderPushCard(push) {
     statusText = `Подключено устройств: ${count}. Уведомления помогут напомнить о контрольном вопросе после разбора.`;
     button = `<button class="secondary-button compact" data-action="disable-push" type="button">Отключить на этом устройстве</button>`;
   } else {
-    statusText = "Можно включить уведомления на этом устройстве: сервис напомнит проверить состояние питомца после разбора.";
+    statusText = "Можно включить уведомления на этом устройстве: сервис напомнит оценить состояние питомца после разбора.";
     button = `<button class="secondary-button compact" data-action="enable-push" type="button">Включить уведомления</button>`;
   }
   return `
@@ -2860,7 +2860,7 @@ async function renderPets() {
             <article class="item-card pet-card">
               <div>
                 <h3>${escapeHtml(petTitle(pet))}</h3>
-                <p>${pet.is_main ? "Основной питомец для быстрых проверок." : "Карточка питомца: история, вес, наблюдения и напоминания."}</p>
+                <p>${pet.is_main ? "Основной питомец для быстрых оценок." : "Карточка питомца: история, вес, наблюдения и напоминания."}</p>
                 ${renderPetBadges(pet)}
               </div>
               <button class="secondary-button compact" data-open-pet="${pet.id}" type="button">Открыть карточку</button>
@@ -2891,7 +2891,7 @@ async function renderPets() {
       <label><span>Месяц</span><input name="birth_month" inputmode="numeric" placeholder="Если знаете: 6" /></label>
       <label><span>День</span><input name="birth_day" inputmode="numeric" placeholder="Если знаете: 15" /></label>
       <label><span>Вес, кг</span><input name="weight_kg" inputmode="decimal" placeholder="6.1" /></label>
-      <label class="checkbox-row full-row"><input name="is_main" type="checkbox" /> <span>Сделать основным: он будет выбран первым в проверках и напоминаниях.</span></label>
+      <label class="checkbox-row full-row"><input name="is_main" type="checkbox" /> <span>Сделать основным: он будет выбран первым в оценках и напоминаниях.</span></label>
       <button class="primary-button" type="submit">Сохранить питомца</button>
     </form>
   `);
@@ -2956,7 +2956,7 @@ async function renderPetCard(petId) {
       <button class="secondary-button" data-pet-view="observations" data-pet-id="${pet.id}" type="button">📊 Наблюдения</button>
       <button class="secondary-button" data-pet-view="weight" data-pet-id="${pet.id}" type="button">⚖️ Вес</button>
       <button class="secondary-button" data-pet-view="reminders" data-pet-id="${pet.id}" type="button">⏰ Напоминания</button>
-      <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Проверить симптомы</button>
+      <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Оценить состояние</button>
       <button class="secondary-button" data-pet-view="edit" data-pet-id="${pet.id}" type="button">✏️ Изменить</button>
       <button class="secondary-button" data-set-main="${pet.id}" type="button">${pet.is_main ? "⭐ Основной" : "⭐ Сделать основным"}</button>
       <button class="secondary-button danger-text" data-delete-pet="${pet.id}" data-delete-pet-title="${escapeHtml(petTitle(pet))}" data-delete-pet-linked="${pet.external_source ? "1" : "0"}" type="button">🗑 Удалить</button>
@@ -3026,9 +3026,9 @@ async function renderPetHistory(petId) {
     : renderEmptyBlock({
         icon: "📜",
         title: "История пока пустая",
-        text: "После первой проверки, наблюдения, веса или напоминания события появятся здесь.",
+        text: "После первой оценки, наблюдения, веса или напоминания события появятся здесь.",
         action: "triage",
-        actionText: "Проверить симптомы"
+        actionText: "Оценить состояние питомца"
       });
   setWorkspace(`
     <div class="workspace-head">
@@ -3053,7 +3053,7 @@ async function renderPetObservations(petId) {
       <h2>Наблюдения</h2>
       <button class="secondary-button compact" data-open-pet="${petId}" type="button">⬅️ В карточку</button>
     </div>
-    <div class="care-note">Наблюдения — это ваши короткие заметки: аппетит, активность, стул, весомые изменения поведения. Проверки симптомов хранятся в «Истории здоровья».</div>
+    <div class="care-note">Наблюдения — это ваши короткие заметки: аппетит, активность, стул, весомые изменения поведения. Оценки состояния хранятся в «Истории здоровья».</div>
     <form class="inline-form" id="observationForm">
       <input name="text" placeholder="Например: аппетит нормальный, активность ниже обычного" required />
       <button class="primary-button compact" type="submit">Добавить наблюдение</button>
@@ -3199,7 +3199,7 @@ async function renderTriage(prefillPetId = null) {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Проверить симптомы</h2>
+        <h2>Оценка состояния питомца</h2>
         <p>Выберите питомца и опишите, что происходит. Если в тексте есть опасные признаки, сервис сразу покажет срочное предупреждение.</p>
       </div>
       <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
@@ -3211,13 +3211,13 @@ async function renderTriage(prefillPetId = null) {
     <form class="form-grid one-column" id="triageForm">
       <label><span>Питомец</span><select name="pet_id"><option value="">Без привязки</option>${petOptions(selectedPetId)}</select></label>
       <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка не ест второй день, вялая, была рвота после еды" required></textarea></label>
-      <button class="primary-button" type="submit">Оценить срочность</button>
+      <button class="primary-button" type="submit">Оценить состояние питомца</button>
     </form>
     <div id="triageResult"></div>
     <div class="visual-strip compact-visual">
       <img src="/static/assets/hero_pets.jpg" alt="" />
       <div>
-        <h3>Как работает проверка</h3>
+        <h3>Как работает оценка</h3>
         <p>Сначала срабатывают опасные признаки. Это помогает не ждать ответ сервиса там, где нужна клиника.</p>
       </div>
     </div>
@@ -3228,7 +3228,7 @@ async function renderTriage(prefillPetId = null) {
     const petId = String(form.get("pet_id") || "");
     trackFunnel("triage.submit_click", { has_pet: Boolean(petId) });
     const resultEl = document.querySelector("#triageResult");
-    resultEl.innerHTML = `<p class="hint">Проверяю...</p>`;
+    resultEl.innerHTML = `<p class="hint">Оцениваю...</p>`;
     try {
       const data = await api("/api/triage", {
         method: "POST",
@@ -3247,15 +3247,15 @@ async function renderTriage(prefillPetId = null) {
         </div>
         <div class="care-note">
           Если в ответе есть уточняющие вопросы, не обязательно отвечать здесь сразу.
-          Подготовьте эти данные для ветеринарного врача или добавьте их в новую проверку, если хотите уточнить состояние.
-          Новая проверка будет отдельной оценкой срочности и спишет ещё один запрос.
+          Подготовьте эти данные для ветеринарного врача или добавьте их в новую оценку, если хотите уточнить состояние.
+          Следующая оценка состояния спишет ещё один запрос.
           ${data.followup ? "Контроль состояния будет показан в кабинете позже; если Telegram подключён, напоминание также уйдёт туда." : ""}
         </div>
         <div class="next-actions">
           ${petId ? `<button class="secondary-button" data-open-pet="${petId}" type="button">🐾 Открыть карточку</button>` : ""}
           ${petId ? `<button class="secondary-button" data-pet-view="reminders" data-pet-id="${petId}" type="button">⏰ Добавить напоминание</button>` : `<button class="secondary-button" data-action="reminders" type="button">⏰ Добавить напоминание</button>`}
           ${petId ? `<button class="secondary-button" data-pet-view="history" data-pet-id="${petId}" type="button">📜 История питомца</button>` : ""}
-          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить новой проверкой</button>
+          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить состояние</button>
         </div>
       `;
     } catch (error) {
@@ -3430,7 +3430,7 @@ async function renderKnowledgeSection(kind) {
       <button class="primary-button" type="submit">Найти</button>
     </form>
     <div class="care-note">
-      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет проверку симптомов или очный осмотр ветеринарного врача.
+      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет оценку состояния питомца или очный осмотр ветеринарного врача.
     </div>
     <div id="knowledgeResult"></div>
   `);
@@ -3540,7 +3540,7 @@ function renderSubscription(statusHtml = "") {
     <div class="profile-card">
       <h3>Ваш текущий доступ</h3>
       <p><strong>Тариф:</strong> ${escapeHtml(plan)}</p>
-      <p><strong>Использовано проверок:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
+      <p><strong>Использовано оценок:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
       <p><strong>Источник подписки:</strong> ${escapeHtml(sourceLabel)}.</p>
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
       ${telegramConnected || sourceLabel === "Telegram" ? `
@@ -3565,9 +3565,9 @@ function renderSubscription(statusHtml = "") {
           <strong>Free</strong>
           <span>Бесплатный старт</span>
         </div>
-        <p>Базовый личный кабинет для первых проверок и ведения питомца.</p>
+        <p>Базовый личный кабинет для первых оценок состояния и ведения питомца.</p>
         <ul>
-          <li>до 5 проверок по здоровью в первый месяц;</li>
+          <li>до 5 оценок состояния в первый месяц;</li>
           <li>карточка питомца, история, наблюдения и вес;</li>
           <li>базовый доступ к материалам и проверке питания.</li>
         </ul>
@@ -3579,7 +3579,7 @@ function renderSubscription(statusHtml = "") {
         </div>
         <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
         <ul>
-          <li>до 10 проверок по здоровью в месяц;</li>
+          <li>до 10 оценок состояния в месяц;</li>
           <li>расширенная история по питомцам;</li>
           <li>до 20 активных напоминаний;</li>
           <li>до 3 питомцев в личном кабинете.</li>

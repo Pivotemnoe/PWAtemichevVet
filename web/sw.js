@@ -1,4 +1,4 @@
-const CACHE_NAME = "temichevvet-pwa-20260711-check-save-1";
+const CACHE_NAME = "temichevvet-pwa-20260723-state-assess-1";
 const APP_SHELL = [
   "/",
   "/check",
@@ -8,7 +8,7 @@ const APP_SHELL = [
   "/check/poisoning",
   "/check/general",
   "/static/styles.css?v=20260711-check-save-1",
-  "/static/app.js?v=20260711-check-save-1",
+  "/static/app.js?v=20260723-state-assess-1",
   "/static/manifest.webmanifest?v=20260627-ios-icon-1",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
   "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",
@@ -91,7 +91,7 @@ self.addEventListener("push", (event) => {
   }
   const title = payload.title || "TemichevVet";
   const options = {
-    body: payload.body || "Проверьте состояние питомца в личном кабинете.",
+    body: payload.body || "Оцените состояние питомца в личном кабинете.",
     icon: "/static/assets/app-icon-192.png",
     badge: "/static/assets/app-icon-192.png",
     data: { url: payload.url || "/app" }
