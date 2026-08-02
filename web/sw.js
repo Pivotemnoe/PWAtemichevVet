@@ -1,4 +1,4 @@
-const CACHE_NAME = "temichevvet-pwa-20260723-state-assess-1";
+const CACHE_NAME = "temichevvet-pwa-20260729-marketing-funnel-1";
 const APP_SHELL = [
   "/",
   "/check",
@@ -7,8 +7,8 @@ const APP_SHELL = [
   "/check/urination",
   "/check/poisoning",
   "/check/general",
-  "/static/styles.css?v=20260711-check-save-1",
-  "/static/app.js?v=20260723-state-assess-1",
+  "/static/styles.css?v=20260729-marketing-funnel-1",
+  "/static/app.js?v=20260729-marketing-funnel-1",
   "/static/manifest.webmanifest?v=20260627-ios-icon-1",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
   "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",

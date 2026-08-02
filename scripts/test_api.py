@@ -275,13 +275,29 @@ class ApiTests(unittest.TestCase):
             api.FunnelEventRequest(
                 event_type="landing.primary_cta_click",
                 session_id="session-1",
-                metadata={"target": "hero", "complaint_text": "secret symptom"},
+                metadata={
+                    "target": "hero",
+                    "complaint_text": "secret symptom",
+                    "traffic_source": "yandex_direct<script>",
+                    "landing_path": "/check/cat-not-eating?unsafe=1",
+                    "utm_campaign": "search-cats",
+                    "utm_content": "ad-01",
+                },
             ),
             request("/api/funnel/event"),
         )
         user, _ = login("funnel-owner@example.ru")
         api._track_funnel(
-            request("/api/triage"),
+            request(
+                "/api/triage",
+                headers={
+                    "x-tvv-traffic-source": "yandex_direct",
+                    "x-tvv-utm-campaign": "search-symptoms",
+                    "x-tvv-utm-content": "ad-42",
+                    "x-tvv-landing-path": "/check/dog-vomiting",
+                    "x-tvv-has-yclid": "1",
+                },
+            ),
             "triage.completed",
             user_id=int(user["id"]),
             metadata={"urgency": "yellow", "text": "secret"},
@@ -290,6 +306,15 @@ class ApiTests(unittest.TestCase):
         items = db.list_funnel_events(api.settings.database_path, limit=20)
         self.assertTrue(any(item["step"] == "primary_cta" for item in items))
         self.assertTrue(any(item["step"] == "triage_success" for item in items))
+        triage_item = next(item for item in items if item["step"] == "triage_success")
+        self.assertEqual(triage_item["source"], "yandex_direct")
+        self.assertEqual(triage_item["path"], "/check/dog-vomiting")
+        self.assertEqual(triage_item["metadata"]["utm_campaign"], "search-symptoms")
+        self.assertTrue(triage_item["metadata"]["has_yclid"])
+        primary_item = next(item for item in items if item["step"] == "primary_cta")
+        self.assertEqual(primary_item["source"], "yandex_directscript")
+        self.assertEqual(primary_item["path"], "/check/cat-not-eatingunsafe1")
+        self.assertEqual(primary_item["metadata"]["utm_campaign"], "search-cats")
         for item in items:
             metadata = item.get("metadata") or {}
             self.assertNotIn("complaint_text", metadata)
@@ -300,6 +325,10 @@ class ApiTests(unittest.TestCase):
         steps = dashboard["conversion_funnel_72h"]["steps"]
         self.assertTrue(any(step["step"] == "primary_cta" and step["count"] >= 1 for step in steps))
         self.assertTrue(any(step["step"] == "triage_success" and step["count"] >= 1 for step in steps))
+        recent_primary = next(item for item in dashboard["recent_funnel_events"] if item["step"] == "primary_cta")
+        self.assertEqual(recent_primary["landing_path"], "/check/cat-not-eatingunsafe1")
+        self.assertEqual(recent_primary["utm_campaign"], "search-cats")
+        self.assertEqual(recent_primary["utm_content"], "ad-01")
 
     def test_public_check_preview_red_flag_does_not_call_llm_or_save_history(self) -> None:
         original_llm = api.call_triage_llm

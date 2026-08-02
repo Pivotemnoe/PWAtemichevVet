@@ -90,7 +90,7 @@ def check_public_dom_templates() -> None:
 def check_public_seo() -> None:
     html = (ROOT / "web/index.html").read_text(encoding="utf-8")
     required = {
-        "public title": "<title>TemichevVet — оценка срочности симптомов у собак и кошек</title>",
+        "public title": "<title>TemichevVet — проверка симптомов у собак и кошек</title>",
         "meta description": 'name="description"',
         "canonical": '<link rel="canonical" href="https://temichevvet.ru/"',
         "og title": 'property="og:title"',

@@ -229,6 +229,37 @@ def _funnel_session_hash(session_id: str | None) -> str | None:
     return hash_value(clean[:128], settings.session_secret)[:24]
 
 
+def _funnel_metadata_value(metadata: dict[str, Any], key: str, *, max_length: int) -> str | None:
+    raw = metadata.get(key)
+    if raw is None:
+        return None
+    value = re.sub(r"[^0-9A-Za-zА-Яа-яЁё._:/ -]+", "", str(raw)).strip()
+    return value[:max_length] or None
+
+
+def _funnel_request_attribution(request: Request | None) -> dict[str, Any]:
+    if not request:
+        return {}
+    header_fields = {
+        "traffic_source": ("x-tvv-traffic-source", 80),
+        "utm_source": ("x-tvv-utm-source", 80),
+        "utm_medium": ("x-tvv-utm-medium", 80),
+        "utm_campaign": ("x-tvv-utm-campaign", 120),
+        "utm_content": ("x-tvv-utm-content", 120),
+        "utm_term": ("x-tvv-utm-term", 120),
+        "landing_path": ("x-tvv-landing-path", 160),
+    }
+    attribution: dict[str, Any] = {}
+    for key, (header, max_length) in header_fields.items():
+        value = _funnel_metadata_value(dict(request.headers), header, max_length=max_length)
+        if value:
+            attribution[key] = value
+    has_yclid = str(request.headers.get("x-tvv-has-yclid") or "").strip().lower()
+    if has_yclid in {"0", "1", "true", "false"}:
+        attribution["has_yclid"] = has_yclid in {"1", "true"}
+    return attribution
+
+
 def _track_funnel(
     request: Request | None,
     event_type: str,
@@ -241,14 +272,20 @@ def _track_funnel(
     step = FUNNEL_EVENT_STEPS.get(event_type)
     if not step:
         return
+    event_metadata = {**_funnel_request_attribution(request), **(metadata or {})}
     try:
         referrer_host = _site_visit_referrer_host(request) if request else None
         if request:
             device, browser, is_bot = _site_visit_user_agent_summary(request)
             if is_bot and user_id is None:
                 return
-            source = _site_visit_source(request, referrer_host)
-            path = request.url.path or None
+            source = _funnel_metadata_value(event_metadata, "traffic_source", max_length=80) or _site_visit_source(request, referrer_host)
+            path = (
+                _funnel_metadata_value(event_metadata, "path", max_length=240)
+                or _funnel_metadata_value(event_metadata, "landing_path", max_length=240)
+                or request.url.path
+                or None
+            )
             resolved_user_id = user_id if user_id is not None else _site_visit_user_id(request)
         else:
             device, browser, source, path, resolved_user_id = None, None, None, None, user_id
@@ -263,7 +300,7 @@ def _track_funnel(
             path=path,
             device=device,
             browser=browser,
-            metadata=metadata,
+            metadata=event_metadata,
         )
     except Exception as exc:
         logger.warning("Funnel event write failed for %s: %s", event_type, exc)
@@ -665,6 +702,14 @@ class PublicCheckPreviewSaveRequest(BaseModel):
     total_tokens: int | None = Field(default=None, ge=0, le=300000)
     landing_slug: str | None = Field(default=None, max_length=80)
     session_id: str | None = Field(default=None, max_length=128)
+    traffic_source: str | None = Field(default=None, max_length=80)
+    utm_source: str | None = Field(default=None, max_length=80)
+    utm_medium: str | None = Field(default=None, max_length=80)
+    utm_campaign: str | None = Field(default=None, max_length=120)
+    utm_content: str | None = Field(default=None, max_length=120)
+    utm_term: str | None = Field(default=None, max_length=120)
+    has_yclid: bool = False
+    landing_path: str | None = Field(default=None, max_length=160)
 
 
 class PetPayload(BaseModel):
@@ -1939,6 +1984,11 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         recent_site_visits = db.list_site_visits(settings.database_path, limit=80)
         conversion_funnel_72h = _admin_conversion_funnel(conn, since_72h)
         recent_funnel_events = db.list_funnel_events(settings.database_path, limit=80)
+        for item in recent_funnel_events:
+            metadata = item.get("metadata") or {}
+            item["landing_path"] = _funnel_metadata_value(metadata, "landing_path", max_length=240) or item.get("path")
+            item["utm_campaign"] = _funnel_metadata_value(metadata, "utm_campaign", max_length=120)
+            item["utm_content"] = _funnel_metadata_value(metadata, "utm_content", max_length=120)
 
     return {
         "generated_at": now_iso,
@@ -2980,7 +3030,20 @@ def save_public_check_preview(
         "check.saved_after_login",
         user_id=int(user["id"]),
         session_id=payload.session_id,
-        metadata={"urgency": urgency, "slug": landing_slug, "pet_type": pet_type, "has_pet": bool(pet_id)},
+        metadata={
+            "urgency": urgency,
+            "slug": landing_slug,
+            "pet_type": pet_type,
+            "has_pet": bool(pet_id),
+            "traffic_source": payload.traffic_source,
+            "utm_source": payload.utm_source,
+            "utm_medium": payload.utm_medium,
+            "utm_campaign": payload.utm_campaign,
+            "utm_content": payload.utm_content,
+            "utm_term": payload.utm_term,
+            "has_yclid": payload.has_yclid,
+            "landing_path": payload.landing_path,
+        },
     )
     return {
         "status": "saved",

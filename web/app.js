@@ -30,26 +30,18 @@ let consumedStartupAction = "";
 let checkLandingViewTrackedPath = "";
 
 const METRIKA_GOALS = {
-  "check.view": "check_view",
   "check.start_click": "check_start_click",
-  "check.pet_selected": "check_pet_selected",
-  "check.symptoms_started": "check_symptoms_started",
   "check.submit": "check_submit",
   "check.result_shown": "check_result_shown",
-  "check.red_flag": "check_red_flag",
   "check.save_click": "check_save_click",
   "check.saved_after_login": "check_saved_after_login",
-  "auth.dialog_open": "auth_dialog_open",
-  "auth.provider_start": "auth_provider_start",
-  "auth.login_success": "auth_login_success",
-  "subscription.open_click": "subscription_open",
-  "payment.succeeded": "payment_success"
+  "auth.login_success": "auth_login_success"
 };
 
 const CHECK_LANDING_VARIANTS = {
   general: {
     slug: "general",
-    title: "Быстрая оценка состояния питомца",
+    title: "Питомцу нездоровится? Проверьте, почему",
     lead: "Опишите симптомы собаки или кошки. TemichevVet покажет тревожные признаки и поможет понять, что сделать сейчас.",
     label: "Пробный разбор без регистрации",
     image: "/static/assets/check-ad-general.png",
@@ -60,7 +52,7 @@ const CHECK_LANDING_VARIANTS = {
   },
   "cat-not-eating": {
     slug: "cat-not-eating",
-    title: "Кошка не ест? Быстро оцените состояние",
+    title: "Кошка не ест? Проверьте, почему",
     lead: "Ответьте на несколько вопросов и получите понятный ориентир: можно наблюдать, нужна консультация или лучше не откладывать клинику.",
     label: "Для тревожных кошачьих симптомов",
     image: "/static/assets/check-ad-cat.png",
@@ -71,7 +63,7 @@ const CHECK_LANDING_VARIANTS = {
   },
   "dog-vomiting": {
     slug: "dog-vomiting",
-    title: "Собаку рвёт? Оцените тревожные признаки",
+    title: "Собаку рвёт? Проверьте, почему",
     lead: "Короткий пробный разбор поможет понять, на что обратить внимание и когда лучше сразу ехать в клинику.",
     label: "Для ситуаций с рвотой и слабостью",
     image: "/static/assets/check-ad-dog.png",
@@ -93,7 +85,7 @@ const CHECK_LANDING_VARIANTS = {
   },
   poisoning: {
     slug: "poisoning",
-    title: "Питомец мог съесть опасное?",
+    title: "Питомец съел что-то опасное?",
     lead: "Укажите, что именно произошло. Сервис подсветит признаки, при которых нельзя ждать и нужно обращаться в клинику.",
     label: "Для подозрения на отравление",
     image: "/static/assets/check-ad-general.png",
@@ -117,8 +109,10 @@ function clearAuthLinkRequest() {
 }
 
 const FUNNEL_SESSION_KEY = "tvv_funnel_session";
+const FIRST_TOUCH_KEY = "tvv_first_touch";
+const FIRST_TOUCH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
-const CHECK_SAVE_CTA = "Сохранить разбор и получить 5 бесплатных оценок состояния";
+const CHECK_SAVE_CTA = "Сохранить результат и получить ещё 5 бесплатных оценок";
 const AUTH_DIALOG_DEFAULT_LEAD =
   "Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.";
 
@@ -130,8 +124,86 @@ function getFunnelSessionId() {
   return value;
 }
 
+function cleanAttributionValue(value, maxLength = 120) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9а-яА-ЯёЁ._:/ -]/g, "")
+    .slice(0, maxLength);
+}
+
+function readFirstTouchAttribution() {
+  try {
+    const raw = localStorage.getItem(FIRST_TOUCH_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    const capturedAt = Date.parse(value?.captured_at || "");
+    if (!value || typeof value !== "object" || !Number.isFinite(capturedAt) || Date.now() - capturedAt > FIRST_TOUCH_TTL_MS) {
+      localStorage.removeItem(FIRST_TOUCH_KEY);
+      return null;
+    }
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function captureFirstTouchAttribution() {
+  if (isAdminRoute) return {};
+  const existing = readFirstTouchAttribution();
+  if (existing) return existing;
+
+  const params = new URLSearchParams(window.location.search);
+  let referrerHost = "";
+  try {
+    const referrer = document.referrer ? new URL(document.referrer) : null;
+    if (referrer && referrer.hostname !== window.location.hostname) {
+      referrerHost = referrer.hostname;
+    }
+  } catch {
+    referrerHost = "";
+  }
+
+  const utmSource = cleanAttributionValue(params.get("utm_source"), 80);
+  const hasYclid = Boolean(cleanAttributionValue(params.get("yclid"), 120));
+  const attribution = {
+    traffic_source: utmSource || (hasYclid ? "yandex_direct" : cleanAttributionValue(referrerHost, 80) || "direct"),
+    utm_source: utmSource,
+    utm_medium: cleanAttributionValue(params.get("utm_medium"), 80),
+    utm_campaign: cleanAttributionValue(params.get("utm_campaign"), 120),
+    utm_content: cleanAttributionValue(params.get("utm_content"), 120),
+    utm_term: cleanAttributionValue(params.get("utm_term"), 120),
+    has_yclid: hasYclid,
+    landing_path: cleanAttributionValue(window.location.pathname || "/", 160) || "/",
+    captured_at: new Date().toISOString()
+  };
+  try {
+    localStorage.setItem(FIRST_TOUCH_KEY, JSON.stringify(attribution));
+  } catch {
+    // Attribution must never block the product flow.
+  }
+  return attribution;
+}
+
+function attributionRequestHeaders() {
+  const attribution = captureFirstTouchAttribution();
+  const headers = {
+    "X-Tvv-Traffic-Source": attribution.traffic_source,
+    "X-Tvv-Utm-Source": attribution.utm_source,
+    "X-Tvv-Utm-Medium": attribution.utm_medium,
+    "X-Tvv-Utm-Campaign": attribution.utm_campaign,
+    "X-Tvv-Utm-Content": attribution.utm_content,
+    "X-Tvv-Utm-Term": attribution.utm_term,
+    "X-Tvv-Landing-Path": attribution.landing_path,
+    "X-Tvv-Has-Yclid": attribution.has_yclid ? "1" : "0"
+  };
+  return Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined && value !== ""));
+}
+
 function safeMetrikaParams(metadata = {}) {
-  const allowedKeys = new Set(["slug", "pet_type", "level", "urgency", "target", "provider", "path", "has_pet"]);
+  const allowedKeys = new Set([
+    "slug", "pet_type", "level", "urgency", "target", "provider", "path", "has_pet",
+    "traffic_source", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "landing_path"
+  ]);
   const params = {};
   for (const [key, value] of Object.entries(metadata || {})) {
     if (!allowedKeys.has(key)) continue;
@@ -154,7 +226,8 @@ function trackMetrikaGoal(eventType, metadata = {}) {
 
 function trackFunnel(eventType, metadata = {}) {
   if (isAdminRoute) return;
-  trackMetrikaGoal(eventType, metadata);
+  const enrichedMetadata = { ...captureFirstTouchAttribution(), ...metadata };
+  trackMetrikaGoal(eventType, enrichedMetadata);
   fetch("/api/funnel/event", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -162,9 +235,16 @@ function trackFunnel(eventType, metadata = {}) {
     body: JSON.stringify({
       event_type: eventType,
       session_id: getFunnelSessionId(),
-      metadata
+      metadata: enrichedMetadata
     })
   }).catch(() => {});
+}
+
+function trackAuthLoginSuccess(provider) {
+  trackMetrikaGoal("auth.login_success", {
+    ...captureFirstTouchAttribution(),
+    provider
+  });
 }
 
 function normalizeStartupAction(action) {
@@ -225,7 +305,7 @@ const ADMIN_PAGES = [
 let adminDashboardData = null;
 let adminSystemData = null;
 let adminCurrentPage = "overview";
-const openAuthBtn = document.querySelector("#openAuthBtn");
+const openCheckBtn = document.querySelector("#openCheckBtn");
 const openLoginBtn = document.querySelector("#openLoginBtn");
 const authDialog = document.querySelector("#authDialog");
 const authDialogLead = document.querySelector("#authDialogLead");
@@ -513,6 +593,7 @@ function publicCheckSavePayload(data, variant, formValues) {
     total_tokens: data.total_tokens || 0,
     landing_slug: variant.slug,
     session_id: getFunnelSessionId(),
+    ...captureFirstTouchAttribution(),
     created_at: new Date().toISOString()
   };
 }
@@ -521,8 +602,8 @@ function renderCheckSaveCallout() {
   return `
     <div class="check-save-callout">
       <div>
-        <strong>Разбор готов — сохраните его в личном кабинете</strong>
-        <p>После входа он появится в истории питомца. Там можно продолжить оценку и использовать следующие бесплатные разборы.</p>
+        <strong>Разбор готов — сохраните его и получите ещё 5 оценок</strong>
+        <p>Telegram, MAX или почта · без телефона · результат не потеряется</p>
       </div>
       <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
@@ -532,8 +613,8 @@ function renderCheckSaveCallout() {
 function renderCheckStickySave() {
   return `
     <div class="check-sticky-save" role="region" aria-label="Сохранить разбор">
-      <span>Разбор готов</span>
-      <button class="primary-button compact" data-check-save type="button">Сохранить</button>
+      <span>Разбор готов · ещё 5 оценок бесплатно</span>
+      <button class="primary-button compact" data-check-save type="button">Сохранить результат</button>
     </div>
   `;
 }
@@ -563,6 +644,7 @@ async function completePendingPublicCheckAfterLogin() {
     if (data.pet?.id) state.currentPetId = data.pet.id;
     const petName = data.pet?.pet_name ? `«${escapeHtml(data.pet.pet_name)}»` : "питомца";
     trackMetrikaGoal("check.saved_after_login", {
+      ...captureFirstTouchAttribution(),
       slug: pending.landing_slug || "general",
       pet_type: pending.pet_type || "unknown",
       urgency: pending.urgency || "",
@@ -690,74 +772,64 @@ function renderPublicCheckLanding() {
       <div class="check-hero-copy">
         <p class="section-label">${escapeHtml(variant.label)}</p>
         <h1>${escapeHtml(variant.title)}</h1>
+        <div class="check-promise" aria-label="Условия оценки">
+          <strong>Бесплатно, без регистрации до результата</strong>
+          <span>Обычно 15–30 секунд</span>
+        </div>
         <p class="lead">${escapeHtml(variant.lead)}</p>
-        <div class="check-hero-actions">
-          <button class="primary-link" data-check-scroll type="button">Быстрая оценка состояния</button>
-        </div>
-        <div class="trust-row check-trust-row" aria-label="Преимущества оценки">
-          <span>Без регистрации до результата</span>
-          <span>Собаки и кошки</span>
-          <span>Тревожные признаки отдельно</span>
-        </div>
       </div>
-      <div class="check-hero-media">
-        <img src="${escapeHtml(variant.image)}" alt="${escapeHtml(variant.imageAlt)}" />
-      </div>
-      <p class="care-note check-care-note">
-        TemichevVet не ставит диагноз и не назначает лечение. Если есть тяжёлое дыхание,
-        судороги, потеря сознания, признаки отравления, кровь, невозможность мочиться
-        или резкое ухудшение — обращайтесь в клинику срочно.
-      </p>
-    </div>
-
-    <section class="content-section check-panel" id="checkFormPanel" aria-labelledby="checkFormTitle">
-      <div class="section-head">
-        <p class="section-label">Пробный разбор</p>
-        <h2 id="checkFormTitle">Опишите состояние простыми словами</h2>
-        <p>Оценка займёт меньше минуты. Текст не нужен идеальный: достаточно симптомов, срока и того, как питомец ведёт себя сейчас.</p>
-      </div>
-      <div class="check-examples" aria-label="Примеры запросов">
-        ${renderExampleChips(variant.examples)}
-      </div>
-      <form class="form-grid one-column check-form" id="publicCheckForm">
+      <section class="check-hero-form" id="checkFormPanel" aria-labelledby="checkFormTitle">
+        <h2 id="checkFormTitle">Что происходит с питомцем?</h2>
+      <form class="form-grid one-column check-form" id="publicCheckForm" novalidate>
         <div class="check-species-control" role="radiogroup" aria-label="Тип питомца">
           <label>
-            <input type="radio" name="pet_type" value="dog" ${variant.defaultPet === "dog" ? "checked" : ""} />
+            <input type="radio" name="pet_type" value="dog" ${variant.defaultPet === "dog" ? "checked" : ""} required />
             <span>Собака</span>
           </label>
           <label>
             <input type="radio" name="pet_type" value="cat" ${variant.defaultPet === "cat" ? "checked" : ""} />
             <span>Кошка</span>
           </label>
-          <label>
-            <input type="radio" name="pet_type" value="unknown" ${variant.defaultPet ? "" : "checked"} />
-            <span>Пока не важно</span>
-          </label>
         </div>
+        <p class="field-error" id="checkSpeciesError" role="alert" hidden>Выберите: кошка или собака.</p>
         <label>
-          <span>Возраст или примерный возраст</span>
-          <input name="age" placeholder="Например: 3 года, щенок, пожилая кошка" />
+          <span>Опишите симптомы простыми словами</span>
+          <textarea name="text" placeholder="${escapeHtml(variant.placeholder)}" minlength="10" maxlength="1200" required></textarea>
         </label>
-        <label>
-          <span>Что происходит</span>
-          <textarea name="text" placeholder="${escapeHtml(variant.placeholder)}" required></textarea>
-        </label>
+        <p class="field-error" id="checkTextError" role="alert" hidden>Добавьте немного деталей: что произошло, когда началось и как питомец ведёт себя сейчас.</p>
         <label class="check-honeypot" aria-hidden="true" tabindex="-1">
           <span>Сайт</span>
           <input name="website" autocomplete="off" tabindex="-1" />
         </label>
-        <fieldset class="check-red-flags">
-          <legend>Есть что-то из этого?</legend>
-          <label class="checkbox-row"><input name="red_flags" value="breathing" type="checkbox" /> Тяжело дышит или задыхается</label>
-          <label class="checkbox-row"><input name="red_flags" value="consciousness" type="checkbox" /> Судороги, обморок или потеря сознания</label>
-          <label class="checkbox-row"><input name="red_flags" value="poisoning" type="checkbox" /> Мог съесть опасное: лекарство, яд, шоколад, виноград</label>
-          <label class="checkbox-row"><input name="red_flags" value="urination" type="checkbox" /> Не может помочиться или мочи почти нет</label>
-          <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
-        </fieldset>
-        <button class="primary-button" type="submit">Показать результат оценки</button>
+        <details class="check-optional">
+          <summary>Возраст и тревожные признаки <span>необязательно</span></summary>
+          <label>
+            <span>Возраст или примерный возраст</span>
+            <input name="age" placeholder="Например: 3 года, щенок, пожилая кошка" />
+          </label>
+          <fieldset class="check-red-flags">
+            <legend>Есть что-то из этого?</legend>
+            <label class="checkbox-row"><input name="red_flags" value="breathing" type="checkbox" /> Тяжело дышит или задыхается</label>
+            <label class="checkbox-row"><input name="red_flags" value="consciousness" type="checkbox" /> Судороги, обморок или потеря сознания</label>
+            <label class="checkbox-row"><input name="red_flags" value="poisoning" type="checkbox" /> Мог съесть опасное: лекарство, яд, шоколад, виноград</label>
+            <label class="checkbox-row"><input name="red_flags" value="urination" type="checkbox" /> Не может помочиться или мочи почти нет</label>
+            <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
+          </fieldset>
+        </details>
+        <button class="primary-button" type="submit">Бесплатно проверить симптомы</button>
+        <p class="check-form-disclaimer">Это не диагноз и не замена осмотра врача.</p>
       </form>
       <div id="publicCheckResult"></div>
-    </section>
+      </section>
+      <aside class="check-example" aria-label="Пример результата">
+        <div>
+          <p class="section-label">Пример готового результата</p>
+          <strong><span aria-hidden="true">●</span> Можно наблюдать</strong>
+          <p>Свежая вода и спокойное место · отмечать еду, воду и туалет · при ухудшении обратиться к врачу.</p>
+        </div>
+        <small>Пример формата, не рекомендация для вашего питомца.</small>
+      </aside>
+    </div>
 
     <section class="content-section check-benefits" aria-labelledby="checkBenefitsTitle">
       <div class="section-head">
@@ -788,31 +860,43 @@ function renderPublicCheckLanding() {
 
   const form = publicCheckView.querySelector("#publicCheckForm");
   const symptomsInput = form?.querySelector("textarea[name='text']");
-  let symptomsTracked = false;
+  const speciesError = form?.querySelector("#checkSpeciesError");
+  const textError = form?.querySelector("#checkTextError");
+  let checkStartTracked = false;
 
-  publicCheckView.querySelector("[data-check-scroll]")?.addEventListener("click", () => {
-    trackFunnel("check.start_click", { slug: variant.slug, target: "hero" });
-    publicCheckView.querySelector("#checkFormPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setTimeout(() => symptomsInput?.focus(), 250);
-  });
+  const trackCheckStart = (target) => {
+    if (checkStartTracked) return;
+    checkStartTracked = true;
+    trackFunnel("check.start_click", { slug: variant.slug, target });
+  };
   publicCheckView.querySelectorAll("input[name='pet_type']").forEach((input) => {
     input.addEventListener("change", () => {
+      trackCheckStart("pet_type");
+      if (speciesError) speciesError.hidden = true;
       trackFunnel("check.pet_selected", { slug: variant.slug, pet_type: input.value });
     });
   });
+  symptomsInput?.addEventListener("focus", () => trackCheckStart("symptoms"));
   symptomsInput?.addEventListener("input", () => {
-    if (symptomsTracked || symptomsInput.value.trim().length < 3) return;
-    symptomsTracked = true;
-    trackFunnel("check.symptoms_started", { slug: variant.slug });
+    trackCheckStart("symptoms");
+    if (textError && symptomsInput.value.trim().length >= 10) textError.hidden = true;
   });
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const text = String(formData.get("text") || "");
+    const text = String(formData.get("text") || "").trim();
     const redFlags = formData.getAll("red_flags").map(String);
-    const petType = String(formData.get("pet_type") || "unknown");
-    const age = String(formData.get("age") || "");
+    const petType = String(formData.get("pet_type") || "");
+    const age = String(formData.get("age") || "").trim();
     const website = String(formData.get("website") || "");
+    const hasSpecies = petType === "dog" || petType === "cat";
+    const hasEnoughText = text.length >= 10;
+    if (speciesError) speciesError.hidden = hasSpecies;
+    if (textError) textError.hidden = hasEnoughText;
+    if (!hasSpecies || !hasEnoughText) {
+      (hasSpecies ? symptomsInput : form.querySelector("input[name='pet_type']"))?.focus();
+      return;
+    }
     const previewInput = {
       pet_type: petType,
       age,
@@ -823,12 +907,16 @@ function renderPublicCheckLanding() {
     };
     const resultEl = publicCheckView.querySelector("#publicCheckResult");
     const submitButton = event.currentTarget.querySelector("button[type='submit']");
+    if (submitButton?.disabled) return;
     trackFunnel("check.submit", { slug: variant.slug, pet_type: petType });
     if (resultEl) {
-      resultEl.innerHTML = `<div class="notice check-loading">Оцениваю состояние...</div>`;
+      resultEl.innerHTML = `<div class="notice check-loading" role="status">Анализируем описание — обычно это занимает 15–30 секунд</div>`;
       resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    if (submitButton) submitButton.disabled = true;
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Анализируем описание…";
+    }
     try {
       const data = await api("/api/check/preview", {
         method: "POST",
@@ -849,11 +937,14 @@ function renderPublicCheckLanding() {
         if (authRequired) {
           renderPublicCheckAuthPrompt(readableError(error.message));
         } else {
-          resultEl.innerHTML = `<div class="notice danger">Не удалось получить пробный разбор: ${escapeHtml(readableError(error.message))}</div>`;
+          resultEl.innerHTML = `<div class="notice danger" role="alert"><strong>Не удалось получить результат.</strong><p>${escapeHtml(readableError(error.message))}</p><p>Ваш текст сохранён в форме — можно попробовать ещё раз.</p></div>`;
         }
       }
     } finally {
-      if (submitButton) submitButton.disabled = false;
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = "Бесплатно проверить симптомы";
+      }
     }
   });
   publicCheckView.addEventListener("click", async (event) => {
@@ -1260,6 +1351,7 @@ function showError(message) {
 async function api(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
+    ...attributionRequestHeaders(),
     ...(options.headers || {})
   };
   if (state.token) {
@@ -1759,6 +1851,9 @@ function renderAdminFunnelPage(data) {
       { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
       { key: "user_id", label: "User" },
       { key: "source", label: "Источник" },
+      { key: "landing_path", label: "Первая страница" },
+      { key: "utm_campaign", label: "Кампания" },
+      { key: "utm_content", label: "Объявление" },
       { key: "device", label: "Устройство" }
     ], "Событий воронки пока нет.")}
   `;
@@ -3689,6 +3784,7 @@ async function verifyEmailCode() {
     localStorage.removeItem("tvv_token");
     await refreshAccountState();
     setAuthMode(true);
+    trackAuthLoginSuccess("email");
     emailHint.textContent = "";
     if (await completePendingPublicCheckAfterLogin()) return;
     await renderStartupView();
@@ -3770,6 +3866,7 @@ async function tryMaxMiniAppLogin() {
       clearMaxLogin();
       await refreshAccountState();
       setAuthMode(true);
+      trackAuthLoginSuccess("max");
       if (await completePendingPublicCheckAfterLogin()) return true;
       await renderStartupView();
       return true;
@@ -3842,6 +3939,7 @@ async function pollTelegramLogin(loginState, attempt = 0) {
       messengerHint.textContent = "Telegram-вход подтвержден.";
       setAuthMode(true);
       stopTelegramPolling();
+      trackAuthLoginSuccess("telegram");
       if (await completePendingPublicCheckAfterLogin()) return;
       await renderStartupView();
       return;
@@ -3922,6 +4020,7 @@ async function pollMaxLogin(loginState, attempt = 0) {
       messengerHint.textContent = "MAX-вход подтвержден.";
       setAuthMode(true);
       stopMaxPolling();
+      trackAuthLoginSuccess("max");
       if (await completePendingPublicCheckAfterLogin()) return;
       await renderStartupView();
       return;
@@ -3940,9 +4039,8 @@ async function pollMaxLogin(loginState, attempt = 0) {
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
-openAuthBtn.addEventListener("click", () => {
+openCheckBtn?.addEventListener("click", () => {
   trackFunnel("landing.primary_cta_click", { target: "hero" });
-  openAuthDialog();
 });
 openLoginBtn?.addEventListener("click", () => {
   trackFunnel("landing.login_cta_click", { target: "hero" });
@@ -4131,6 +4229,8 @@ if ("serviceWorker" in navigator) {
 
 showCookieBannerIfNeeded();
 renderPublicCheckLanding();
-trackFunnel("landing.view", { path: location.pathname, search: location.search.slice(0, 80) });
+if ((location.pathname.replace(/\/+$/, "") || "/") === "/") {
+  trackFunnel("landing.view", { path: "/" });
+}
 bootstrap();
 openLegalFromCurrentPath();
