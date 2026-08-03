@@ -125,6 +125,17 @@ def main() -> None:
         if f'localStorage.setItem("{key}"' in js or f"localStorage.setItem('{key}'" in js:
             raise SystemExit(f"messenger login challenge must not be written to localStorage: {key}")
 
+    for public_check_ui in (
+        "Бесплатно оценить состояние",
+        "Оцениваем состояние питомца",
+        "revealPublicCheckState",
+        'aria-live="polite"',
+    ):
+        if public_check_ui not in js:
+            raise SystemExit(f"public check progress UI is missing: {public_check_ui}")
+    if 'resultEl.scrollIntoView({ behavior: "smooth", block: "start" })' in js:
+        raise SystemExit("public check must scroll to the visible state card, not the result container")
+
     for endpoint in (
         "/api/auth/email/start",
         "/api/auth/email/verify",

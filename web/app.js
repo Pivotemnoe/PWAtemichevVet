@@ -713,6 +713,30 @@ function publicCheckResultClass(data) {
   return "warning";
 }
 
+function revealPublicCheckState(element, { block = "start", settleViewport = false } = {}) {
+  if (!element) return;
+  const activeElement = document.activeElement;
+  if (activeElement && activeElement !== document.body && typeof activeElement.blur === "function") {
+    activeElement.blur();
+  }
+
+  const scroll = (behavior = "smooth") => {
+    element.scrollIntoView({ behavior, block, inline: "nearest" });
+  };
+  window.requestAnimationFrame(() => scroll());
+
+  if (!settleViewport) return;
+  let viewportSettled = false;
+  const finishViewportScroll = () => {
+    if (viewportSettled) return;
+    viewportSettled = true;
+    window.visualViewport?.removeEventListener("resize", finishViewportScroll);
+    window.requestAnimationFrame(() => scroll("auto"));
+  };
+  window.visualViewport?.addEventListener("resize", finishViewportScroll, { once: true });
+  window.setTimeout(finishViewportScroll, 350);
+}
+
 function renderPublicCheckAuthPrompt(message) {
   const resultEl = publicCheckView?.querySelector("#publicCheckResult");
   if (!resultEl) return;
@@ -729,7 +753,7 @@ function renderPublicCheckAuthPrompt(message) {
       </div>
     </div>
   `;
-  resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  revealPublicCheckState(resultEl.querySelector(".check-auth-notice"));
 }
 
 function renderPublicCheckResult(data, variant, petType, formValues) {
@@ -758,7 +782,7 @@ function renderPublicCheckResult(data, variant, petType, formValues) {
   if (level === "red") {
     trackFunnel("check.red_flag", { slug: variant.slug, pet_type: petType || "unknown", level });
   }
-  resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  revealPublicCheckState(resultEl.querySelector(".check-result"));
 }
 
 function renderPublicCheckLanding() {
@@ -816,7 +840,7 @@ function renderPublicCheckLanding() {
             <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
           </fieldset>
         </details>
-        <button class="primary-button" type="submit">Бесплатно проверить симптомы</button>
+        <button class="primary-button" type="submit">Бесплатно оценить состояние</button>
         <p class="check-form-disclaimer">Это не диагноз и не замена осмотра врача.</p>
       </form>
       <div id="publicCheckResult"></div>
@@ -909,13 +933,19 @@ function renderPublicCheckLanding() {
     const submitButton = event.currentTarget.querySelector("button[type='submit']");
     if (submitButton?.disabled) return;
     trackFunnel("check.submit", { slug: variant.slug, pet_type: petType });
-    if (resultEl) {
-      resultEl.innerHTML = `<div class="notice check-loading" role="status">Анализируем описание — обычно это занимает 15–30 секунд</div>`;
-      resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    event.currentTarget.setAttribute("aria-busy", "true");
     if (submitButton) {
       submitButton.disabled = true;
-      submitButton.textContent = "Анализируем описание…";
+      submitButton.textContent = "Оцениваем состояние…";
+    }
+    if (resultEl) {
+      resultEl.innerHTML = `
+        <div class="notice check-loading" role="status" aria-live="polite" aria-atomic="true">
+          <strong>Оцениваем состояние питомца</strong>
+          <span>Обычно это занимает 15–30 секунд. Не закрывайте страницу.</span>
+        </div>
+      `;
+      revealPublicCheckState(resultEl.querySelector(".check-loading"), { block: "center", settleViewport: true });
     }
     try {
       const data = await api("/api/check/preview", {
@@ -938,12 +968,14 @@ function renderPublicCheckLanding() {
           renderPublicCheckAuthPrompt(readableError(error.message));
         } else {
           resultEl.innerHTML = `<div class="notice danger" role="alert"><strong>Не удалось получить результат.</strong><p>${escapeHtml(readableError(error.message))}</p><p>Ваш текст сохранён в форме — можно попробовать ещё раз.</p></div>`;
+          revealPublicCheckState(resultEl.querySelector(".notice.danger"));
         }
       }
     } finally {
+      event.currentTarget.removeAttribute("aria-busy");
       if (submitButton) {
         submitButton.disabled = false;
-        submitButton.textContent = "Бесплатно проверить симптомы";
+        submitButton.textContent = "Бесплатно оценить состояние";
       }
     }
   });

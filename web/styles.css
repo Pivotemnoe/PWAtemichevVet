@@ -331,6 +331,29 @@ p {
   margin: 0;
 }
 
+#publicCheckResult > .notice,
+.check-result {
+  scroll-margin-top: 128px;
+}
+
+.notice.check-loading {
+  display: grid;
+  gap: 6px;
+  border-color: #9fc5ee;
+  background: #f1f8ff;
+  color: #27445f;
+  box-shadow: 0 12px 28px rgba(20, 118, 212, 0.14);
+}
+
+.notice.check-loading strong {
+  color: var(--blue-dark);
+  font-size: 17px;
+}
+
+.notice.check-loading span {
+  line-height: 1.4;
+}
+
 .check-example {
   grid-column: 1 / -1;
   display: flex;
