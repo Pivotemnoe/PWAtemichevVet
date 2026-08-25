@@ -1,0 +1,107 @@
+{
+  "created_at": "2026-08-25",
+  "status": "draft_only_not_uploaded",
+  "campaign": {
+    "id": 713573600,
+    "network": "search_only",
+    "weekly_budget_rub": 3000,
+    "target_average_cpc_rub": 4.5,
+    "auto_recommendations": false,
+    "new_campaigns": false,
+    "live_change_requires_separate_approval": true
+  },
+  "spend_allocation": [
+    {
+      "cluster": "service_core",
+      "share_percent": 60,
+      "landing": "/pet",
+      "phrases": [
+        "карточка здоровья питомца",
+        "дневник здоровья питомца",
+        "история здоровья питомца",
+        "приложение для питомца",
+        "приложение для владельцев собак",
+        "приложение для владельцев кошек",
+        "записывать здоровье питомца"
+      ],
+      "ads": [
+        {
+          "variant": "A",
+          "headline": "Здоровье питомца — в одном сервисе",
+          "text": "Карточка, история, питание, вес и важные даты. Добавьте питомца бесплатно",
+          "landing": "/pet"
+        },
+        {
+          "variant": "B",
+          "headline": "Личная карточка здоровья питомца",
+          "text": "Сохраняйте вес, наблюдения, питание и даты. Всё важное всегда под рукой",
+          "landing": "/pet"
+        }
+      ]
+    },
+    {
+      "cluster": "permanent_actions",
+      "share_percent": 20,
+      "phrases": [
+        "напоминание о прививке собаке",
+        "напоминание о прививке кошке",
+        "дневник веса собаки",
+        "контроль веса кошки"
+      ],
+      "landings": {
+        "reminders": "/pet-reminders",
+        "weight_and_history": "/pet-history",
+        "food": "/pet-food"
+      }
+    },
+    {
+      "cluster": "exact_situational_entries",
+      "maximum_share_percent": 20,
+      "match_policy": "exact_only",
+      "autotargeting": false,
+      "ad": {
+        "headline": "Здоровье питомца — не только один ответ",
+        "text": "Получите ответ и сохраните его в истории питомца вместе с весом и важными датами",
+        "landing": "/check/what-to-do-now"
+      }
+    }
+  ],
+  "sitelinks": [
+    { "title": "Карточка", "path": "/pet" },
+    { "title": "История", "path": "/pet-history" },
+    { "title": "Питание", "path": "/pet-food" },
+    { "title": "Напоминания", "path": "/pet-reminders" }
+  ],
+  "brand_negative_candidates": [
+    "Purina",
+    "Royal Canin",
+    "Pro Plan",
+    "Petstory"
+  ],
+  "brand_negative_rule": "Add only when fresh real-query evidence confirms irrelevant spend; never use competitor brands in ad copy or as targeting phrases.",
+  "pre_upload_checks": [
+    "Fresh Wordstat broad, phrase and exact demand",
+    "Yandex desktop and mobile search results",
+    "Google search results",
+    "Real paid competitors",
+    "Landing represents the whole service rather than a one-off answer",
+    "Autotargeting remains disabled",
+    "Auto-application of recommendations remains disabled",
+    "No new campaign, network placement or budget change"
+  ],
+  "metrika_counter": 109726654,
+  "metrika_goals_to_create_or_verify": [
+    { "event": "service.first_record_saved", "goal": "first_health_record_saved", "role": "activation_microstep" },
+    { "event": "service.activated", "goal": "service_activated", "role": "primary_business_conversion" },
+    { "event": "summary.viewed", "goal": "doctor_summary_open", "role": "retention_value" },
+    { "event": "payment.succeeded", "goal": "plus_payment_success", "role": "revenue" }
+  ],
+  "strategy_gate": "Keep click optimization until service_activated has stable volume; then use activation as the primary goal and payment as the highest-value lower-funnel goal.",
+  "stop_loss": {
+    "threshold_clicks": 250,
+    "threshold_spend_rub": 500,
+    "minimum_service_activated": 5,
+    "action": "recommend_stop_only",
+    "automatic_mutation": false
+  }
+}
