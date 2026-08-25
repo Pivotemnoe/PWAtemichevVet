@@ -10,27 +10,27 @@
     <meta name="apple-mobile-web-app-title" content="TemichevVet" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
-    <title>TemichevVet — проверка симптомов у собак и кошек</title>
+    <title>TemichevVet — здоровье питомца в одном месте</title>
     <meta
       name="description"
-      content="Сервис для владельцев собак и кошек: быстрая оценка состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача."
+      content="Карточка питомца, история здоровья, вес, питание, наблюдения и важные даты в одном сервисе. Добавьте питомца бесплатно."
     />
     <link rel="canonical" href="https://temichevvet.ru/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="ru_RU" />
     <meta property="og:site_name" content="TemichevVet" />
-    <meta property="og:title" content="TemichevVet — быстрая оценка состояния питомца" />
+    <meta property="og:title" content="TemichevVet — здоровье питомца в одном месте" />
     <meta
       property="og:description"
-      content="Опишите симптомы собаки или кошки. TemichevVet поможет понять тревожные признаки и следующий шаг."
+      content="Ведите карточку питомца: сохраняйте изменения, вес, питание и важные даты. Вся история всегда рядом."
     />
     <meta property="og:url" content="https://temichevvet.ru/" />
     <meta property="og:image" content="https://temichevvet.ru/static/assets/hero_pets.jpg" />
-    <link rel="manifest" href="/static/manifest.webmanifest?v=20260627-ios-icon-1" />
+    <link rel="manifest" href="/static/manifest.webmanifest?v=20260825-service-first-2" />
     <link rel="icon" href="/static/assets/app-icon-192.png?v=20260627-ios-icon-1" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
     <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260803-check-progress-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260825-service-first-2" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -43,7 +43,7 @@
             "applicationCategory": "HealthApplication",
             "operatingSystem": "Web",
             "inLanguage": "ru-RU",
-            "description": "PWA-сервис для владельцев собак и кошек: оценка состояния питомца, история здоровья, напоминания и подготовка информации для ветеринарного врача.",
+            "description": "Сервис здоровья питомца: карточка, история изменений, вес, питание, наблюдения, важные даты и подготовка сводки для ветеринарного врача.",
             "offers": [
               {
                 "@type": "Offer",
@@ -114,32 +114,29 @@
               </div>
             </div>
             <div class="hero-copy">
-              <p class="section-label">Для владельцев собак и кошек</p>
-              <h1>Питомцу плохо? Поймите, что делать сейчас</h1>
-              <p class="lead">
-                Опишите, что происходит с питомцем, простыми словами. TemichevVet оценит
-                состояние и подскажет следующий шаг: наблюдать дома, обратиться за консультацией
-                или ехать в клинику.
-              </p>
+              <p class="section-label">Постоянный сервис для владельца</p>
+              <h1>TemichevVet — здоровье питомца в одном месте</h1>
+              <p class="lead">Ведите карточку питомца: сохраняйте изменения, вес, питание и важные даты. Когда понадобится помощь, вся история уже рядом.</p>
               <div class="hero-actions">
-                <a class="primary-link" id="openCheckBtn" href="/check">Бесплатно оценить состояние</a>
-                <button class="secondary-link" id="openLoginBtn" type="button">Войти в личный кабинет</button>
-                <a class="secondary-link" href="#serviceCanTitle">Что умеет сервис</a>
+                <button class="primary-link" id="openCheckBtn" type="button">Добавить питомца</button>
+                <a class="secondary-link" id="viewFeaturesBtn" href="#serviceCanTitle">Посмотреть возможности</a>
               </div>
-              <p class="hero-support">Без регистрации до результата · обычно 15–30 секунд</p>
+              <p class="hero-support">Бесплатно · для начала достаточно вида и клички питомца</p>
+              <p class="hero-login-line">Уже пользуетесь TemichevVet? <button class="text-button" id="openLoginBtn" type="button">Войти</button></p>
               <p class="hero-channel-links">
                 Удобнее в мессенджере?
                 <a href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
                 ·
                 <a href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
               </p>
-              <p class="care-note">
-                Важно: TemichevVet не ставит диагноз и не назначает лечение. Он помогает быстрее
-                сориентироваться и вовремя обратиться в клинику при тревожных признаках.
-              </p>
+              <p class="care-note">Все записи остаются в одной истории. Медицинские предупреждения работают внутри раздела здоровья.</p>
             </div>
-            <div class="hero-media">
-              <img src="/static/assets/hero_pets.jpg" alt="TemichevVet для собак и кошек" />
+            <div class="hero-media hero-doctor-media">
+              <img class="hero-doctor-photo-cat-table" src="/static/assets/doctor-konstantin-cat-table-retouched.jpg" alt="Ветеринарный врач Константин Темичев гладит кошку на смотровом столе" />
+              <p class="hero-doctor-caption">
+                <strong>Константин Валерьевич Темичев</strong>
+                <span>ветеринарный врач</span>
+              </p>
             </div>
           </div>
 
@@ -147,38 +144,31 @@
             <div class="trust-panel-head">
               <span class="trust-icon" aria-hidden="true">✓</span>
               <div>
-                <p class="section-label">На чём основан сервис</p>
-                <h2 id="trustPanelTitle">Основано на 25+ годах ветеринарной практики</h2>
+              <p class="section-label">Экспертная основа</p>
+                <h2 id="trustPanelTitle">Опыт ветеринарного врача — в основе сервиса</h2>
               </div>
             </div>
             <p>
-              Логика TemichevVet создана на основе практического опыта Константина Темичева,
-              кандидата ветеринарных наук, автора клинических методик и руководителя
-              ветеринарных клиник TemichevVet.
+              В основе TemichevVet — опыт Константина Валерьевича Темичева:
+              ветеринарного врача, кандидата ветеринарных наук и автора клинических методик.
             </p>
             <p>
-              Сервис помогает владельцам собак и кошек быстрее оценить состояние питомца,
-              не пропустить тревожные признаки и подготовить информацию для обращения
-              к ветеринарному врачу.
+              Сервис помогает владельцу вести историю питомца, сохранять изменения и готовить
+              важные детали для разговора с ветеринарным врачом.
             </p>
             <p class="trust-disclaimer">
-              TemichevVet не ставит диагноз и не назначает лечение — он помогает
-              сориентироваться до визита в клинику.
+              TemichevVet не ставит диагноз и не назначает лечение.
             </p>
           </section>
 
           <section class="content-section service-summary" aria-labelledby="serviceSummaryTitle">
             <div>
-              <p class="section-label">Что это за сервис</p>
-              <h2 id="serviceSummaryTitle">Здоровье питомца и быстрые оценки в одном месте</h2>
+              <p class="section-label">Один сервис на каждый день</p>
+              <h2 id="serviceSummaryTitle">Важное о питомце больше не теряется по чатам и заметкам</h2>
             </div>
             <p>
-              TemichevVet помогает владельцу не теряться, когда с собакой или кошкой что-то
-              происходит. В основе логики сервиса — практический ветеринарный опыт Константина
-              Темичева: кандидата ветеринарных наук, автора клинических методик
-              и руководителя ветеринарных клиник TemichevVet. Сервис не заменяет врача, но
-              помогает быстрее понять, когда можно наблюдать, когда нужна консультация, а когда
-              нельзя откладывать визит в клинику.
+              Карточка объединяет вес, наблюдения, питание, важные даты, сохранённые разборы и историю действий.
+              При новом изменении уже не нужно заново вспоминать, что происходило раньше.
             </p>
           </section>
 
@@ -187,30 +177,26 @@
               <p class="section-label">Возможности</p>
               <h2 id="serviceCanTitle">Что умеет сервис</h2>
             </div>
-            <div class="feature-card-grid">
+            <div class="feature-card-grid service-first-feature-grid">
               <article class="feature-card">
-                <strong>Оценка состояния</strong>
-                <p>Вы описываете, что происходит с питомцем, а сервис разделяет ситуацию на понятные уровни: можно наблюдать, нужна консультация или срочно в клинику.</p>
+                <strong>Карточка питомца</strong>
+                <p>Кличка, возраст, вес, особенности и все важные события собраны отдельно для каждой собаки или кошки.</p>
               </article>
               <article class="feature-card">
-                <strong>Хронология обращений</strong>
-                <p>Оценки состояния, наблюдения, вес и заметки сохраняются по конкретному питомцу, чтобы не искать важные детали в переписках и памяти.</p>
-              </article>
-              <article class="feature-card">
-                <strong>Карточки питомцев</strong>
-                <p>Можно вести данные собак и кошек: возраст, вес, породу, особенности и основные события здоровья.</p>
-              </article>
-              <article class="feature-card">
-                <strong>Процедуры по графику</strong>
-                <p>Сервис помогает не забывать вакцинацию, обработки от паразитов, плановые осмотры, груминг и другие процедуры.</p>
+                <strong>История здоровья</strong>
+                <p>Изменения, ответы, наблюдения и действия сохраняются по датам и не теряются после одного обращения.</p>
               </article>
               <article class="feature-card">
                 <strong>Питание</strong>
-                <p>Можно проверить отдельный продукт или готовое блюдо: сервис объяснит, можно ли давать его питомцу и на что обратить внимание.</p>
+                <p>Проверяйте отдельный продукт или состав блюда и сохраняйте полезный ответ в карточке питомца.</p>
               </article>
               <article class="feature-card">
-                <strong>Подписка и лимиты</strong>
-                <p>Сервис показывает текущий тариф, доступные оценки и возможности Plus без лишней путаницы.</p>
+                <strong>Вес и наблюдения</strong>
+                <p>Записывайте вес, аппетит, активность, туалет и поведение, чтобы видеть изменения во времени.</p>
+              </article>
+              <article class="feature-card">
+                <strong>Важные даты</strong>
+                <p>Вакцинация, обработка от паразитов, осмотр, груминг и свои задачи остаются в напоминаниях.</p>
               </article>
             </div>
           </section>
@@ -218,23 +204,20 @@
           <section class="content-section service-flow" aria-labelledby="serviceFlowTitle">
             <div class="flow-copy">
               <p class="section-label">Как это работает</p>
-              <h2 id="serviceFlowTitle">От симптома до понятного следующего шага</h2>
+              <h2 id="serviceFlowTitle">Сначала карточка — затем полезная история</h2>
               <ol class="step-list">
-                <li><strong>Опишите проблему.</strong> Например: “кошка не ест второй день”, “собака хромает”, “была рвота после еды”.</li>
-                <li><strong>Получите оценку состояния.</strong> Сервис отдельно выделяет тревожные признаки, при которых нельзя ждать.</li>
-                <li><strong>Сохраните событие.</strong> Оценка остаётся в истории питомца, чтобы видеть динамику и показать детали врачу.</li>
-                <li><strong>Продолжайте наблюдение.</strong> Добавляйте вес, заметки и напоминания по процедурам.</li>
+                <li><strong>Добавьте питомца.</strong> Для начала достаточно вида и клички.</li>
+                <li><strong>Сохраните первое важное.</strong> Вес, наблюдение, дату, питание или изменение самочувствия.</li>
+                <li><strong>Возвращайтесь к истории.</strong> Новые события дополняют одну карточку, а не создают разрозненные ответы.</li>
+                <li><strong>Подготовьте сводку.</strong> Перед посещением врача соберите важные изменения и даты в одном экране.</li>
               </ol>
-            </div>
-            <div class="flow-media">
-              <img src="/static/assets/onb_step1_add_pet.jpg" alt="Карточка питомца в TemichevVet" />
             </div>
           </section>
 
           <section class="content-section pricing-section" aria-labelledby="pricingTitle">
             <div class="section-head">
               <p class="section-label">Услуга и тарифы</p>
-              <h2 id="pricingTitle">TemichevVet помогает вести здоровье питомца и делать быстрые оценки</h2>
+              <h2 id="pricingTitle">Постоянная история и сводка для врача</h2>
               <p>Платная услуга сервиса — доступ Plus на 30 дней. Оплата разовая, автосписаний нет. После окончания срока доступ возвращается на Free.</p>
             </div>
             <div class="pricing-grid">
@@ -243,11 +226,12 @@
                   <strong>Free</strong>
                   <span>Бесплатный старт</span>
                 </div>
-                <p>Базовый личный кабинет, карточка питомца, ограниченное число оценок состояния и напоминаний на старте.</p>
+                <p>Полезная карточка одного питомца, история и ежедневные записи.</p>
                 <ul>
-                  <li>до 5 оценок состояния в первый месяц;</li>
+                  <li>до 5 разборов в первый месяц;</li>
                   <li>карточка питомца, история, наблюдения и вес;</li>
                   <li>базовый доступ к материалам и проверке питания.</li>
+                  <li>сводка за последние 30 дней без экспорта.</li>
                 </ul>
               </article>
               <article class="pricing-card featured">
@@ -255,12 +239,13 @@
                   <strong>Plus</strong>
                   <span>200 ₽ за 30 дней</span>
                 </div>
-                <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
+                <p>Полная история нескольких питомцев и подготовка к посещению врача.</p>
                 <ul>
-                  <li>до 10 оценок состояния в месяц;</li>
+                  <li>до 10 разборов в месяц;</li>
                   <li>расширенная история по питомцам;</li>
                   <li>до 20 активных напоминаний;</li>
                   <li>до 3 питомцев в личном кабинете.</li>
+                  <li>сводка за 30, 90 дней или всё время с печатью в PDF.</li>
                 </ul>
               </article>
             </div>
@@ -283,7 +268,7 @@
               </article>
               <article class="channel-card">
                 <strong>Telegram-версия</strong>
-                <p>Уже доступна для тех, кому удобно работать в Telegram: оценки состояния, питомцы, напоминания и подписка.</p>
+                <p>Уже доступна для тех, кому удобно работать в Telegram: разборы, питомцы, напоминания и подписка.</p>
                 <a href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Открыть Telegram-версию</a>
               </article>
               <article class="channel-card">
@@ -328,58 +313,97 @@
             </p>
           </section>
 
+          <div class="auth-dialog pet-onboarding-dialog" id="petOnboardingDialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="petOnboardingTitle">
+            <div class="auth-card pet-onboarding-card">
+              <div class="auth-card-head">
+                <div>
+                  <p class="section-label">Первый шаг</p>
+                  <h2 id="petOnboardingTitle">Добавьте питомца</h2>
+                  <p>Для начала достаточно вида и клички. Остальные сведения можно заполнить позже.</p>
+                </div>
+                <button class="icon-button close-button" id="petOnboardingCloseBtn" type="button" aria-label="Закрыть добавление питомца"></button>
+              </div>
+              <form class="pet-onboarding-form" id="publicPetOnboardingForm">
+                <fieldset>
+                  <legend>Кто у вас?</legend>
+                  <label class="pet-type-choice">
+                    <input name="pet_type" type="radio" value="собака" required />
+                    <span>Собака</span>
+                  </label>
+                  <label class="pet-type-choice">
+                    <input name="pet_type" type="radio" value="кошка" required />
+                    <span>Кошка</span>
+                  </label>
+                </fieldset>
+                <label>
+                  <span>Кличка</span>
+                  <input name="pet_name" maxlength="80" autocomplete="off" placeholder="Например: Лео" required />
+                </label>
+                <button class="primary-button" type="submit">Продолжить</button>
+                <p class="hint" id="petOnboardingHint">Карточка сохранится после входа в TemichevVet.</p>
+              </form>
+            </div>
+          </div>
+
           <div class="auth-dialog" id="authDialog" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="authDialogTitle">
             <div class="auth-card">
               <div class="auth-card-head">
                 <div>
                   <p class="section-label">Вход в личный кабинет</p>
                   <h2 id="authDialogTitle">Войдите или создайте личный кабинет</h2>
-                  <p id="authDialogLead">Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.</p>
+                  <p id="authDialogLead">Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически.</p>
                 </div>
                 <button class="icon-button close-button" id="authCloseBtn" type="button" aria-label="Закрыть окно входа"></button>
               </div>
 
               <div class="auth-grid">
-                <form class="panel" id="emailForm">
-                  <h2>Войти по email</h2>
-                  <p>Пришлём одноразовый код на email. Телефон не нужен.</p>
-                  <label>
-                    <span>Email</span>
-                    <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
-                  </label>
-                  <label class="checkbox-row legal-consent">
-                    <input id="privacyConsent" type="checkbox" />
-                    <span>
-                      Я согласен с условиями сервиса.
-                      <span class="legal-links-line">
-                        <button type="button" class="inline-legal-link" data-open-legal="terms">Пользовательское соглашение</button>
-                        <button type="button" class="inline-legal-link" data-open-legal="consent">Согласие на ПДн</button>
-                        <button type="button" class="inline-legal-link" data-open-legal="privacy">Политика конфиденциальности</button>
-                      </span>
-                    </span>
-                  </label>
-                  <button class="primary-button" type="submit">Получить код</button>
-                  <div class="code-row" id="codeRow" hidden>
-                    <label>
-                      <span>Код</span>
-                      <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
-                    </label>
-                    <button class="secondary-button" id="verifyCodeBtn" type="submit">Войти</button>
+                <section class="panel auth-email-primary" aria-labelledby="emailAuthTitle">
+                  <div class="auth-method-heading">
+                    <div>
+                      <p class="section-label">Основной способ</p>
+                      <h2 id="emailAuthTitle">Войти по электронной почте</h2>
+                    </div>
+                    <span class="auth-primary-badge">Email</span>
                   </div>
-                  <p class="hint" id="emailHint">Код действует 10 минут.</p>
-                </form>
+                  <form id="emailForm">
+                    <p>Пришлём одноразовый код на email. Телефон не нужен.</p>
+                    <label>
+                      <span>Электронная почта</span>
+                      <input id="emailInput" type="email" autocomplete="email" placeholder="name@example.ru" required />
+                    </label>
+                    <label class="checkbox-row legal-consent">
+                      <input id="privacyConsent" type="checkbox" />
+                      <span>
+                        Я согласен с условиями сервиса.
+                        <span class="legal-links-line">
+                          <button type="button" class="inline-legal-link" data-open-legal="terms">Пользовательское соглашение</button>
+                          <button type="button" class="inline-legal-link" data-open-legal="consent">Согласие на ПДн</button>
+                          <button type="button" class="inline-legal-link" data-open-legal="privacy">Политика конфиденциальности</button>
+                        </span>
+                      </span>
+                    </label>
+                    <button class="primary-button" type="submit">Получить код</button>
+                    <div class="code-row" id="codeRow" hidden>
+                      <label>
+                        <span>Код</span>
+                        <input id="codeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
+                      </label>
+                      <button class="secondary-button" id="verifyCodeBtn" type="submit">Войти</button>
+                    </div>
+                    <p class="hint" id="emailHint">Код действует 10 минут.</p>
+                  </form>
+                </section>
 
                 <div class="panel auth-options">
-                  <h2>Войти через мессенджер</h2>
-                  <button class="messenger-button" id="telegramBtn" type="button">
-                    <span>Telegram</span>
-                    <small>Подтвердить вход</small>
-                  </button>
-                  <button class="messenger-button" id="maxBtn" type="button">
+                  <p class="section-label">Также удобно</p>
+                  <h2>Войти через MAX</h2>
+                  <button class="messenger-button is-secondary is-max-featured" id="maxBtn" type="button">
                     <span>MAX</span>
-                    <small>Войти или открыть в MAX</small>
+                    <small>Войти или открыть приложение</small>
                   </button>
-                  <p class="hint" id="messengerHint">Telegram подтверждает вход. MAX подтверждает вход и открывает TemichevVet как мини-приложение внутри MAX.</p>
+                  <p class="hint" id="messengerHint">MAX подтверждает вход и открывает TemichevVet как мини-приложение.</p>
+                  <div class="auth-alt-divider" aria-hidden="true"><span>Другой вариант</span></div>
+                  <button class="auth-telegram-link" id="telegramBtn" type="button">Войти через Telegram</button>
                 </div>
               </div>
             </div>
@@ -417,10 +441,9 @@
 
     <div class="cookie-banner" id="cookieBanner" hidden>
       <div>
-        <strong>Cookie и локальное хранение</strong>
+        <strong>Cookie и аналитика</strong>
         <p>
-          Мы используем необходимые cookie/localStorage для входа, безопасности, PWA-кеша и сохранения состояния интерфейса.
-          Аналитика будет включаться только после отдельного согласия.
+          Необходимые cookie обеспечивают работу сайта. Аналитика включится только с вашего согласия.
         </p>
       </div>
       <div class="cookie-actions">
@@ -431,6 +454,6 @@
     </div>
 
     <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <script src="/static/app.js?v=20260803-check-progress-2" type="module"></script>
+    <script src="/static/app.js?v=20260825-service-first-2" type="module"></script>
   </body>
 </html>

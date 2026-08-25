@@ -173,12 +173,20 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "pets", "is_main", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(cur, "pets", "external_source", "TEXT")
         _ensure_column(cur, "pets", "external_id", "TEXT")
+        _ensure_column(cur, "pets", "client_request_id", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pets_owner ON pets(owner_id)")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_pets_external
             ON pets(external_source, external_id)
             WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pets_owner_client_request
+            ON pets(owner_id, client_request_id)
+            WHERE client_request_id IS NOT NULL
             """
         )
 
@@ -524,6 +532,14 @@ def init_db(db_path: Path) -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_funnel_events_session_created ON funnel_events(session_hash, created_at)")
         cur.execute(
             """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_funnel_service_once
+            ON funnel_events(user_id, event_type)
+            WHERE user_id IS NOT NULL
+              AND event_type IN ('service.first_record_saved', 'service.activated')
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS public_check_preview_usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 identity_hash TEXT NOT NULL UNIQUE,
@@ -866,6 +882,66 @@ def create_funnel_event(
         raise RuntimeError("funnel_event_not_created")
     item["metadata"] = _json_load(item.get("metadata"))
     return item
+
+
+def create_funnel_event_once(
+    db_path: Path,
+    *,
+    event_type: str,
+    step: str,
+    user_id: int,
+    status: str = "ok",
+    session_hash: str | None = None,
+    source: str | None = None,
+    path: str | None = None,
+    device: str | None = None,
+    browser: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    with closing(connect(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO funnel_events (
+                created_at, event_type, step, status, session_hash, user_id,
+                source, path, device, browser, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                utc_now_iso(),
+                event_type[:120],
+                step[:80],
+                status[:40],
+                session_hash[:80] if session_hash else None,
+                int(user_id),
+                source[:160] if source else None,
+                path[:240] if path else None,
+                device[:40] if device else None,
+                browser[:80] if browser else None,
+                _safe_audit_metadata(metadata),
+            ),
+        )
+        created = cur.rowcount > 0
+        conn.commit()
+        if created:
+            cur.execute("SELECT * FROM funnel_events WHERE id = ?", (int(cur.lastrowid),))
+        else:
+            cur.execute(
+                """
+                SELECT * FROM funnel_events
+                WHERE user_id = ? AND event_type = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (int(user_id), event_type[:120]),
+            )
+        row = cur.fetchone()
+    item = row_to_dict(row)
+    if not item:
+        raise RuntimeError("funnel_event_not_created")
+    item["metadata"] = _json_load(item.get("metadata"))
+    return item, created
 
 
 def list_funnel_events(db_path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -2047,6 +2123,27 @@ def get_pet(db_path: Path, *, owner_id: int, pet_id: int) -> dict[str, Any] | No
         return row_to_dict(cur.fetchone())
 
 
+def get_pet_by_client_request_id(
+    db_path: Path,
+    *,
+    owner_id: int,
+    client_request_id: str | None,
+) -> dict[str, Any] | None:
+    clean_request_id = str(client_request_id or "").strip()[:128]
+    if not clean_request_id:
+        return None
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM pets
+            WHERE owner_id = ? AND client_request_id = ?
+            LIMIT 1
+            """,
+            (int(owner_id), clean_request_id),
+        ).fetchone()
+    return row_to_dict(row)
+
+
 def _user_has_pets(cur: sqlite3.Cursor, owner_id: int) -> bool:
     cur.execute("SELECT 1 FROM pets WHERE owner_id = ? LIMIT 1", (int(owner_id),))
     return cur.fetchone() is not None
@@ -2066,10 +2163,22 @@ def create_pet(
     weight_kg: float | None = None,
     breed: str | None = None,
     is_main: bool | None = None,
+    client_request_id: str | None = None,
 ) -> dict[str, Any]:
     now = utc_now_iso()
+    clean_request_id = str(client_request_id or "").strip()[:128] or None
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        if clean_request_id:
+            cur.execute(
+                "SELECT * FROM pets WHERE owner_id = ? AND client_request_id = ? LIMIT 1",
+                (int(owner_id), clean_request_id),
+            )
+            existing = cur.fetchone()
+            if existing:
+                conn.commit()
+                return dict(existing)
         has_pets = _user_has_pets(cur, owner_id)
         make_main = (not has_pets) or bool(is_main)
         if make_main:
@@ -2078,9 +2187,9 @@ def create_pet(
             """
             INSERT INTO pets (
                 owner_id, pet_type, pet_name, added_at, birth_year, birth_month,
-                birth_day, birth_precision, sex, weight_kg, breed, is_main
+                birth_day, birth_precision, sex, weight_kg, breed, is_main, client_request_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(owner_id),
@@ -2095,6 +2204,7 @@ def create_pet(
                 weight_kg,
                 breed,
                 1 if make_main else 0,
+                clean_request_id,
             ),
         )
         pet_id = int(cur.lastrowid)

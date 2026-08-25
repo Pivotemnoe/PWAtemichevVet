@@ -44,6 +44,7 @@ class Settings:
     smtp_password: str
     smtp_from_email: str
     smtp_use_tls: bool
+    email_registration_russian_domain_only: bool
     bot_database_path: str
     core_api_secret: str
     admin_api_secret: str
@@ -83,6 +84,10 @@ def get_settings() -> Settings:
         smtp_password=os.getenv("SMTP_PASSWORD", ""),
         smtp_from_email=os.getenv("SMTP_FROM_EMAIL", "").strip(),
         smtp_use_tls=_bool_env("SMTP_USE_TLS", default=True),
+        email_registration_russian_domain_only=_bool_env(
+            "EMAIL_REGISTRATION_RUSSIAN_DOMAIN_ONLY",
+            default=False,
+        ),
         bot_database_path=os.getenv("BOT_DATABASE_PATH", "").strip(),
         core_api_secret=os.getenv("CORE_API_SECRET", "").strip(),
         admin_api_secret=os.getenv("ADMIN_API_SECRET", "").strip(),

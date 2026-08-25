@@ -65,6 +65,21 @@ _COMPLEX_DISH_HINTS = {
     "запеканка",
 }
 
+FOOD_SPECIES = {"dog", "cat"}
+FOOD_DATABASE_SCOPE = "general_cats_and_dogs"
+FOOD_DATABASE_DISCLAIMER = (
+    "Ответ сформирован по общей справочной базе продуктов для кошек и собак. "
+    "База не содержит отдельных правил по виду и не является анализом корма, этикетки или индивидуальной рекомендацией."
+)
+FOOD_DOSE_NOTE = (
+    "Универсальную безопасную или опасную дозу по этой базе определить нельзя: "
+    "риск зависит от вида, массы, состояния животного, продукта и фактически съеденного количества."
+)
+FOOD_EXPOSURE_ADVICE = (
+    "Если питомец уже съел этот продукт, немедленно свяжитесь с ветеринарной клиникой "
+    "или ветеринарной токсикологической службой, даже если симптомов пока нет."
+)
+
 
 def _load_foods() -> list[dict[str, Any]]:
     global _FOODS_CACHE
@@ -249,7 +264,8 @@ def food_to_public(item: dict[str, Any]) -> dict[str, Any]:
         "toxicity": why.get("toxicity") or "",
         "effects": why.get("effects") or "",
         "risk_level": why.get("risk_level") or "",
-        "how_much_is_dangerous": item.get("how_much_is_dangerous") or "",
+        "how_much_is_dangerous": "",
+        "dose_note": FOOD_DOSE_NOTE,
         "advice": item.get("advice") or "",
     }
 
@@ -320,71 +336,103 @@ def find_care(
     ]
 
 
-def check_food(query: str, ingredients: str | None = None) -> dict[str, Any]:
+def _food_response(species: str, **payload: Any) -> dict[str, Any]:
+    normalized_species = str(species or "").strip().casefold()
+    if normalized_species not in FOOD_SPECIES:
+        raise ValueError("invalid_food_species")
+    return {
+        "species": normalized_species,
+        "species_label": "собаки" if normalized_species == "dog" else "кошки",
+        "species_specific": False,
+        "database_scope": FOOD_DATABASE_SCOPE,
+        "disclaimer": FOOD_DATABASE_DISCLAIMER,
+        "requires_immediate_vet_contact": False,
+        "exposure_advice": "",
+        **payload,
+    }
+
+
+def check_food(query: str, ingredients: str | None = None, *, species: str) -> dict[str, Any]:
     query = (query or "").strip()
     ingredients = (ingredients or "").strip()
     if not query:
-        return {"status": "empty", "message": "Введите продукт или блюдо."}
+        return _food_response(species, status="empty", message="Введите продукт или блюдо.")
 
     matches = find_food(query, limit=3)
     if matches:
         item = food_to_public(matches[0])
-        return {
-            "status": "found",
-            "item": item,
-            "message": render_food_result(item),
-            "suggestions": [food_to_public(match) for match in matches[1:]],
-        }
+        requires_contact = not item["allowed"]
+        return _food_response(
+            species,
+            status="found",
+            item=item,
+            message=render_food_result(item, species=species),
+            suggestions=[food_to_public(match) for match in matches[1:]],
+            requires_immediate_vet_contact=requires_contact,
+            exposure_advice=FOOD_EXPOSURE_ADVICE if requires_contact else "",
+        )
 
     if ingredients:
         ingredient_results = [food_to_public(item) for part in ingredients.split(",") for item in find_food(part.strip(), limit=1)]
         dangerous = [item for item in ingredient_results if not item["allowed"]]
         if dangerous:
             names = ", ".join(item["name"] for item in dangerous[:5])
-            return {
-                "status": "ingredients_checked",
-                "message": (
+            return _food_response(
+                species,
+                status="ingredients_checked",
+                message=(
                     f"Лучше не давать: в составе есть рискованные ингредиенты: {names}.\n\n"
+                    f"{FOOD_EXPOSURE_ADVICE}\n\n"
                     "Для питомцев безопаснее отдельные простые продукты без соли, специй, лука, чеснока, соусов и жареного жира."
                 ),
-                "items": ingredient_results,
-            }
+                items=ingredient_results,
+                requires_immediate_vet_contact=True,
+                exposure_advice=FOOD_EXPOSURE_ADVICE,
+            )
         if ingredient_results:
-            return {
-                "status": "ingredients_checked",
-                "message": (
+            return _food_response(
+                species,
+                status="ingredients_checked",
+                message=(
                     "По известным ингредиентам явных запрещённых продуктов не найдено. "
                     "Но готовые блюда всё равно лучше давать только без соли, специй, соусов и жарки."
                 ),
-                "items": ingredient_results,
-            }
+                items=ingredient_results,
+            )
 
     if is_complex_dish_query(query):
-        return {
-            "status": "need_ingredients",
-            "message": (
+        return _food_response(
+            species,
+            status="need_ingredients",
+            message=(
                 "Похоже, это готовое блюдо. Напишите состав через запятую: например, мясо, рис, лук, соль. "
                 "Я проверю ингредиенты и отмечу опасные добавки."
             ),
-        }
+        )
 
-    return {
-        "status": "not_found",
-        "message": (
+    return _food_response(
+        species,
+        status="not_found",
+        message=(
             "Я не нашёл это как отдельный продукт в базе. Если это блюдо, напишите его состав через запятую. "
             "Если это отдельный продукт, попробуйте другое название или близкий вариант."
         ),
-    }
-
-
-def render_food_result(item: dict[str, Any]) -> str:
-    prefix = "✅ Можно" if item["allowed"] else "⛔ Нельзя"
-    return (
-        f"{prefix}: {item['name']}\n"
-        f"Категория: {item['category'] or 'не указана'}\n"
-        f"Токсичность: {item['toxicity'] or 'не указана'}\n"
-        f"Почему это важно: {item['effects'] or 'нет данных'}\n"
-        f"Уровень риска: {item['risk_level'] or 'не указан'}\n"
-        f"Опасное количество: {item['how_much_is_dangerous'] or 'нет данных'}\n"
-        f"Совет: {item['advice'] or 'нет данных'}"
     )
+
+
+def render_food_result(item: dict[str, Any], *, species: str) -> str:
+    prefix = "✅ Можно" if item["allowed"] else "⛔ Нельзя"
+    species_label = "собаки" if str(species).casefold() == "dog" else "кошки"
+    lines = [
+        f"{prefix}: {item['name']}",
+        f"Запрос: для {species_label}.",
+        f"Категория в общей базе: {item['category'] or 'не указана'}",
+        f"Сведения из общей базы: {item['effects'] or 'нет данных'}",
+        f"Уровень риска в базе: {item['risk_level'] or 'не указан'}",
+        f"О количестве: {item['dose_note']}",
+        f"Общая рекомендация: {item['advice'] or 'нет данных'}",
+    ]
+    if not item["allowed"]:
+        lines.append(FOOD_EXPOSURE_ADVICE)
+    lines.append(FOOD_DATABASE_DISCLAIMER)
+    return "\n".join(lines)

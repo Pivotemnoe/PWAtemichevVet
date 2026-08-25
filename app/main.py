@@ -11,12 +11,12 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
-from typing import Annotated, Any
-from urllib.parse import urlparse
+from typing import Annotated, Any, Literal
+from urllib.parse import unquote, urlparse
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -51,7 +51,13 @@ from app.security import (
     utc_now,
     verify_password_hash,
 )
-from app.subscriptions import activate_paid_subscription, get_effective_subscription, refund_quota, try_consume_quota
+from app.subscriptions import (
+    activate_paid_subscription,
+    get_effective_subscription,
+    plan_entitlements,
+    refund_quota,
+    try_consume_quota,
+)
 from app.telegram_auth import complete_telegram_login, confirm_telegram_login, create_telegram_login_challenge
 from app.telegram_sync import (
     sync_pwa_measurement_to_telegram,
@@ -182,12 +188,96 @@ FUNNEL_STEPS: list[tuple[str, str, str]] = [
     ("email_code", "Запросили email-код", "Попросили одноразовый код на email."),
     ("provider_start", "Начали вход через мессенджер", "Открыли Telegram или MAX для подтверждения."),
     ("login_success", "Вошли в кабинет", "Успешно вошли через email, Telegram или MAX."),
+    ("pet_created", "Создали питомца", "Добавили первую постоянную карточку питомца."),
+    ("first_record", "Сохранили первую запись", "Добавили вес, наблюдение, важную дату, разбор или ответ по питанию."),
+    ("service_activated", "Активировали сервис", "Создали питомца и сохранили хотя бы одну постоянную запись."),
+    ("summary_view", "Открыли сводку", "Посмотрели сводку по истории питомца для врача."),
+    ("summary_export", "Подготовили сводку", "Открыли печать или сохранение сводки в PDF."),
     ("triage_start", "Начали проверку симптомов", "Отправили форму проверки симптомов."),
     ("triage_success", "Получили результат", "Сервис вернул разбор или срочное предупреждение."),
     ("subscription_open", "Открыли тарифы", "Открыли экран подписки."),
     ("payment_created", "Перешли к оплате", "Создана ссылка оплаты Plus."),
     ("payment_success", "Оплатили Plus", "Платёж подтверждён и Plus активирован."),
 ]
+
+SERVICE_FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("landing", "Открыли сервис", "Человек попал на публичную страницу TemichevVet."),
+    ("primary_cta", "Начали добавление питомца", "Нажали основную кнопку и открыли короткую форму питомца."),
+    ("auth_open", "Открыли вход", "Перешли к подтверждению аккаунта."),
+    ("login_success", "Вошли", "Успешно вошли через email, Telegram или MAX."),
+    ("pet_created", "Создали питомца", "Карточка питомца появилась в кабинете."),
+    ("first_record", "Сохранили первую запись", "Добавили первое постоянное событие здоровья."),
+    ("service_activated", "Активировали сервис", "Карточка и первая постоянная запись созданы."),
+    ("summary_view", "Открыли сводку", "Посмотрели собранную историю питомца."),
+    ("subscription_open", "Открыли Plus", "Посмотрели условия расширенной истории и сводки."),
+    ("payment_success", "Оплатили Plus", "Платёж подтверждён и Plus активирован."),
+]
+
+PUBLIC_CHECK_FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("check_view", "Открыли проверку", "Открыли страницу проверки симптомов."),
+    ("check_start", "Начали проверку", "Выбрали питомца или начали заполнять форму."),
+    ("check_submit", "Отправили симптомы", "Отправили описание симптомов на разбор."),
+    ("check_result", "Получили результат", "Увидели результат или срочное предупреждение."),
+    ("check_save_cta_view", "Увидели сохранение", "Увидели предложение сохранить разбор в карточке питомца."),
+    ("check_save", "Решили сохранить", "Нажали сохранение результата и открыли вход."),
+    ("auth_open", "Открыли вход", "Открыли вход после проверки."),
+    ("login_success", "Вошли", "Успешно вошли после проверки."),
+    ("check_saved", "Сохранили результат", "Результат появился в кабинете."),
+]
+
+PET_CAMPAIGN_FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("pet_landing", "Открыли электронный паспорт", "Открыли рекламную страницу электронного паспорта."),
+    ("pet_card_start", "Нажали создать паспорт", "Нажали основную кнопку посадочной страницы."),
+    ("auth_open", "Открыли вход", "Открыли окно входа или регистрации."),
+    ("login_success", "Вошли в кабинет", "Успешно вошли любым доступным способом."),
+    ("pet_created", "Создали паспорт", "Фактически добавили питомца в личном кабинете."),
+]
+
+FOOD_CAMPAIGN_FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("food_landing", "Открыли базу продуктов", "Открыли посадочную страницу питания кошки или собаки."),
+    ("food_submit", "Отправили продукт", "Отправили название продукта или состав блюда на проверку."),
+    ("food_result", "Увидели ответ", "Получили ответ из существующей базы продуктов."),
+    ("food_save_cta_view", "Увидели сохранение", "Увидели предложение сохранить ответ в карточке питомца."),
+    ("food_card_start", "Решили сохранить", "После ответа нажали сохранение в карточку питомца."),
+    ("auth_open", "Открыли вход", "Открыли окно входа или регистрации."),
+    ("login_success", "Вошли в кабинет", "Успешно вошли любым доступным способом."),
+    ("food_saved", "Сохранили ответ", "Ответ по продукту появился в наблюдениях питомца."),
+    ("pet_created", "Создали карточку", "При сохранении автоматически создали карточку питомца."),
+]
+
+AUTH_FUNNEL_STEPS: list[tuple[str, str, str]] = [
+    ("primary_cta", "Нажали главную кнопку", "Перешли к началу работы с главного экрана."),
+    ("auth_open", "Открыли вход", "Открыли окно входа или регистрации."),
+    ("email_code", "Запросили email-код", "Попросили одноразовый код на email."),
+    ("provider_start", "Перешли в мессенджер", "Открыли Telegram или MAX для подтверждения."),
+    ("login_success", "Вошли в кабинет", "Успешно вошли через email, Telegram или MAX."),
+    ("triage_start", "Начали проверку в кабинете", "Отправили форму проверки симптомов."),
+    ("triage_success", "Получили результат", "Сервис вернул результат или срочное предупреждение."),
+    ("subscription_open", "Открыли Plus", "Открыли экран подписки."),
+    ("payment_created", "Перешли к оплате", "Создана ссылка оплаты Plus."),
+    ("payment_success", "Оплатили Plus", "Платёж подтверждён и Plus активирован."),
+]
+
+TECHNICAL_TRAFFIC_MARKERS: tuple[str, ...] = (
+    "codex_test",
+    "marketing_funnel_qa",
+    "synthetic",
+    "self_test",
+    "self-test",
+    "autotest",
+)
+
+SCANNER_PATH_MARKERS: tuple[str, ...] = (
+    "wp-admin",
+    "wp-includes",
+    "wlwmanifest",
+    "wordpress",
+    "xmlrpc",
+    "phpmyadmin",
+    "/feed",
+    "/.env",
+    "/.git",
+)
 
 FUNNEL_EVENT_STEPS = {
     "landing.view": "landing",
@@ -198,8 +288,25 @@ FUNNEL_EVENT_STEPS = {
     "check.submit": "check_submit",
     "check.result_shown": "check_result",
     "check.red_flag": "check_result",
+    "check.save_cta_view": "check_save_cta_view",
     "check.save_click": "check_save",
     "check.saved_after_login": "check_saved",
+    "pet.landing_view": "pet_landing",
+    "pet.card_start_click": "pet_card_start",
+    "food.landing_view": "food_landing",
+    "food.submit": "food_submit",
+    "food.result_shown": "food_result",
+    "food.save_cta_view": "food_save_cta_view",
+    "food.card_start_click": "food_card_start",
+    "food.saved_after_login": "food_saved",
+    "pet.created": "pet_created",
+    "weight.created": "first_record",
+    "observation.created": "first_record",
+    "reminder.created": "first_record",
+    "service.first_record_saved": "first_record",
+    "service.activated": "service_activated",
+    "summary.viewed": "summary_view",
+    "summary.exported": "summary_export",
     "landing.primary_cta_click": "primary_cta",
     "landing.login_cta_click": "auth_open",
     "landing.service_link_click": "auth_open",
@@ -221,6 +328,18 @@ FUNNEL_EVENT_STEPS = {
     "payment.succeeded": "payment_success",
 }
 
+SERVER_ONLY_FUNNEL_EVENTS = {
+    "pet.created",
+    "weight.created",
+    "observation.created",
+    "reminder.created",
+    "service.first_record_saved",
+    "service.activated",
+    "summary.viewed",
+    "summary.exported",
+    "food.saved_after_login",
+}
+
 
 def _funnel_session_hash(session_id: str | None) -> str | None:
     clean = (session_id or "").strip()
@@ -237,10 +356,86 @@ def _funnel_metadata_value(metadata: dict[str, Any], key: str, *, max_length: in
     return value[:max_length] or None
 
 
+FUNNEL_METADATA_FIELD_LIMITS: dict[str, int] = {
+    "source": 80,
+    "target": 80,
+    "slug": 80,
+    "pet_type": 30,
+    "level": 40,
+    "urgency": 40,
+    "path": 240,
+    "provider": 40,
+    "method": 80,
+    "reason": 120,
+    "error": 120,
+    "provider_status": 80,
+    "plan": 40,
+    "subscription_source": 80,
+    "record_kind": 40,
+    "summary_period": 20,
+    "traffic_source": 80,
+    "utm_source": 80,
+    "utm_medium": 80,
+    "utm_campaign": 120,
+    "utm_content": 120,
+    "utm_term": 120,
+    "landing_path": 160,
+    "current_flow_id": 128,
+    "current_traffic_source": 80,
+    "current_utm_source": 80,
+    "current_utm_medium": 80,
+    "current_utm_campaign": 120,
+    "current_utm_content": 120,
+    "current_utm_term": 120,
+    "current_landing_path": 160,
+    "first_traffic_source": 80,
+    "first_utm_source": 80,
+    "first_utm_medium": 80,
+    "first_utm_campaign": 120,
+    "first_utm_content": 120,
+    "first_utm_term": 120,
+    "first_landing_path": 160,
+}
+FUNNEL_BOOLEAN_METADATA_FIELDS = {
+    "has_pet",
+    "first_pet",
+    "created_pet",
+    "has_yclid",
+    "current_has_yclid",
+    "first_has_yclid",
+}
+FUNNEL_NUMERIC_METADATA_FIELDS = {"amount_rub", "matched_count"}
+
+
+def _safe_funnel_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    raw = metadata if isinstance(metadata, dict) else {}
+    safe: dict[str, Any] = {}
+    for key, max_length in FUNNEL_METADATA_FIELD_LIMITS.items():
+        value = _funnel_metadata_value(raw, key, max_length=max_length)
+        if value is not None:
+            safe[key] = value
+    for key in FUNNEL_BOOLEAN_METADATA_FIELDS:
+        value = raw.get(key)
+        if isinstance(value, bool):
+            safe[key] = value
+    for key in FUNNEL_NUMERIC_METADATA_FIELDS:
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            safe[key] = value
+    return safe
+
+
+def _decoded_funnel_header_value(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return unquote(raw, errors="replace")
+
+
 def _funnel_request_attribution(request: Request | None) -> dict[str, Any]:
     if not request:
         return {}
-    header_fields = {
+    current_header_fields = {
         "traffic_source": ("x-tvv-traffic-source", 80),
         "utm_source": ("x-tvv-utm-source", 80),
         "utm_medium": ("x-tvv-utm-medium", 80),
@@ -249,14 +444,32 @@ def _funnel_request_attribution(request: Request | None) -> dict[str, Any]:
         "utm_term": ("x-tvv-utm-term", 120),
         "landing_path": ("x-tvv-landing-path", 160),
     }
+    first_header_fields = {
+        "first_traffic_source": ("x-tvv-first-traffic-source", 80),
+        "first_utm_source": ("x-tvv-first-utm-source", 80),
+        "first_utm_medium": ("x-tvv-first-utm-medium", 80),
+        "first_utm_campaign": ("x-tvv-first-utm-campaign", 120),
+        "first_utm_content": ("x-tvv-first-utm-content", 120),
+        "first_utm_term": ("x-tvv-first-utm-term", 120),
+        "first_landing_path": ("x-tvv-first-landing-path", 160),
+        "current_flow_id": ("x-tvv-current-flow-id", 128),
+    }
     attribution: dict[str, Any] = {}
-    for key, (header, max_length) in header_fields.items():
-        value = _funnel_metadata_value(dict(request.headers), header, max_length=max_length)
+    for key, (header, max_length) in {**current_header_fields, **first_header_fields}.items():
+        decoded = _decoded_funnel_header_value(request.headers.get(header))
+        value = _funnel_metadata_value({key: decoded}, key, max_length=max_length)
         if value:
             attribution[key] = value
+    for key in current_header_fields:
+        if key in attribution:
+            attribution[f"current_{key}"] = attribution[key]
     has_yclid = str(request.headers.get("x-tvv-has-yclid") or "").strip().lower()
     if has_yclid in {"0", "1", "true", "false"}:
         attribution["has_yclid"] = has_yclid in {"1", "true"}
+        attribution["current_has_yclid"] = attribution["has_yclid"]
+    first_has_yclid = str(request.headers.get("x-tvv-first-has-yclid") or "").strip().lower()
+    if first_has_yclid in {"0", "1", "true", "false"}:
+        attribution["first_has_yclid"] = first_has_yclid in {"1", "true"}
     return attribution
 
 
@@ -268,17 +481,21 @@ def _track_funnel(
     status: str = "ok",
     session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
+    once_per_user: bool = False,
+) -> bool:
     step = FUNNEL_EVENT_STEPS.get(event_type)
     if not step:
-        return
-    event_metadata = {**_funnel_request_attribution(request), **(metadata or {})}
+        return False
+    event_metadata = {**_safe_funnel_metadata(metadata), **_funnel_request_attribution(request)}
+    resolved_session_id = _funnel_metadata_value(event_metadata, "current_flow_id", max_length=128) or session_id
+    if not resolved_session_id and request:
+        resolved_session_id = request.headers.get("x-tvv-funnel-session")
     try:
         referrer_host = _site_visit_referrer_host(request) if request else None
         if request:
             device, browser, is_bot = _site_visit_user_agent_summary(request)
             if is_bot and user_id is None:
-                return
+                return False
             source = _funnel_metadata_value(event_metadata, "traffic_source", max_length=80) or _site_visit_source(request, referrer_host)
             path = (
                 _funnel_metadata_value(event_metadata, "path", max_length=240)
@@ -289,21 +506,35 @@ def _track_funnel(
             resolved_user_id = user_id if user_id is not None else _site_visit_user_id(request)
         else:
             device, browser, source, path, resolved_user_id = None, None, None, None, user_id
+        event_args = {
+            "event_type": event_type,
+            "step": step,
+            "status": status,
+            "session_hash": _funnel_session_hash(resolved_session_id),
+            "source": source,
+            "path": path,
+            "device": device,
+            "browser": browser,
+            "metadata": event_metadata,
+        }
+        if once_per_user:
+            if resolved_user_id is None:
+                return False
+            _, created = db.create_funnel_event_once(
+                settings.database_path,
+                user_id=int(resolved_user_id),
+                **event_args,
+            )
+            return created
         db.create_funnel_event(
             settings.database_path,
-            event_type=event_type,
-            step=step,
-            status=status,
-            session_hash=_funnel_session_hash(session_id),
             user_id=resolved_user_id,
-            source=source,
-            path=path,
-            device=device,
-            browser=browser,
-            metadata=event_metadata,
+            **event_args,
         )
+        return True
     except Exception as exc:
         logger.warning("Funnel event write failed for %s: %s", event_type, exc)
+        return False
 
 
 def _site_visit_user_id(request: Request) -> int | None:
@@ -352,9 +583,42 @@ def _site_visit_source(request: Request, referrer_host: str | None) -> str:
     return "Прямой заход"
 
 
+def _traffic_value_is_technical(value: Any) -> bool:
+    normalized = str(value or "").strip().lower()
+    return bool(normalized) and any(marker in normalized for marker in TECHNICAL_TRAFFIC_MARKERS)
+
+
+def _site_visit_path_is_scanner(path: Any) -> bool:
+    normalized = str(path or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("//"):
+        return True
+    return any(marker in normalized for marker in SCANNER_PATH_MARKERS)
+
+
 def _site_visit_user_agent_summary(request: Request) -> tuple[str, str, bool]:
     user_agent = (request.headers.get("user-agent") or "").lower()
-    is_bot = any(marker in user_agent for marker in ("bot", "crawler", "spider", "monitor", "curl", "wget"))
+    is_bot = any(
+        marker in user_agent
+        for marker in (
+            "bot",
+            "crawler",
+            "spider",
+            "monitor",
+            "curl",
+            "wget",
+            "python-requests",
+            "python-httpx",
+            "go-http-client",
+            "headlesschrome",
+            "zgrab",
+            "censys",
+            "masscan",
+            "uptimerobot",
+            "statuscake",
+        )
+    )
     if is_bot:
         device = "Бот/проверка"
     elif any(marker in user_agent for marker in ("iphone", "android", "mobile")):
@@ -400,6 +664,12 @@ def _should_log_site_visit(request: Request, response: Response) -> bool:
     }
     if path in ignored_paths or any(path.startswith(prefix) for prefix in ignored_prefixes):
         return False
+    fetch_mode = str(request.headers.get("sec-fetch-mode") or "").strip().lower()
+    fetch_dest = str(request.headers.get("sec-fetch-dest") or "").strip().lower()
+    if fetch_mode and fetch_mode != "navigate":
+        return False
+    if fetch_dest and fetch_dest not in {"document", "iframe"}:
+        return False
     accept = request.headers.get("accept", "")
     if "text/html" not in accept and path not in {"/", "/app", "/cabinet"}:
         return False
@@ -411,6 +681,11 @@ def _log_site_visit(request: Request, response: Response) -> None:
         return
     referrer_host = _site_visit_referrer_host(request)
     device, browser, is_bot = _site_visit_user_agent_summary(request)
+    source = _site_visit_source(request, referrer_host)
+    is_bot = is_bot or _site_visit_path_is_scanner(request.url.path) or _traffic_value_is_technical(source)
+    if is_bot:
+        device = "Бот/проверка"
+        browser = "Бот/проверка"
     try:
         db.create_site_visit(
             settings.database_path,
@@ -420,7 +695,7 @@ def _log_site_visit(request: Request, response: Response) -> None:
             user_id=_site_visit_user_id(request),
             ip_hash=_audit_ip_hash(request),
             referrer_host=referrer_host,
-            source=_site_visit_source(request, referrer_host),
+            source=source,
             device=device,
             browser=browser,
             is_bot=is_bot,
@@ -710,6 +985,8 @@ class PublicCheckPreviewSaveRequest(BaseModel):
     utm_term: str | None = Field(default=None, max_length=120)
     has_yclid: bool = False
     landing_path: str | None = Field(default=None, max_length=160)
+    pet_id: int | None = Field(default=None, ge=1)
+    create_pet: bool = False
 
 
 class PetPayload(BaseModel):
@@ -723,6 +1000,7 @@ class PetPayload(BaseModel):
     weight_kg: float | None = Field(default=None, ge=0.05, le=200)
     breed: str | None = Field(default=None, max_length=80)
     is_main: bool | None = None
+    client_request_id: str | None = Field(default=None, max_length=128)
 
 
 class PetPatchPayload(BaseModel):
@@ -762,8 +1040,25 @@ class ReminderPayload(BaseModel):
 
 
 class FoodCheckPayload(BaseModel):
+    species: Literal["dog", "cat"]
     query: str = Field(min_length=1, max_length=160)
     ingredients: str | None = Field(default=None, max_length=1000)
+
+
+class PublicFoodSaveRequest(FoodCheckPayload):
+    pet_type: str | None = Field(default=None, max_length=30)
+    landing_slug: str | None = Field(default=None, max_length=80)
+    session_id: str | None = Field(default=None, max_length=128)
+    traffic_source: str | None = Field(default=None, max_length=80)
+    utm_source: str | None = Field(default=None, max_length=80)
+    utm_medium: str | None = Field(default=None, max_length=80)
+    utm_campaign: str | None = Field(default=None, max_length=120)
+    utm_content: str | None = Field(default=None, max_length=120)
+    utm_term: str | None = Field(default=None, max_length=120)
+    has_yclid: bool = False
+    landing_path: str | None = Field(default=None, max_length=160)
+    pet_id: int | None = Field(default=None, ge=1)
+    create_pet: bool = False
 
 
 class FeedbackPayload(BaseModel):
@@ -869,6 +1164,8 @@ def _require_email_registration_domain(email: str, request: Request) -> dict[str
     user = _existing_email_user(email)
     if user:
         return user
+    if not settings.email_registration_russian_domain_only:
+        return None
     if _is_russian_email_domain(email):
         return None
     _audit(
@@ -1760,27 +2057,164 @@ def _admin_rows(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = 
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
-def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, Any]:
+def _admin_funnel_session_id(row: dict[str, Any]) -> str:
+    session_hash = row.get("session_hash")
+    if session_hash:
+        return f"session:{session_hash}"
+    user_id = row.get("user_id")
+    if user_id is not None:
+        return f"user:{int(user_id)}"
+    return f"event:{row['id']}"
+
+
+def _admin_funnel_metadata_value(row: dict[str, Any], key: str, *, max_length: int) -> str | None:
+    raw = row.get("metadata") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    return _funnel_metadata_value(raw, key, max_length=max_length)
+
+
+def _admin_funnel_row_is_synthetic(row: dict[str, Any]) -> bool:
+    values: list[Any] = [
+        row.get("source"),
+        row.get("path"),
+        row.get("device"),
+        row.get("browser"),
+    ]
+    for key in (
+        "traffic_source",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "utm_term",
+        "landing_path",
+    ):
+        values.append(_admin_funnel_metadata_value(row, key, max_length=240))
+    return any(_traffic_value_is_technical(value) for value in values)
+
+
+def _admin_site_visit_row_is_technical(row: dict[str, Any]) -> bool:
+    return bool(row.get("is_bot")) or _site_visit_path_is_scanner(row.get("path")) or _traffic_value_is_technical(
+        row.get("source"),
+    )
+
+
+def _admin_group_site_visits(rows: list[dict[str, Any]], key: str, fallback: str) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        label = str(row.get(key) or fallback)
+        item = grouped.setdefault(label, {key: label, "count": 0, "visitors": set(), "last_at": None})
+        item["count"] += 1
+        if row.get("ip_hash"):
+            item["visitors"].add(str(row["ip_hash"]))
+        created_at = row.get("created_at")
+        if created_at and (item["last_at"] is None or str(created_at) > str(item["last_at"])):
+            item["last_at"] = created_at
+    return [
+        {
+            key: item[key],
+            "count": int(item["count"]),
+            "visitors": len(item["visitors"]),
+            "last_at": item["last_at"],
+        }
+        for item in sorted(grouped.values(), key=lambda item: (-int(item["count"]), str(item[key])))
+    ]
+
+
+def _admin_audit_event_is_routine(row: dict[str, Any]) -> bool:
+    event_type = str(row.get("event_type") or "")
+    if event_type == "admin.dashboard_view":
+        return True
+    metadata = row.get("metadata") or {}
+    return (
+        event_type == "push.followups_send"
+        and str(row.get("actor") or "") == "system"
+        and str(row.get("status") or "") == "ok"
+        and int((metadata or {}).get("sent") or 0) == 0
+        and int((metadata or {}).get("failed") or 0) == 0
+    )
+
+
+def _admin_is_public_check_step(step: str) -> bool:
+    return step in {
+        "check_view",
+        "check_start",
+        "check_submit",
+        "check_result",
+        "check_save_cta_view",
+        "check_save",
+        "check_saved",
+    }
+
+
+def _admin_is_auth_scope_step(step: str) -> bool:
+    return step in {
+        "primary_cta",
+        "auth_open",
+        "email_code",
+        "provider_start",
+        "login_success",
+        "triage_start",
+        "triage_success",
+        "subscription_open",
+        "payment_created",
+        "payment_success",
+    }
+
+
+def _admin_funnel_row_is_public(row: dict[str, Any]) -> bool:
+    step = str(row.get("step") or "")
+    if _admin_is_public_check_step(step):
+        return True
+    path = str(row.get("path") or "").strip()
+    if path.startswith("/check"):
+        return True
+    for key in ("slug", "landing_path"):
+        value = _admin_funnel_metadata_value(row, key, max_length=240)
+        if value and str(value).startswith("/check"):
+            return True
+    return False
+
+
+def _admin_funnel_row_is_auth(row: dict[str, Any]) -> bool:
+    if row.get("user_id") is not None:
+        return True
+    return _admin_is_auth_scope_step(str(row.get("step") or ""))
+
+
+def _admin_funnel_rows(conn: sqlite3.Connection, since: str) -> list[dict[str, Any]]:
     rows = _admin_rows(
         conn,
         """
-        SELECT step,
-               COUNT(*) AS count,
-               COUNT(DISTINCT COALESCE(session_hash, 'user:' || user_id, 'event:' || id)) AS unique_count,
-               SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS issues,
-               MAX(created_at) AS last_at
+        SELECT id, created_at, event_type, step, status, session_hash, user_id,
+               source, path, device, browser, metadata
         FROM funnel_events
         WHERE created_at >= ?
-        GROUP BY step
         """,
         (since,),
     )
-    by_step = {str(row["step"]): row for row in rows}
+    return rows
+
+
+def _admin_build_funnel_steps(
+    rows: list[dict[str, Any]],
+    definitions: list[tuple[str, str, str]] = FUNNEL_STEPS,
+) -> list[dict[str, Any]]:
+    rows_by_step: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in rows:
+        rows_by_step[str(item.get("step") or "")].append(item)
+
     steps: list[dict[str, Any]] = []
     previous_unique: int | None = None
-    for step, label, help_text in FUNNEL_STEPS:
-        row = by_step.get(step, {})
-        unique_count = int(row.get("unique_count") or 0)
+    for step, label, help_text in definitions:
+        step_rows = rows_by_step.get(step, [])
+        unique_count = len({_admin_funnel_session_id(item) for item in step_rows})
         conversion: float | None = None
         if previous_unique and previous_unique > 0:
             conversion = round((unique_count / previous_unique) * 100, 1)
@@ -1789,15 +2223,373 @@ def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, 
                 "step": step,
                 "label": label,
                 "help": help_text,
-                "count": int(row.get("count") or 0),
+                "count": int(len(step_rows)),
                 "unique_count": unique_count,
-                "issues": int(row.get("issues") or 0),
-                "last_at": row.get("last_at"),
+                "issues": sum(1 for item in step_rows if str(item.get("status") or "") != "ok"),
+                "last_at": max((item.get("created_at") for item in step_rows), default=None),
                 "conversion_from_previous": conversion,
-            }
+            },
         )
         previous_unique = unique_count
-    return {"since": since, "steps": steps}
+    return steps
+
+
+def _admin_funnel_first_seen(conn: sqlite3.Connection) -> dict[str, str]:
+    rows = _admin_rows(
+        conn,
+        """
+        SELECT COALESCE(
+            CASE WHEN session_hash IS NOT NULL THEN 'session:' || session_hash ELSE NULL END,
+            'user:' || user_id,
+            'event:' || id
+        ) AS session_key,
+               MIN(created_at) AS first_at
+        FROM funnel_events
+        GROUP BY COALESCE(
+            CASE WHEN session_hash IS NOT NULL THEN 'session:' || session_hash ELSE NULL END,
+            'user:' || user_id,
+            'event:' || id
+        )
+        """,
+        (),
+    )
+    return {str(item.get("session_key")): str(item.get("first_at") or "") for item in rows}
+
+
+def _admin_funnel_landing_label(row: dict[str, Any]) -> str:
+    slug = _admin_funnel_metadata_value(row, "slug", max_length=80)
+    if slug:
+        clean_slug = str(slug).strip().strip("/")
+        if clean_slug in {"pet", "food-dog", "food-cat"}:
+            return clean_slug
+        return clean_slug or "other"
+    path = str(row.get("path") or "").strip()
+    normalized_path = path.rstrip("/") or "/"
+    campaign_landings = {
+        "/pet": "pet",
+        "pet": "pet",
+        "/food/dog": "food-dog",
+        "food/dog": "food-dog",
+        "food-dog": "food-dog",
+        "/food/cat": "food-cat",
+        "food/cat": "food-cat",
+        "food-cat": "food-cat",
+    }
+    if normalized_path in campaign_landings:
+        return campaign_landings[normalized_path]
+    if path == "/check":
+        return "general"
+    if path.startswith("/check/"):
+        return path.replace("/check/", "", 1) or "general"
+    landing = _admin_funnel_metadata_value(row, "landing_path", max_length=240)
+    if landing:
+        normalized_landing = str(landing).strip().rstrip("/") or "/"
+        if normalized_landing in campaign_landings:
+            return campaign_landings[normalized_landing]
+        if normalized_landing == "/check":
+            return "general"
+        if normalized_landing.startswith("/check/"):
+            return normalized_landing.replace("/check/", "", 1) or "general"
+        return normalized_landing
+    return "other"
+
+
+def _admin_funnel_scope_rows(
+    rows: list[dict[str, Any]],
+    *,
+    explicit_steps: set[str],
+    landing_names: set[str],
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if str(row.get("step") or "") in explicit_steps or _admin_funnel_landing_label(row) in landing_names
+    ]
+
+
+def _admin_funnel_cuts(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    campaign_rows: dict[str, set[str]] = defaultdict(set)
+    landing_rows: dict[str, set[str]] = defaultdict(set)
+    device_rows: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        sid = _admin_funnel_session_id(row)
+        campaign = _admin_funnel_metadata_value(row, "utm_campaign", max_length=120) or "без кампании"
+        landing = _admin_funnel_landing_label(row)
+        device = str(row.get("device") or "неизвестно")
+        campaign_rows[campaign].add(sid)
+        landing_rows[landing].add(sid)
+        device_rows[device].add(sid)
+
+    def as_report(values: dict[str, set[str]]) -> list[dict[str, Any]]:
+        return [
+            {"name": key, "sessions": len(sessions)}
+            for key, sessions in sorted(values.items(), key=lambda item: (-len(item[1]), item[0]))
+        ]
+
+    return {
+        "campaign": as_report(campaign_rows),
+        "landing": as_report(landing_rows),
+        "device": as_report(device_rows),
+    }
+
+
+def _admin_campaign_loss_reasons(rows: list[dict[str, Any]], *, kind: str) -> dict[str, int]:
+    sessions: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        item = sessions.setdefault(
+            _admin_funnel_session_id(row),
+            {"steps": set(), "authenticated_cta": False},
+        )
+        step = str(row.get("step") or "")
+        item["steps"].add(step)
+        if step in {"pet_card_start", "food_card_start"} and row.get("user_id") is not None:
+            item["authenticated_cta"] = True
+
+    if kind == "pet":
+        return {
+            "cta_not_clicked": sum(
+                1 for item in sessions.values()
+                if "pet_landing" in item["steps"] and "pet_card_start" not in item["steps"]
+            ),
+            "login_not_opened": sum(
+                1 for item in sessions.values()
+                if "pet_card_start" in item["steps"]
+                and "auth_open" not in item["steps"]
+                and "pet_created" not in item["steps"]
+                and not item["authenticated_cta"]
+            ),
+            "login_incomplete": sum(
+                1 for item in sessions.values()
+                if "auth_open" in item["steps"]
+                and "login_success" not in item["steps"]
+                and "pet_created" not in item["steps"]
+            ),
+            "passport_not_created": sum(
+                1 for item in sessions.values()
+                if ("login_success" in item["steps"] or item["authenticated_cta"])
+                and "pet_created" not in item["steps"]
+            ),
+        }
+    return {
+        "not_submitted": sum(
+            1 for item in sessions.values()
+            if "food_landing" in item["steps"] and "food_submit" not in item["steps"]
+        ),
+        "result_not_received": sum(
+            1 for item in sessions.values()
+            if "food_submit" in item["steps"] and "food_result" not in item["steps"]
+        ),
+        "save_cta_not_seen": sum(
+            1 for item in sessions.values()
+            if "food_result" in item["steps"] and "food_save_cta_view" not in item["steps"]
+        ),
+        "save_not_clicked": sum(
+            1 for item in sessions.values()
+            if "food_save_cta_view" in item["steps"] and "food_card_start" not in item["steps"]
+        ),
+        "login_not_opened": sum(
+            1 for item in sessions.values()
+            if "food_card_start" in item["steps"]
+            and "auth_open" not in item["steps"]
+            and "food_saved" not in item["steps"]
+            and not item["authenticated_cta"]
+        ),
+        "login_incomplete": sum(
+            1 for item in sessions.values()
+            if "auth_open" in item["steps"]
+            and "login_success" not in item["steps"]
+            and "food_saved" not in item["steps"]
+        ),
+        "answer_not_saved": sum(
+            1 for item in sessions.values()
+            if ("login_success" in item["steps"] or item["authenticated_cta"])
+            and "food_saved" not in item["steps"]
+        ),
+    }
+
+
+def _admin_funnel_metadata_breakdown(
+    rows: list[dict[str, Any]],
+    *,
+    step: str,
+    key: str,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if str(row.get("step") or "") != step:
+            continue
+        value = _admin_funnel_metadata_value(row, key, max_length=80) or "не указано"
+        item = grouped.setdefault(value, {"name": value, "events": 0, "sessions": set()})
+        item["events"] += 1
+        item["sessions"].add(_admin_funnel_session_id(row))
+    return [
+        {"name": item["name"], "events": int(item["events"]), "sessions": len(item["sessions"])}
+        for item in sorted(grouped.values(), key=lambda item: (-int(item["events"]), str(item["name"])))
+    ]
+
+
+def _admin_funnel_loss_reasons(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, Any]],
+    *,
+    since: str,
+) -> dict[str, int]:
+    public_rows = [item for item in rows if _admin_funnel_row_is_public(item)]
+    sessions: dict[str, dict[str, bool]] = {}
+    for row in public_rows:
+        session_id = _admin_funnel_session_id(row)
+        item = sessions.setdefault(
+            session_id,
+            {
+                "check_view": False,
+                "check_start": False,
+                "check_submit": False,
+                "check_result": False,
+                "check_save_cta_view": False,
+                "check_save": False,
+                "check_saved": False,
+                "login_opened": False,
+                "login_success": False,
+            },
+        )
+        step = str(row.get("step") or "")
+        if step == "check_view":
+            item["check_view"] = True
+        elif step == "check_start":
+            item["check_start"] = True
+        elif step == "check_submit":
+            item["check_submit"] = True
+        elif step == "check_result":
+            item["check_result"] = True
+        elif step == "check_save_cta_view":
+            item["check_save_cta_view"] = True
+        elif step == "check_save":
+            item["check_save"] = True
+        elif step == "check_saved":
+            item["check_saved"] = True
+        elif step == "auth_open":
+            item["login_opened"] = True
+        elif step == "login_success":
+            item["login_success"] = True
+
+    repeat_limit = 0
+    repeat_rows = _admin_rows(
+        conn,
+        """
+        SELECT metadata
+        FROM security_audit_events
+        WHERE created_at >= ?
+          AND event_type = 'check.preview_blocked'
+        """,
+        (since,),
+    )
+    for item in repeat_rows:
+        metadata = item.get("metadata") or "{}"
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        if str((metadata or {}).get("reason")) == "already_used":
+            repeat_limit += 1
+
+    model_error_rows = _admin_scalar(
+        conn,
+        """
+        SELECT COUNT(*)
+        FROM security_audit_events
+        WHERE created_at >= ?
+          AND event_type = 'llm.check_preview_failed'
+        """,
+        (since,),
+    )
+
+    return {
+        "not_started": sum(1 for session in sessions.values() if session["check_view"] and not session["check_start"]),
+        "not_submitted": sum(1 for session in sessions.values() if session["check_start"] and not session["check_submit"]),
+        "result_not_received": sum(
+            1 for session in sessions.values() if session["check_submit"] and not session["check_result"]
+        ),
+        "save_cta_not_seen": sum(
+            1 for session in sessions.values()
+            if session["check_result"] and not session["check_save_cta_view"]
+        ),
+        "save_not_clicked": sum(
+            1 for session in sessions.values()
+            if session["check_save_cta_view"] and not session["check_save"]
+        ),
+        "save_incomplete": sum(1 for session in sessions.values() if session["check_save"] and not session["check_saved"]),
+        "repeat_limit": repeat_limit,
+        "model_error": model_error_rows,
+        "login_opened": sum(1 for session in sessions.values() if session["login_opened"]),
+        "login_successful": sum(1 for session in sessions.values() if session["login_success"]),
+    }
+
+
+def _admin_funnel_returning_segments(rows: list[dict[str, Any]], *, since: str, first_seen: dict[str, str]) -> list[dict[str, Any]]:
+    scoped_sessions = {_admin_funnel_session_id(item) for item in rows}
+    new_sessions = sum(1 for session in scoped_sessions if first_seen.get(session, "0") >= since)
+    returning_sessions = max(len(scoped_sessions) - new_sessions, 0)
+    return [
+        {"name": "new", "sessions": new_sessions},
+        {"name": "returning", "sessions": returning_sessions},
+    ]
+
+
+def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, Any]:
+    rows = _admin_funnel_rows(conn, since)
+    all_steps = _admin_build_funnel_steps(rows)
+    synthetic_rows = [row for row in rows if _admin_funnel_row_is_synthetic(row)]
+    product_rows = [row for row in rows if not _admin_funnel_row_is_synthetic(row)]
+    public_rows = [row for row in product_rows if _admin_funnel_row_is_public(row)]
+    auth_rows = [row for row in product_rows if _admin_funnel_row_is_auth(row)]
+    pet_rows = _admin_funnel_scope_rows(
+        product_rows,
+        explicit_steps={"pet_landing", "pet_card_start"},
+        landing_names={"pet"},
+    )
+    food_rows = _admin_funnel_scope_rows(
+        product_rows,
+        explicit_steps={"food_landing", "food_submit", "food_result", "food_save_cta_view", "food_card_start", "food_saved"},
+        landing_names={"food-dog", "food-cat"},
+    )
+    public_steps = _admin_build_funnel_steps(public_rows, PUBLIC_CHECK_FUNNEL_STEPS)
+    auth_steps = _admin_build_funnel_steps(auth_rows, AUTH_FUNNEL_STEPS)
+    pet_steps = _admin_build_funnel_steps(pet_rows, PET_CAMPAIGN_FUNNEL_STEPS)
+    food_steps = _admin_build_funnel_steps(food_rows, FOOD_CAMPAIGN_FUNNEL_STEPS)
+    service_steps = _admin_build_funnel_steps(product_rows, SERVICE_FUNNEL_STEPS)
+    product_login_rows = [row for row in product_rows if str(row.get("step") or "") == "login_success"]
+
+    first_seen = _admin_funnel_first_seen(conn)
+    return {
+        "since": since,
+        "steps": all_steps,
+        "public_steps": public_steps,
+        "auth_steps": auth_steps,
+        "pet_steps": pet_steps,
+        "food_steps": food_steps,
+        "service_steps": service_steps,
+        "product_events": len(product_rows),
+        "product_sessions": len({_admin_funnel_session_id(row) for row in product_rows}),
+        "synthetic_events": len(synthetic_rows),
+        "synthetic_sessions": len({_admin_funnel_session_id(row) for row in synthetic_rows}),
+        "product_login_events": len(product_login_rows),
+        "product_login_users": len(
+            {int(row["user_id"]) for row in product_login_rows if row.get("user_id") is not None}
+        ),
+        "cuts": {
+            "public": _admin_funnel_cuts(public_rows),
+            "pet": _admin_funnel_cuts(pet_rows),
+            "food": _admin_funnel_cuts(food_rows),
+            "returning": _admin_funnel_returning_segments(public_rows, since=since, first_seen=first_seen),
+            "pet_returning": _admin_funnel_returning_segments(pet_rows, since=since, first_seen=first_seen),
+            "food_returning": _admin_funnel_returning_segments(food_rows, since=since, first_seen=first_seen),
+        },
+        "loss_reasons": _admin_funnel_loss_reasons(conn, product_rows, since=since),
+        "pet_loss_reasons": _admin_campaign_loss_reasons(pet_rows, kind="pet"),
+        "food_loss_reasons": _admin_campaign_loss_reasons(food_rows, kind="food"),
+        "food_result_levels": _admin_funnel_metadata_breakdown(food_rows, step="food_result", key="level"),
+    }
 
 
 def _admin_dashboard_payload() -> dict[str, Any]:
@@ -1808,9 +2600,60 @@ def _admin_dashboard_payload() -> dict[str, Any]:
     since_30d = (now - timedelta(days=30)).isoformat()
     today = date.today().isoformat()
     with closing(db.connect(settings.database_path)) as conn:
+        site_visit_rows_24h = _admin_rows(
+            conn,
+            """
+            SELECT id, created_at, method, path, status_code, user_id, ip_hash,
+                   referrer_host, source, device, browser, is_bot
+            FROM site_visits
+            WHERE created_at >= ?
+            ORDER BY id DESC
+            """,
+            (since_24h,),
+        )
+        product_site_visit_rows = [
+            row for row in site_visit_rows_24h if not _admin_site_visit_row_is_technical(row)
+        ]
+        technical_site_visit_rows = [
+            row for row in site_visit_rows_24h if _admin_site_visit_row_is_technical(row)
+        ]
+        public_tokens_30d = _admin_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(call_tokens), 0)
+            FROM (
+                SELECT completed_at, MAX(COALESCE(total_tokens, 0)) AS call_tokens
+                FROM public_check_preview_usage
+                WHERE status = 'completed' AND completed_at >= ?
+                GROUP BY completed_at
+            )
+            """,
+            (since_30d,),
+        )
+        cabinet_tokens_30d = _admin_scalar(
+            conn,
+            """
+            SELECT COALESCE(SUM(total_tokens), 0)
+            FROM triage_logs
+            WHERE created_at >= ? AND COALESCE(subscription_source, '') != 'public_preview'
+            """,
+            (since_30d,),
+        )
+        users_total_raw = _admin_scalar(conn, "SELECT COUNT(*) FROM users")
+        users_service = _admin_scalar(
+            conn,
+            "SELECT COUNT(*) FROM users WHERE LOWER(email) = ?",
+            (REVIEW_ACCOUNT_EMAIL,),
+        )
         overview = {
-            "users_total": _admin_scalar(conn, "SELECT COUNT(*) FROM users"),
-            "users_today": _admin_scalar(conn, "SELECT COUNT(*) FROM users WHERE created_at >= ?", (today,)),
+            "users_total": max(users_total_raw - users_service, 0),
+            "users_total_raw": users_total_raw,
+            "users_service": users_service,
+            "users_today": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM users WHERE created_at >= ? AND LOWER(email) != ?",
+                (today, REVIEW_ACCOUNT_EMAIL),
+            ),
             "pets_total": _admin_scalar(conn, "SELECT COUNT(*) FROM pets"),
             "active_plus": _admin_scalar(
                 conn,
@@ -1818,16 +2661,21 @@ def _admin_dashboard_payload() -> dict[str, Any]:
                 (now_iso,),
             ),
             "active_reminders": _admin_scalar(conn, "SELECT COUNT(*) FROM reminders WHERE is_active = 1"),
-            "site_visits_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM site_visits WHERE created_at >= ?", (since_24h,)),
-            "site_visitors_24h": _admin_scalar(
-                conn,
-                "SELECT COUNT(DISTINCT ip_hash) FROM site_visits WHERE created_at >= ? AND ip_hash IS NOT NULL",
-                (since_24h,),
+            "site_visits_24h": len(site_visit_rows_24h),
+            "site_visits_24h_human": len(product_site_visit_rows),
+            "site_visits_24h_product": len(product_site_visit_rows),
+            "site_visits_24h_technical": len(technical_site_visit_rows),
+            "site_visitors_24h": len(
+                {str(row["ip_hash"]) for row in site_visit_rows_24h if row.get("ip_hash")}
             ),
-            "site_logged_in_visits_24h": _admin_scalar(
-                conn,
-                "SELECT COUNT(*) FROM site_visits WHERE created_at >= ? AND user_id IS NOT NULL",
-                (since_24h,),
+            "site_visitors_24h_product": len(
+                {str(row["ip_hash"]) for row in product_site_visit_rows if row.get("ip_hash")}
+            ),
+            "site_visitors_24h_technical": len(
+                {str(row["ip_hash"]) for row in technical_site_visit_rows if row.get("ip_hash")}
+            ),
+            "site_logged_in_visits_24h": sum(
+                1 for row in product_site_visit_rows if row.get("user_id") is not None
             ),
             "triage_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_24h,)),
             "triage_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM triage_logs WHERE created_at >= ?", (since_30d,)),
@@ -1857,9 +2705,53 @@ def _admin_dashboard_payload() -> dict[str, Any]:
                 "SELECT COALESCE(SUM(amount_rub), 0) FROM payments WHERE created_at >= ? AND status IN ('succeeded', 'paid')",
                 (since_30d,),
             ),
-            "tokens_30d": _admin_scalar(
+            "tokens_30d": public_tokens_30d + cabinet_tokens_30d,
+            "tokens_30d_public": public_tokens_30d,
+            "tokens_30d_cabinet": cabinet_tokens_30d,
+            "check_visits_72h": _admin_scalar(
                 conn,
-                "SELECT COALESCE(SUM(total_tokens), 0) FROM triage_logs WHERE created_at >= ?",
+                "SELECT COUNT(*) FROM funnel_events WHERE created_at >= ? AND (step LIKE 'check_%' OR path LIKE '/check%')",
+                (since_72h,),
+            ),
+            "auth_funnel_events_72h": _admin_scalar(
+                conn,
+                "SELECT COUNT(*) FROM funnel_events WHERE created_at >= ? AND (step IN ('primary_cta','auth_open','email_code','provider_start','login_success','subscription_open','payment_created','payment_success'))",
+                (since_72h,),
+            ),
+            "return_d1_users_30d": _admin_scalar(
+                conn,
+                """
+                WITH first_visits AS (
+                    SELECT user_id, MIN(created_at) AS first_at
+                    FROM site_visits
+                    WHERE user_id IS NOT NULL
+                    GROUP BY user_id
+                )
+                SELECT COUNT(DISTINCT sv.user_id)
+                FROM site_visits sv
+                JOIN first_visits fv ON fv.user_id = sv.user_id
+                WHERE fv.first_at >= ?
+                  AND julianday(sv.created_at) - julianday(fv.first_at) >= 1
+                  AND julianday(sv.created_at) - julianday(fv.first_at) < 2
+                """,
+                (since_30d,),
+            ),
+            "return_d7_users_30d": _admin_scalar(
+                conn,
+                """
+                WITH first_visits AS (
+                    SELECT user_id, MIN(created_at) AS first_at
+                    FROM site_visits
+                    WHERE user_id IS NOT NULL
+                    GROUP BY user_id
+                )
+                SELECT COUNT(DISTINCT sv.user_id)
+                FROM site_visits sv
+                JOIN first_visits fv ON fv.user_id = sv.user_id
+                WHERE fv.first_at >= ?
+                  AND julianday(sv.created_at) - julianday(fv.first_at) >= 7
+                  AND julianday(sv.created_at) - julianday(fv.first_at) < 8
+                """,
                 (since_30d,),
             ),
         }
@@ -1976,36 +2868,121 @@ def _admin_dashboard_payload() -> dict[str, Any]:
             """,
             (since_24h,),
         )
-        recent_audit = db.list_security_audit_events(
+        site_sources_24h_product = _admin_group_site_visits(product_site_visit_rows, "source", "Неизвестно")
+        site_paths_24h_product = _admin_group_site_visits(product_site_visit_rows, "path", "/")
+        site_sources_24h_technical = _admin_group_site_visits(technical_site_visit_rows, "source", "Неизвестно")
+        site_paths_24h_technical = _admin_group_site_visits(technical_site_visit_rows, "path", "/")
+
+        recent_audit_raw = db.list_security_audit_events(
             settings.database_path,
-            limit=80,
-            hide_noisy_system_events=True,
+            limit=200,
+            hide_noisy_system_events=False,
         )
-        recent_site_visits = db.list_site_visits(settings.database_path, limit=80)
+        recent_audit = [
+            item for item in recent_audit_raw if not _admin_audit_event_is_routine(item)
+        ][:80]
+        recent_audit_raw = recent_audit_raw[:80]
+
+        recent_site_visits = db.list_site_visits(settings.database_path, limit=200)
+        recent_site_visits_product = [
+            item for item in recent_site_visits if not _admin_site_visit_row_is_technical(item)
+        ][:80]
+        recent_site_visits_technical = [
+            item for item in recent_site_visits if _admin_site_visit_row_is_technical(item)
+        ][:80]
+        recent_site_visits = recent_site_visits[:80]
+
         conversion_funnel_72h = _admin_conversion_funnel(conn, since_72h)
-        recent_funnel_events = db.list_funnel_events(settings.database_path, limit=80)
+        overview["successful_login_users_72h"] = int(conversion_funnel_72h.get("product_login_users") or 0)
+        overview["successful_login_events_72h"] = int(conversion_funnel_72h.get("product_login_events") or 0)
+
+        recent_funnel_events = db.list_funnel_events(settings.database_path, limit=200)
         for item in recent_funnel_events:
             metadata = item.get("metadata") or {}
             item["landing_path"] = _funnel_metadata_value(metadata, "landing_path", max_length=240) or item.get("path")
             item["utm_campaign"] = _funnel_metadata_value(metadata, "utm_campaign", max_length=120)
             item["utm_content"] = _funnel_metadata_value(metadata, "utm_content", max_length=120)
+        recent_funnel_events_product = [
+            item for item in recent_funnel_events if not _admin_funnel_row_is_synthetic(item)
+        ][:80]
+        recent_funnel_events_technical = [
+            item for item in recent_funnel_events if _admin_funnel_row_is_synthetic(item)
+        ][:80]
+        recent_funnel_events = recent_funnel_events[:80]
+
+        recent_users_product = [
+            item
+            for item in recent_users
+            if str(item.get("email") or "").strip().lower() != REVIEW_ACCOUNT_EMAIL
+        ]
+        recent_users_service = [
+            item
+            for item in recent_users
+            if str(item.get("email") or "").strip().lower() == REVIEW_ACCOUNT_EMAIL
+        ]
 
     return {
         "generated_at": now_iso,
         "overview": overview,
         "conversion_funnel_72h": conversion_funnel_72h,
+        "conversion_funnel_72h_public": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("public_steps", []),
+            "loss_reasons": conversion_funnel_72h.get("loss_reasons", {}),
+            "cuts": conversion_funnel_72h.get("cuts", {}),
+        },
+        "conversion_funnel_72h_service": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("service_steps", []),
+        },
+        "conversion_funnel_72h_auth": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("auth_steps", []),
+        },
+        "conversion_funnel_72h_pet": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("pet_steps", []),
+            "loss_reasons": conversion_funnel_72h.get("pet_loss_reasons", {}),
+            "cuts": conversion_funnel_72h.get("cuts", {}).get("pet", {}),
+            "returning": conversion_funnel_72h.get("cuts", {}).get("pet_returning", []),
+        },
+        "conversion_funnel_72h_food": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("food_steps", []),
+            "loss_reasons": conversion_funnel_72h.get("food_loss_reasons", {}),
+            "cuts": conversion_funnel_72h.get("cuts", {}).get("food", {}),
+            "returning": conversion_funnel_72h.get("cuts", {}).get("food_returning", []),
+            "result_levels": conversion_funnel_72h.get("food_result_levels", []),
+        },
+        "funnel_technical_72h": {
+            "events": int(conversion_funnel_72h.get("synthetic_events") or 0),
+            "sessions": int(conversion_funnel_72h.get("synthetic_sessions") or 0),
+        },
+        "funnel_loss_reasons_72h": conversion_funnel_72h.get("loss_reasons", {}),
+        "funnel_cuts_72h": conversion_funnel_72h.get("cuts", {}),
         "recent_funnel_events": recent_funnel_events,
+        "recent_funnel_events_product": recent_funnel_events_product,
+        "recent_funnel_events_technical": recent_funnel_events_technical,
         "payments_by_status": payments_by_status,
         "providers": providers,
         "recent_payments": recent_payments,
         "recent_users": recent_users,
+        "recent_users_product": recent_users_product,
+        "recent_users_service": recent_users_service,
         "recent_triage": recent_triage,
         "recent_feedback": recent_feedback,
         "audit_breakdown_24h": audit_breakdown_24h,
         "recent_audit": recent_audit,
+        "recent_audit_raw": recent_audit_raw,
         "site_sources_24h": site_sources_24h,
         "site_paths_24h": site_paths_24h,
+        "site_sources_24h_product": site_sources_24h_product,
+        "site_paths_24h_product": site_paths_24h_product,
+        "site_sources_24h_technical": site_sources_24h_technical,
+        "site_paths_24h_technical": site_paths_24h_technical,
         "recent_site_visits": recent_site_visits,
+        "recent_site_visits_product": recent_site_visits_product,
+        "recent_site_visits_technical": recent_site_visits_technical,
     }
 
 
@@ -2684,7 +3661,7 @@ def public_config() -> dict:
 @app.post("/api/funnel/event")
 def funnel_event(payload: FunnelEventRequest, request: Request) -> dict[str, Any]:
     event_type = payload.event_type.strip()
-    if event_type not in FUNNEL_EVENT_STEPS:
+    if event_type not in FUNNEL_EVENT_STEPS or event_type in SERVER_ONLY_FUNNEL_EVENTS:
         return {"ok": True, "ignored": True}
     _track_funnel(
         request,
@@ -2845,19 +3822,43 @@ def _public_check_save_complaint(
     return "\n".join(parts)
 
 
-def _public_check_preview_save_pet(user: dict[str, Any], pet_type: str) -> tuple[dict[str, Any] | None, bool]:
+def _public_check_preview_save_pet(
+    user: dict[str, Any],
+    pet_type: str,
+    *,
+    pet_id: int | None = None,
+    create_pet: bool = False,
+) -> tuple[dict[str, Any], bool]:
+    owner_id = int(user["id"])
     pets = db.list_pets(settings.database_path, owner_id=int(user["id"]))
+
+    if pet_id is not None and create_pet:
+        raise HTTPException(status_code=400, detail="invalid_check_preview_pet_selection")
+
+    if pet_id is not None:
+        selected_pet = db.get_pet(settings.database_path, owner_id=owner_id, pet_id=pet_id)
+        if not selected_pet:
+            raise HTTPException(status_code=404, detail="check_preview_pet_not_found")
+        selected_type = _public_check_pet_type(selected_pet.get("pet_type"))
+        if pet_type != "питомец" and selected_type != pet_type:
+            raise HTTPException(status_code=409, detail="check_preview_pet_type_mismatch")
+        return selected_pet, False
+
+    if create_pet:
+        pets = []
+
     if len(pets) == 1:
         existing_type = _public_check_pet_type(pets[0].get("pet_type"))
         if pet_type == "питомец" or existing_type == pet_type:
             return pets[0], False
     if pets:
-        return None, False
+        raise HTTPException(status_code=409, detail="check_preview_pet_required")
 
+    _enforce_pet_creation_limit(user)
     pet_name = {"собака": "Собака", "кошка": "Кошка"}.get(pet_type, "Питомец")
     pet = db.create_pet(
         settings.database_path,
-        owner_id=int(user["id"]),
+        owner_id=owner_id,
         pet_type=pet_type,
         pet_name=pet_name,
         is_main=True,
@@ -2895,6 +3896,7 @@ def public_check_preview(payload: PublicCheckPreviewRequest, request: Request) -
         return {
             "status": "preview",
             "preview": True,
+            "usage_consumed": False,
             "urgency": "red",
             "urgency_label": "Срочно в клинику",
             "summary": summary,
@@ -2950,6 +3952,7 @@ def public_check_preview(payload: PublicCheckPreviewRequest, request: Request) -
     return {
         "status": "preview",
         "preview": True,
+        "usage_consumed": True,
         "urgency": urgency,
         "urgency_emoji": urgency_emoji,
         "urgency_label": urgency_label,
@@ -2975,8 +3978,13 @@ def save_public_check_preview(
 
     pet_type = _public_check_pet_type(payload.pet_type)
     landing_slug = _public_check_landing_slug(payload.landing_slug)
-    pet, created_pet = _public_check_preview_save_pet(user, pet_type)
-    pet_id = int(pet["id"]) if pet else None
+    pet, created_pet = _public_check_preview_save_pet(
+        user,
+        pet_type,
+        pet_id=payload.pet_id,
+        create_pet=payload.create_pet,
+    )
+    pet_id = int(pet["id"])
     urgency = _public_check_saved_urgency(payload, answer)
     summary = _clean_text(payload.summary) or short_summary(answer) or "Пробный разбор состояния питомца"
     complaint = _public_check_save_complaint(payload, pet_type=pet_type, landing_slug=landing_slug)
@@ -3045,6 +4053,14 @@ def save_public_check_preview(
             "landing_path": payload.landing_path,
         },
     )
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=pet_id,
+        record_event=None,
+        record_kind="health_check",
+        session_id=payload.session_id,
+    )
     return {
         "status": "saved",
         "triage_id": int(log["id"]),
@@ -3052,6 +4068,7 @@ def save_public_check_preview(
         "created_pet": created_pet,
         "subscription": sub.to_public(),
         "followup": followup,
+        "service": service,
     }
 
 
@@ -3707,12 +4724,89 @@ def pets(user: dict = Depends(current_user)) -> dict:
     return {"items": items}
 
 
+def _user_entitlements(user: dict) -> tuple[Any, dict[str, Any]]:
+    subscription = get_effective_subscription(settings, user)
+    return subscription, plan_entitlements(subscription.plan)
+
+
+def _enforce_pet_creation_limit(user: dict) -> None:
+    _, limits = _user_entitlements(user)
+    current_count = len(db.list_pets(settings.database_path, owner_id=int(user["id"])))
+    if current_count >= int(limits["pets"]):
+        raise HTTPException(status_code=409, detail="pet_limit_reached")
+
+
+def _enforce_reminder_creation_limit(user: dict) -> None:
+    _, limits = _user_entitlements(user)
+    active = db.list_reminders(settings.database_path, owner_id=int(user["id"])) or []
+    if len(active) >= int(limits["active_reminders"]):
+        raise HTTPException(status_code=409, detail="reminder_limit_reached")
+
+
+def _track_service_record(
+    request: Request,
+    user: dict,
+    *,
+    pet_id: int | None,
+    record_event: str | None,
+    record_kind: str,
+    session_id: str | None = None,
+) -> dict[str, bool]:
+    if pet_id is None:
+        return {"first_record_saved": False, "activated": False}
+    metadata = {"has_pet": True, "record_kind": record_kind}
+    if record_event:
+        _track_funnel(
+            request,
+            record_event,
+            user_id=int(user["id"]),
+            session_id=session_id,
+            metadata=metadata,
+        )
+    first_record_saved = _track_funnel(
+        request,
+        "service.first_record_saved",
+        user_id=int(user["id"]),
+        session_id=session_id,
+        metadata=metadata,
+        once_per_user=True,
+    )
+    activated = _track_funnel(
+        request,
+        "service.activated",
+        user_id=int(user["id"]),
+        session_id=session_id,
+        metadata=metadata,
+        once_per_user=True,
+    )
+    return {"first_record_saved": first_record_saved, "activated": activated}
+
+
 @app.post("/api/pets")
-def create_pet(payload: PetPayload, user: dict = Depends(current_user)) -> dict:
+def create_pet(
+    payload: PetPayload,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict:
+    owner_id = int(user["id"])
+    existing = db.get_pet_by_client_request_id(
+        settings.database_path,
+        owner_id=owner_id,
+        client_request_id=payload.client_request_id,
+    )
+    if existing:
+        return {"item": _pet_public(existing), "created": False, "idempotent": True}
+    _enforce_pet_creation_limit(user)
+    normalized_pet_type = _normalize_pet_type(payload.pet_type)
+    first_pet = not db.list_pets(settings.database_path, owner_id=owner_id)
+    analytics_pet_type = {
+        "кошка": "cat",
+        "собака": "dog",
+    }.get(normalized_pet_type, "other")
     pet = db.create_pet(
         settings.database_path,
-        owner_id=int(user["id"]),
-        pet_type=_normalize_pet_type(payload.pet_type),
+        owner_id=owner_id,
+        pet_type=normalized_pet_type,
         pet_name=_clean_text(payload.pet_name, "Питомец"),
         birth_year=payload.birth_year,
         birth_month=payload.birth_month,
@@ -3722,11 +4816,21 @@ def create_pet(payload: PetPayload, user: dict = Depends(current_user)) -> dict:
         weight_kg=payload.weight_kg,
         breed=_clean_optional_text(payload.breed),
         is_main=payload.is_main,
+        client_request_id=_clean_optional_text(payload.client_request_id),
     )
     sync_result = _safe_sync_pwa_pet_to_telegram(user, pet)
     _enqueue_core_outbound_from_sync(sync_result, (("telegram_pet_id", "pets"),))
-    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=int(pet["id"])) or pet
-    return {"item": _pet_public(pet)}
+    pet = db.get_pet(settings.database_path, owner_id=owner_id, pet_id=int(pet["id"])) or pet
+    _track_funnel(
+        request,
+        "pet.created",
+        user_id=owner_id,
+        metadata={
+            "pet_type": analytics_pet_type,
+            "first_pet": first_pet,
+        },
+    )
+    return {"item": _pet_public(pet), "created": True, "idempotent": False}
 
 
 @app.get("/api/pets/{pet_id}")
@@ -3754,6 +4858,114 @@ def get_pet(pet_id: int, request: Request, user: dict = Depends(current_user)) -
         "weights": weights,
         "history": history,
     }
+
+
+def _summary_period_start(period: str) -> datetime | None:
+    if period == "all":
+        return None
+    return utc_now() - timedelta(days=int(period))
+
+
+def _summary_recent(items: list[dict[str, Any]], *, since: datetime | None) -> list[dict[str, Any]]:
+    if since is None:
+        return items
+    recent: list[dict[str, Any]] = []
+    for item in items:
+        created_at = _parse_iso_dt(str(item.get("created_at") or ""))
+        if created_at is None:
+            continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=since.tzinfo)
+        if created_at >= since:
+            recent.append(item)
+    return recent
+
+
+@app.get("/api/pets/{pet_id}/summary")
+def pet_doctor_summary(
+    pet_id: int,
+    request: Request,
+    period: Literal["30", "90", "all"] = Query(default="30"),
+    user: dict = Depends(current_user),
+) -> dict:
+    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id)
+    if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
+        raise HTTPException(status_code=404, detail="pet_not_found")
+
+    subscription, limits = _user_entitlements(user)
+    allowed_periods = [str(value) for value in limits["summary_periods"]]
+    if period not in allowed_periods:
+        raise HTTPException(status_code=403, detail="summary_period_plus_required")
+
+    since = _summary_period_start(period)
+    weights = _summary_recent(
+        db.list_measurements(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=500) or [],
+        since=since,
+    )
+    observations = _summary_recent(
+        db.list_observations(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=500) or [],
+        since=since,
+    )
+    history = _summary_recent(
+        db.list_history(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, limit=500) or [],
+        since=since,
+    )
+    reminders = db.list_reminders(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        pet_id=pet_id,
+    ) or []
+
+    latest_weight = weights[0] if weights else None
+    previous_weight = weights[1] if len(weights) > 1 else None
+    weight_change = None
+    if latest_weight and previous_weight:
+        weight_change = round(float(latest_weight["weight_kg"]) - float(previous_weight["weight_kg"]), 3)
+
+    _track_funnel(
+        request,
+        "summary.viewed",
+        user_id=int(user["id"]),
+        metadata={"has_pet": True, "summary_period": period, "plan": subscription.plan},
+    )
+    return {
+        "generated_at": utc_now().isoformat(),
+        "period": period,
+        "allowed_periods": allowed_periods,
+        "can_export": bool(limits["summary_export"]),
+        "subscription": subscription.to_public(),
+        "pet": _pet_public(pet),
+        "latest_weight": latest_weight,
+        "weight_change_kg": weight_change,
+        "weights": weights,
+        "observations": [_parse_json_payload(item) for item in observations],
+        "history": history,
+        "reminders": reminders,
+    }
+
+
+@app.post("/api/pets/{pet_id}/summary/export")
+def pet_doctor_summary_export(
+    pet_id: int,
+    request: Request,
+    period: Literal["30", "90", "all"] = Query(default="30"),
+    user: dict = Depends(current_user),
+) -> dict:
+    pet = db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id)
+    if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
+        raise HTTPException(status_code=404, detail="pet_not_found")
+    subscription, limits = _user_entitlements(user)
+    if not limits["summary_export"] or period not in limits["summary_periods"]:
+        raise HTTPException(status_code=403, detail="summary_export_plus_required")
+    _track_funnel(
+        request,
+        "summary.exported",
+        user_id=int(user["id"]),
+        metadata={"has_pet": True, "summary_period": period, "plan": subscription.plan},
+    )
+    return {"ok": True, "period": period}
 
 
 def _pet_what_now(reminders: list[dict], observations: list[dict], weights: list[dict]) -> str:
@@ -3861,7 +5073,14 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, request: Request, u
         sync_result,
         (("telegram_pet_id", "pets"), ("telegram_measurement_id", "pet_measurements")),
     )
-    return {"item": item}
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=pet_id,
+        record_event="weight.created",
+        record_kind="weight",
+    )
+    return {"item": item, "service": service}
 
 
 @app.get("/api/pets/{pet_id}/observations")
@@ -3892,7 +5111,14 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, request: Reque
         sync_result,
         (("telegram_pet_id", "pets"), ("telegram_observation_id", "pet_observations")),
     )
-    return {"item": _parse_json_payload(item)}
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=pet_id,
+        record_event="observation.created",
+        record_kind="observation",
+    )
+    return {"item": _parse_json_payload(item), "service": service}
 
 
 @app.get("/api/reminders")
@@ -3903,6 +5129,7 @@ def reminders(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/reminders")
 def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depends(current_user)) -> dict:
+    _enforce_reminder_creation_limit(user)
     item = db.create_reminder(
         settings.database_path,
         owner_id=int(user["id"]),
@@ -3923,7 +5150,14 @@ def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depend
         sync_result,
         (("telegram_pet_id", "pets"), ("telegram_reminder_id", "reminders")),
     )
-    return {"item": item}
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=int(payload.pet_id) if payload.pet_id is not None else None,
+        record_event="reminder.created",
+        record_kind="reminder",
+    )
+    return {"item": item, "service": service}
 
 
 @app.delete("/api/reminders/{reminder_id}")
@@ -3943,7 +5177,138 @@ def food_search(q: str) -> dict:
 
 @app.post("/api/food/check")
 def food_check(payload: FoodCheckPayload) -> dict:
-    return check_food(payload.query, payload.ingredients)
+    return check_food(payload.query, payload.ingredients, species=payload.species)
+
+
+def _public_food_observation_payload(
+    payload: PublicFoodSaveRequest,
+    result: dict[str, Any],
+) -> tuple[str, str]:
+    query = _clean_text(payload.query)
+    status = _clean_text(result.get("status"), "unknown")
+    item = result.get("item") if isinstance(result.get("item"), dict) else {}
+    allowed = item.get("allowed") if item else None
+    if allowed is False or result.get("requires_immediate_vet_contact"):
+        level = "avoid"
+    elif allowed is True:
+        level = "allowed"
+    else:
+        level = status
+
+    message = _clean_text(result.get("message"))
+    if not message:
+        message = "Ответ по продукту сформирован по общей справочной базе."
+    text = f"Проверка питания: {query}\n{message}"[:2000]
+    body = json.dumps(
+        {
+            "text": text,
+            "query": query,
+            "species": payload.species,
+            "status": status,
+            "result_level": level,
+            "source": "public_food_check",
+        },
+        ensure_ascii=False,
+    )
+    return body, level
+
+
+@app.post("/api/food/check/save")
+def save_public_food_check(
+    payload: PublicFoodSaveRequest,
+    request: Request,
+    user: dict = Depends(current_user),
+) -> dict[str, Any]:
+    pet_type = "собака" if payload.species == "dog" else "кошка"
+    if payload.pet_type and _public_check_pet_type(payload.pet_type) != pet_type:
+        raise HTTPException(status_code=409, detail="food_species_mismatch")
+
+    result = check_food(payload.query, payload.ingredients, species=payload.species)
+    body, level = _public_food_observation_payload(payload, result)
+    pet, created_pet = _public_check_preview_save_pet(
+        user,
+        pet_type,
+        pet_id=payload.pet_id,
+        create_pet=payload.create_pet,
+    )
+    pet_id = int(pet["id"])
+    item = db.create_observation(
+        settings.database_path,
+        owner_id=int(user["id"]),
+        pet_id=pet_id,
+        obs_type="food_check",
+        payload=body,
+        source="public_food",
+    )
+    if not item:
+        raise HTTPException(status_code=400, detail="invalid_food_check_save")
+
+    sync_result = _safe_sync_pwa_observation_to_telegram(user, item)
+    _enqueue_core_outbound_from_sync(
+        sync_result,
+        (("telegram_pet_id", "pets"), ("telegram_observation_id", "pet_observations")),
+    )
+    landing_slug = _public_check_landing_slug(payload.landing_slug)
+    if created_pet:
+        _track_funnel(
+            request,
+            "pet.created",
+            user_id=int(user["id"]),
+            session_id=payload.session_id,
+            metadata={"pet_type": payload.species, "first_pet": True, "slug": landing_slug},
+        )
+    _audit(
+        request,
+        "food.check_saved",
+        user_id=int(user["id"]),
+        status="ok",
+        actor="user",
+        entity_type="observation",
+        entity_id=str(item["id"]),
+        metadata={
+            "status": _clean_text(result.get("status"), "unknown"),
+            "level": level,
+            "slug": landing_slug,
+            "pet_type": payload.species,
+            "created_pet": created_pet,
+        },
+    )
+    _track_funnel(
+        request,
+        "food.saved_after_login",
+        user_id=int(user["id"]),
+        session_id=payload.session_id,
+        metadata={
+            "level": level,
+            "slug": landing_slug,
+            "pet_type": payload.species,
+            "has_pet": True,
+            "traffic_source": payload.traffic_source,
+            "utm_source": payload.utm_source,
+            "utm_medium": payload.utm_medium,
+            "utm_campaign": payload.utm_campaign,
+            "utm_content": payload.utm_content,
+            "utm_term": payload.utm_term,
+            "has_yclid": payload.has_yclid,
+            "landing_path": payload.landing_path,
+        },
+    )
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=pet_id,
+        record_event=None,
+        record_kind="food",
+        session_id=payload.session_id,
+    )
+    return {
+        "status": "saved",
+        "pet": _pet_public(pet),
+        "item": _parse_json_payload(item),
+        "created_pet": created_pet,
+        "result": result,
+        "service": service,
+    }
 
 
 @app.get("/api/faq")
@@ -4238,6 +5603,13 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
             user_id=int(user["id"]),
             metadata={"urgency": "red", "matched_count": len(red_flags.matched), "subscription_source": sub.source},
         )
+        service = _track_service_record(
+            request,
+            user,
+            pet_id=pet_id if log else None,
+            record_event=None,
+            record_kind="health_check",
+        )
         return {
             "status": "red",
             "urgency": "red",
@@ -4247,6 +5619,7 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
             "subscription": sub.to_public(),
             "followup": followup,
             "telegram_sync": telegram_sync,
+            "service": service,
         }
 
     ok, sub = try_consume_quota(settings, user, amount=1)
@@ -4367,6 +5740,13 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
         user_id=int(user["id"]),
         metadata={"urgency": urgency, "plan": sub.plan, "subscription_source": sub.source},
     )
+    service = _track_service_record(
+        request,
+        user,
+        pet_id=pet_id if log else None,
+        record_event=None,
+        record_kind="health_check",
+    )
     return {
         "status": "saved",
         "urgency": urgency,
@@ -4379,6 +5759,7 @@ def triage(payload: TriageRequest, request: Request, user: dict = Depends(curren
         "subscription": sub.to_public(),
         "followup": followup,
         "telegram_sync": telegram_sync,
+        "service": service,
     }
 
 
@@ -4419,7 +5800,7 @@ LEGAL_PAGES: dict[str, dict[str, Any]] = {
                 (
                     "создание и защита личного кабинета;",
                     "ведение карточек питомцев, истории, наблюдений, веса и напоминаний;",
-                    "оценка срочности ситуации и подготовка понятных следующих шагов;",
+                    "проверка опасных признаков, разбор введённых изменений и подготовка понятной информации владельцу;",
                     "синхронизация одного аккаунта между сайтом, PWA, Telegram и MAX;",
                     "учёт подписки, лимитов, платежей, обращений в поддержку и технических ошибок.",
                 ),
@@ -4560,7 +5941,7 @@ LEGAL_PAGES: dict[str, dict[str, Any]] = {
             (
                 "Что важно понимать",
                 (
-                    "Сервис помогает быстрее сориентироваться по срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.",
+                    "Сервис помогает вести историю питомца, разбирать сохранённые изменения и готовить понятную информацию к визиту. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.",
                 ),
                 (),
             ),
@@ -4718,6 +6099,53 @@ def legal_cookies() -> HTMLResponse:
 @app.head("/contacts", include_in_schema=False)
 def legal_contacts() -> HTMLResponse:
     return _legal_page_response("contacts")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt() -> PlainTextResponse:
+    base_url = settings.app_base_url.rstrip("/")
+    return PlainTextResponse(
+        "\n".join(
+            (
+                "User-agent: *",
+                "Allow: /",
+                "Disallow: /admin",
+                "Disallow: /app",
+                "Disallow: /check/",
+                f"Sitemap: {base_url}/sitemap.xml",
+                "",
+            )
+        )
+    )
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml() -> Response:
+    base_url = settings.app_base_url.rstrip("/")
+    public_paths = (
+        "/",
+        "/pet",
+        "/pet-history",
+        "/pet-reminders",
+        "/pet-food",
+        "/doctor-summary",
+        "/privacy",
+        "/terms",
+        "/offer",
+        "/medical-disclaimer",
+        "/contacts",
+    )
+    urls = "".join(f"<url><loc>{html.escape(base_url + path)}</loc></url>" for path in public_paths)
+    payload = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'
+    return Response(content=payload, media_type="application/xml")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker_script() -> FileResponse:
+    response = FileResponse(WEB_ROOT / "sw.js", media_type="application/javascript")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response
 
 
 @app.get("/{path:path}")

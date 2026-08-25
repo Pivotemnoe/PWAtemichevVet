@@ -44,6 +44,7 @@ os.environ.update(
 )
 
 from fastapi import HTTPException, Response  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from app import db  # noqa: E402
 from app.config import get_settings  # noqa: E402
@@ -146,6 +147,9 @@ class ApiTests(unittest.TestCase):
             conn.execute("DELETE FROM security_audit_events WHERE event_type = ?", ("push.broadcast_send",))
             conn.commit()
 
+    def _activate_plus(self, user: dict) -> None:
+        api.activate_paid_subscription(api.settings, user_id=int(user["id"]), plan_code="plus", days=30)
+
     def _add_broadcast_push_subscription(self, user: dict, suffix: str, *, revoked: bool = False) -> dict:
         item = db.upsert_push_subscription(
             api.settings.database_path,
@@ -163,6 +167,31 @@ class ApiTests(unittest.TestCase):
             )
         return item
 
+    def _public_check_save_payload(self, **overrides) -> api.PublicCheckPreviewSaveRequest:
+        values = {
+            "pet_type": "cat",
+            "age": "5 лет",
+            "text": "кошка второй день плохо ест и стала менее активной",
+            "answer": (
+                "1) Кратко: по описанию нужно внимательно наблюдать за состоянием.\n"
+                "2) Уровень срочности: 🟡 Нужна консультация — симптом сохраняется.\n"
+                "3) Что делать сейчас — запишите воду, аппетит и активность.\n"
+                "4) Чего делать нельзя — не давайте лекарства без назначения.\n"
+                "5) Тревожные признаки — ухудшение, кровь, тяжёлое дыхание.\n"
+                "6) Этот ответ не заменяет очный осмотр ветеринарного врача."
+            ),
+            "urgency": "yellow",
+            "summary": "Питомец стал хуже есть",
+            "model": "gpt-5.1-mini",
+            "prompt_tokens": 50,
+            "completion_tokens": 80,
+            "total_tokens": 130,
+            "landing_slug": "cat-not-eating",
+            "session_id": "preview-save-matrix",
+        }
+        values.update(overrides)
+        return api.PublicCheckPreviewSaveRequest(**values)
+
     def test_health_and_email_login(self) -> None:
         response = api.health()
         self.assertEqual(response["ok"], True)
@@ -174,6 +203,316 @@ class ApiTests(unittest.TestCase):
         audit_items = db.list_security_audit_events(api.settings.database_path, event_type="auth.login_success")
         self.assertGreaterEqual(len(audit_items), 1)
         self.assertEqual(audit_items[0]["provider"], "email")
+
+    def test_service_first_pet_creation_is_idempotent_and_respects_plan_limits(self) -> None:
+        free_user, _ = login("service-pet-free@example.ru")
+        payload = api.PetPayload(
+            pet_type="собака",
+            pet_name="Лада",
+            client_request_id="service-pet-request-1",
+        )
+        first = api.create_pet(payload, request("/api/pets"), user=free_user)
+        repeated = api.create_pet(payload, request("/api/pets"), user=free_user)
+        self.assertTrue(first["created"])
+        self.assertFalse(repeated["created"])
+        self.assertTrue(repeated["idempotent"])
+        self.assertEqual(first["item"]["id"], repeated["item"]["id"])
+        self.assertEqual(len(api.pets(user=free_user)["items"]), 1)
+        with self.assertRaises(HTTPException) as free_limit:
+            api.create_pet(
+                api.PetPayload(pet_type="кошка", pet_name="Мира", client_request_id="service-pet-request-2"),
+                request("/api/pets"),
+                user=free_user,
+            )
+        self.assertEqual(free_limit.exception.detail, "pet_limit_reached")
+
+        plus_user, _ = login("service-pet-plus@example.ru")
+        self._activate_plus(plus_user)
+        for index in range(3):
+            api.create_pet(
+                api.PetPayload(
+                    pet_type="кошка",
+                    pet_name=f"Питомец {index + 1}",
+                    client_request_id=f"service-plus-pet-{index + 1}",
+                ),
+                request("/api/pets"),
+                user=plus_user,
+            )
+        with self.assertRaises(HTTPException) as plus_limit:
+            api.create_pet(
+                api.PetPayload(pet_type="собака", pet_name="Четвёртый"),
+                request("/api/pets"),
+                user=plus_user,
+            )
+        self.assertEqual(plus_limit.exception.detail, "pet_limit_reached")
+
+    def test_first_permanent_record_activates_service_only_once(self) -> None:
+        user, _ = login("service-activation@example.ru")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Луна", client_request_id="activation-pet"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        first_record = api.add_pet_weight(
+            int(pet["id"]),
+            api.MeasurementPayload(weight_kg=4.2, note="Первая запись"),
+            request(f"/api/pets/{pet['id']}/weights"),
+            user=user,
+        )
+        self.assertTrue(first_record["service"]["first_record_saved"])
+        self.assertTrue(first_record["service"]["activated"])
+        second_record = api.add_pet_observation(
+            int(pet["id"]),
+            api.ObservationPayload(obs_type="note", text="Аппетит обычный"),
+            request(f"/api/pets/{pet['id']}/observations"),
+            user=user,
+        )
+        self.assertFalse(second_record["service"]["first_record_saved"])
+        self.assertFalse(second_record["service"]["activated"])
+        with db.connect(api.settings.database_path) as conn:
+            event_counts = dict(
+                conn.execute(
+                    "SELECT event_type, COUNT(*) FROM funnel_events WHERE user_id = ? AND event_type LIKE 'service.%' GROUP BY event_type",
+                    (int(user["id"]),),
+                ).fetchall()
+            )
+        self.assertEqual(event_counts.get("service.first_record_saved"), 1)
+        self.assertEqual(event_counts.get("service.activated"), 1)
+
+    def test_doctor_summary_owner_periods_and_export_follow_free_plus_rules(self) -> None:
+        user, _ = login("service-summary-owner@example.ru")
+        other_user, _ = login("service-summary-other@example.ru")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="собака", pet_name="Бим", client_request_id="summary-pet"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        api.add_pet_weight(
+            int(pet["id"]),
+            api.MeasurementPayload(weight_kg=12.4, note="Контрольный вес"),
+            request(f"/api/pets/{pet['id']}/weights"),
+            user=user,
+        )
+        free_summary = api.pet_doctor_summary(
+            int(pet["id"]), request(f"/api/pets/{pet['id']}/summary", "GET"), period="30", user=user
+        )
+        self.assertEqual(free_summary["allowed_periods"], ["30"])
+        self.assertFalse(free_summary["can_export"])
+        self.assertEqual(len(free_summary["weights"]), 1)
+        with self.assertRaises(HTTPException) as free_period:
+            api.pet_doctor_summary(
+                int(pet["id"]), request(f"/api/pets/{pet['id']}/summary", "GET"), period="90", user=user
+            )
+        self.assertEqual(free_period.exception.detail, "summary_period_plus_required")
+        with self.assertRaises(HTTPException) as free_export:
+            api.pet_doctor_summary_export(
+                int(pet["id"]), request(f"/api/pets/{pet['id']}/summary/export"), period="30", user=user
+            )
+        self.assertEqual(free_export.exception.detail, "summary_export_plus_required")
+        with self.assertRaises(HTTPException) as foreign_summary:
+            api.pet_doctor_summary(
+                int(pet["id"]), request(f"/api/pets/{pet['id']}/summary", "GET"), period="30", user=other_user
+            )
+        self.assertEqual(foreign_summary.exception.status_code, 404)
+
+        self._activate_plus(user)
+        plus_summary = api.pet_doctor_summary(
+            int(pet["id"]), request(f"/api/pets/{pet['id']}/summary", "GET"), period="90", user=user
+        )
+        self.assertEqual(plus_summary["allowed_periods"], ["30", "90", "all"])
+        self.assertTrue(plus_summary["can_export"])
+        exported = api.pet_doctor_summary_export(
+            int(pet["id"]), request(f"/api/pets/{pet['id']}/summary/export"), period="all", user=user
+        )
+        self.assertTrue(exported["ok"])
+
+    def test_free_reminder_limit_keeps_existing_records_readable(self) -> None:
+        user, _ = login("service-reminder-limit@example.ru")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Соня", client_request_id="reminder-pet"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        for index in range(3):
+            api.add_reminder(
+                api.ReminderPayload(
+                    pet_id=int(pet["id"]),
+                    title=f"Важная дата {index + 1}",
+                    due_date=f"2026-09-{index + 1:02d}",
+                ),
+                request("/api/reminders"),
+                user=user,
+            )
+        with self.assertRaises(HTTPException) as reminder_limit:
+            api.add_reminder(
+                api.ReminderPayload(pet_id=int(pet["id"]), title="Лишняя дата", due_date="2026-09-10"),
+                request("/api/reminders"),
+                user=user,
+            )
+        self.assertEqual(reminder_limit.exception.detail, "reminder_limit_reached")
+        self.assertEqual(len(api.reminders(user=user)["items"]), 3)
+
+    def test_food_check_uses_existing_local_database_without_llm(self) -> None:
+        original_llm = api.call_triage_llm
+
+        def unexpected_llm(*args, **kwargs):
+            raise AssertionError("food check must not call the LLM")
+
+        api.call_triage_llm = unexpected_llm
+        try:
+            for species in ("dog", "cat"):
+                with self.subTest(species=species):
+                    allowed = api.food_check(api.FoodCheckPayload(species=species, query="Морковь"))
+                    self.assertEqual(allowed["status"], "found")
+                    self.assertEqual(allowed["species"], species)
+                    self.assertFalse(allowed["species_specific"])
+                    self.assertEqual(allowed["database_scope"], "general_cats_and_dogs")
+                    self.assertIn("общей справочной базе", allowed["disclaimer"])
+                    self.assertIn("не является анализом корма", allowed["disclaimer"])
+                    self.assertTrue(allowed["item"]["allowed"])
+                    self.assertEqual(allowed["item"]["name"], "Морковь")
+
+                    avoided = api.food_check(api.FoodCheckPayload(species=species, query="Виноград"))
+                    self.assertEqual(avoided["status"], "found")
+                    self.assertEqual(avoided["species"], species)
+                    self.assertFalse(avoided["item"]["allowed"])
+                    self.assertTrue(avoided["requires_immediate_vet_contact"])
+                    self.assertIn("немедленно свяжитесь", avoided["exposure_advice"])
+                    self.assertIn("даже если симптомов пока нет", avoided["exposure_advice"])
+                    self.assertIn("ветеринарной клиникой", avoided["message"])
+                    self.assertNotIn("1–2", json.dumps(avoided, ensure_ascii=False))
+                    self.assertNotIn("1-2", json.dumps(avoided, ensure_ascii=False))
+
+            dish = api.food_check(api.FoodCheckPayload(species="dog", query="Харчо", ingredients="мясо, лук"))
+            self.assertEqual(dish["status"], "ingredients_checked")
+            self.assertEqual(dish["species"], "dog")
+            self.assertTrue(dish["requires_immediate_vet_contact"])
+            self.assertIn("немедленно свяжитесь", dish["message"])
+            self.assertIn("Лук", dish["message"])
+
+            missing = api.food_check(api.FoodCheckPayload(species="cat", query="абракадабраxyz"))
+            self.assertEqual(missing["status"], "not_found")
+            self.assertEqual(missing["species"], "cat")
+
+            with self.assertRaises(ValidationError):
+                api.FoodCheckPayload(species="rabbit", query="Морковь")
+            with self.assertRaises(ValueError) as invalid_species_exc:
+                api.check_food("Морковь", species="rabbit")
+            self.assertEqual(str(invalid_species_exc.exception), "invalid_food_species")
+        finally:
+            api.call_triage_llm = original_llm
+
+    def test_food_check_requires_and_echoes_dog_or_cat_context(self) -> None:
+        for species in ("dog", "cat"):
+            with self.subTest(species=species):
+                result = api.food_check(api.FoodCheckPayload(species=species, query="Морковь"))
+                self.assertEqual(result["species"], species)
+                self.assertFalse(result["species_specific"])
+                self.assertEqual(result["database_scope"], "general_cats_and_dogs")
+                self.assertIn("общей справочной базе", result["disclaimer"])
+                self.assertIn("не является анализом корма", result["disclaimer"])
+
+    def test_food_check_rejects_invalid_species(self) -> None:
+        with self.assertRaises(ValidationError):
+            api.FoodCheckPayload(species="rabbit", query="Морковь")
+        with self.assertRaises(ValueError) as invalid_species_exc:
+            api.check_food("Морковь", species="rabbit")
+        self.assertEqual(str(invalid_species_exc.exception), "invalid_food_species")
+
+    def test_food_check_grape_exposure_requires_immediate_contact_without_dose_claim(self) -> None:
+        for species in ("dog", "cat"):
+            with self.subTest(species=species):
+                result = api.food_check(api.FoodCheckPayload(species=species, query="Виноград"))
+                serialized = json.dumps(result, ensure_ascii=False)
+                self.assertEqual(result["species"], species)
+                self.assertFalse(result["item"]["allowed"])
+                self.assertEqual(result["item"]["how_much_is_dangerous"], "")
+                self.assertTrue(result["requires_immediate_vet_contact"])
+                self.assertIn("немедленно свяжитесь", result["exposure_advice"])
+                self.assertIn("даже если симптомов пока нет", result["exposure_advice"])
+                self.assertNotIn("1–2", serialized)
+                self.assertNotIn("1-2", serialized)
+
+    def test_public_food_answer_saves_to_pet_after_login_without_quota_spend(self) -> None:
+        user, _ = login("food-save-after-login@example.ru")
+        sub_before = api.get_effective_subscription(api.settings, user)
+        query = "Морковь food-save-private-query"
+
+        result = api.save_public_food_check(
+            api.PublicFoodSaveRequest(
+                species="dog",
+                pet_type="dog",
+                query=query,
+                landing_slug="dog",
+                session_id="food-save-after-login-session",
+                traffic_source="yandex_direct",
+                utm_campaign="food-dog-test",
+                create_pet=True,
+            ),
+            request("/api/food/check/save", client_host="10.10.0.31"),
+            user,
+        )
+
+        self.assertEqual(result["status"], "saved")
+        self.assertTrue(result["created_pet"])
+        self.assertEqual(result["pet"]["pet_type"], "собака")
+        self.assertEqual(result["item"]["obs_type"], "food_check")
+        self.assertEqual(result["item"]["source"], "public_food")
+        self.assertIn(query, result["item"]["payload"]["text"])
+        self.assertEqual(result["item"]["payload"]["species"], "dog")
+
+        observations = api.pet_observations(
+            int(result["pet"]["id"]),
+            request(f"/api/pets/{result['pet']['id']}/observations", method="GET"),
+            user=user,
+        )["items"]
+        self.assertTrue(any(int(item["id"]) == int(result["item"]["id"]) for item in observations))
+        sub_after = api.get_effective_subscription(api.settings, user)
+        self.assertEqual(sub_after.quota_used, sub_before.quota_used)
+
+        audit_items = db.list_security_audit_events(
+            api.settings.database_path,
+            event_type="food.check_saved",
+            user_id=int(user["id"]),
+        )
+        self.assertGreaterEqual(len(audit_items), 1)
+        audit_metadata = json.dumps(audit_items[0].get("metadata") or {}, ensure_ascii=False)
+        self.assertIn('"slug": "dog"', audit_metadata)
+        self.assertNotIn(query, audit_metadata)
+
+        funnel_items = db.list_funnel_events(api.settings.database_path, limit=30)
+        self.assertTrue(
+            any(
+                item["event_type"] == "food.saved_after_login"
+                and item["step"] == "food_saved"
+                and int(item.get("user_id") or 0) == int(user["id"])
+                for item in funnel_items
+            )
+        )
+
+    def test_public_food_answer_rejects_mismatched_pet_selection(self) -> None:
+        user, _ = login("food-save-pet-mismatch@example.ru")
+        cat = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Муся"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+
+        with self.assertRaises(HTTPException) as mismatch_exc:
+            api.save_public_food_check(
+                api.PublicFoodSaveRequest(
+                    species="dog",
+                    pet_type="dog",
+                    query="Морковь",
+                    landing_slug="dog",
+                    session_id="food-save-mismatch-session",
+                    pet_id=int(cat["id"]),
+                ),
+                request("/api/food/check/save"),
+                user,
+            )
+        self.assertEqual(mismatch_exc.exception.status_code, 409)
+        self.assertEqual(mismatch_exc.exception.detail, "check_preview_pet_type_mismatch")
 
     def test_logout_revokes_session_and_deletes_cookie(self) -> None:
         user, token = login("logout-owner@example.ru")
@@ -270,6 +609,86 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(any(item.get("source") == "yandex.ru" for item in dashboard["site_sources_24h"]))
         self.assertFalse(any("raw_ip" in item for item in recent_visits))
 
+    def test_admin_dashboard_reports_token_usage_without_double_counting_saved_preview(self) -> None:
+        before = api._admin_dashboard_payload()["overview"]
+        user, _ = login("admin-token-usage@example.ru")
+
+        cabinet_log = db.create_triage_log(
+            api.settings.database_path,
+            owner_id=int(user["id"]),
+            pet_id=None,
+            complaint_text="Проверка расхода токенов в кабинете",
+            response_text="Тестовый ответ",
+            urgency_level="green",
+            prompt_tokens=80,
+            completion_tokens=120,
+            total_tokens=200,
+            model="test-model",
+            subscription_source="pwa",
+        )
+        preview_log = db.create_triage_log(
+            api.settings.database_path,
+            owner_id=int(user["id"]),
+            pet_id=None,
+            complaint_text="Сохранённая публичная проверка",
+            response_text="Тестовый ответ публичной проверки",
+            urgency_level="yellow",
+            prompt_tokens=100,
+            completion_tokens=200,
+            total_tokens=300,
+            model="test-model",
+            subscription_source="public_preview",
+        )
+        preview_hashes = ["admin-token-session", "admin-token-client"]
+        claimed = db.claim_public_check_preview_usage(
+            api.settings.database_path,
+            identities=[("session", preview_hashes[0]), ("client", preview_hashes[1])],
+            landing_slug="general",
+        )
+        self.assertIsNone(claimed)
+        db.complete_public_check_preview_usage(
+            api.settings.database_path,
+            identity_hashes=preview_hashes,
+            urgency_level="yellow",
+            model="test-model",
+            total_tokens=300,
+        )
+
+        dashboard = api._admin_dashboard_payload()
+        overview = dashboard["overview"]
+        self.assertEqual(overview["tokens_30d_cabinet"] - before["tokens_30d_cabinet"], 200)
+        self.assertEqual(overview["tokens_30d_public"] - before["tokens_30d_public"], 300)
+        self.assertEqual(overview["tokens_30d"] - before["tokens_30d"], 500)
+        recent_by_id = {item["id"]: item for item in dashboard["recent_triage"]}
+        self.assertEqual(recent_by_id[int(cabinet_log["id"])]["total_tokens"], 200)
+        self.assertEqual(recent_by_id[int(preview_log["id"])]["total_tokens"], 300)
+
+    def test_site_visit_logger_ignores_service_worker_preloads(self) -> None:
+        response = Response(status_code=200)
+        preload = request(
+            "/",
+            method="GET",
+            headers={
+                "accept": "*/*",
+                "sec-fetch-mode": "no-cors",
+                "sec-fetch-dest": "empty",
+                "user-agent": "Mozilla/5.0 Chrome/140.0",
+            },
+        )
+        navigation = request(
+            "/",
+            method="GET",
+            headers={
+                "accept": "text/html",
+                "sec-fetch-mode": "navigate",
+                "sec-fetch-dest": "document",
+                "user-agent": "Mozilla/5.0 Chrome/140.0",
+            },
+        )
+
+        self.assertFalse(api._should_log_site_visit(preload, response))
+        self.assertTrue(api._should_log_site_visit(navigation, response))
+
     def test_funnel_events_are_sanitized_and_visible_in_admin(self) -> None:
         api.funnel_event(
             api.FunnelEventRequest(
@@ -278,6 +697,7 @@ class ApiTests(unittest.TestCase):
                 metadata={
                     "target": "hero",
                     "complaint_text": "secret symptom",
+                    "internal_secret": "must not be stored",
                     "traffic_source": "yandex_direct<script>",
                     "landing_path": "/check/cat-not-eating?unsafe=1",
                     "utm_campaign": "search-cats",
@@ -286,6 +706,23 @@ class ApiTests(unittest.TestCase):
             ),
             request("/api/funnel/event"),
         )
+        campaign_events = {
+            "pet.landing_view": "pet_landing",
+            "pet.card_start_click": "pet_card_start",
+            "food.landing_view": "food_landing",
+            "food.submit": "food_submit",
+            "food.result_shown": "food_result",
+            "food.card_start_click": "food_card_start",
+        }
+        for event_type in campaign_events:
+            api.funnel_event(
+                api.FunnelEventRequest(
+                    event_type=event_type,
+                    session_id="campaign-session-1",
+                    metadata={"slug": "food-dog", "pet_type": "dog", "landing_path": "/food/dog"},
+                ),
+                request("/api/funnel/event"),
+            )
         user, _ = login("funnel-owner@example.ru")
         api._track_funnel(
             request(
@@ -306,6 +743,8 @@ class ApiTests(unittest.TestCase):
         items = db.list_funnel_events(api.settings.database_path, limit=20)
         self.assertTrue(any(item["step"] == "primary_cta" for item in items))
         self.assertTrue(any(item["step"] == "triage_success" for item in items))
+        for expected_step in campaign_events.values():
+            self.assertTrue(any(item["step"] == expected_step for item in items))
         triage_item = next(item for item in items if item["step"] == "triage_success")
         self.assertEqual(triage_item["source"], "yandex_direct")
         self.assertEqual(triage_item["path"], "/check/dog-vomiting")
@@ -319,6 +758,7 @@ class ApiTests(unittest.TestCase):
             metadata = item.get("metadata") or {}
             self.assertNotIn("complaint_text", metadata)
             self.assertNotIn("text", metadata)
+            self.assertNotIn("internal_secret", metadata)
 
         dashboard = api._admin_dashboard_payload()
         self.assertIn("conversion_funnel_72h", dashboard)
@@ -329,6 +769,723 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(recent_primary["landing_path"], "/check/cat-not-eatingunsafe1")
         self.assertEqual(recent_primary["utm_campaign"], "search-cats")
         self.assertEqual(recent_primary["utm_content"], "ad-01")
+
+    def test_funnel_request_attribution_decodes_cyrillic_headers(self) -> None:
+        term = "кот часто ходит в лоток"
+        attribution = api._funnel_request_attribution(
+            request(
+                "/api/check/preview",
+                headers={
+                    "x-tvv-traffic-source": "yandex",
+                    "x-tvv-utm-source": "yandex",
+                    "x-tvv-utm-medium": "cpc",
+                    "x-tvv-utm-campaign": "711014575",
+                    "x-tvv-utm-term": urllib.parse.quote(term, safe=""),
+                    "x-tvv-landing-path": urllib.parse.quote("/check", safe=""),
+                    "x-tvv-has-yclid": "1",
+                    "x-tvv-current-flow-id": "flow-current-check",
+                    "x-tvv-first-traffic-source": "direct",
+                    "x-tvv-first-utm-campaign": "first-campaign",
+                    "x-tvv-first-landing-path": urllib.parse.quote("/", safe=""),
+                    "x-tvv-first-has-yclid": "0",
+                },
+            )
+        )
+
+        self.assertEqual(attribution["utm_term"], term)
+        self.assertEqual(attribution["landing_path"], "/check")
+        self.assertEqual(attribution["utm_campaign"], "711014575")
+        self.assertTrue(attribution["has_yclid"])
+        self.assertEqual(attribution["current_flow_id"], "flow-current-check")
+        self.assertEqual(attribution["current_landing_path"], "/check")
+        self.assertEqual(attribution["current_utm_campaign"], "711014575")
+        self.assertEqual(attribution["first_traffic_source"], "direct")
+        self.assertEqual(attribution["first_utm_campaign"], "first-campaign")
+        self.assertEqual(attribution["first_landing_path"], "/")
+        self.assertFalse(attribution["first_has_yclid"])
+
+    def test_admin_tracks_pet_and_food_campaigns_without_cross_contamination(self) -> None:
+        pet_session = "pet-campaign-complete-session"
+        food_session = "food-campaign-complete-session"
+        food_loss_session = "food-campaign-no-submit-session"
+        session_ids = [pet_session, food_session, food_loss_session]
+        before = api._admin_dashboard_payload()
+        before_pet = {
+            item["step"]: item["unique_count"]
+            for item in before["conversion_funnel_72h_pet"]["steps"]
+        }
+        before_food = {
+            item["step"]: item["unique_count"]
+            for item in before["conversion_funnel_72h_food"]["steps"]
+        }
+        before_food_loss = before["conversion_funnel_72h_food"]["loss_reasons"]["not_submitted"]
+
+        def send(event_type: str, session_id: str, landing_path: str, **metadata) -> None:
+            api.funnel_event(
+                api.FunnelEventRequest(
+                    event_type=event_type,
+                    session_id=session_id,
+                    metadata={"landing_path": landing_path, **metadata},
+                ),
+                request(
+                    "/api/funnel/event",
+                    headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
+                ),
+            )
+
+        try:
+            send("pet.landing_view", pet_session, "/pet", slug="pet", utm_campaign="passport-test")
+            send("pet.card_start_click", pet_session, "/pet", slug="pet", utm_campaign="passport-test")
+            send("auth.dialog_open", pet_session, "/pet", utm_campaign="passport-test")
+            pet_user, _ = login("passport-funnel-owner@example.ru")
+            api._track_funnel(
+                request(
+                    "/api/auth/email/verify",
+                    headers={
+                        "x-tvv-funnel-session": pet_session,
+                        "x-tvv-landing-path": "/pet",
+                        "x-tvv-utm-campaign": "passport-test",
+                    },
+                ),
+                "auth.login_success",
+                user_id=int(pet_user["id"]),
+            )
+            api.create_pet(
+                api.PetPayload(pet_type="кошка", pet_name="Секретная кличка"),
+                user=pet_user,
+                request=request(
+                    "/api/pets",
+                    headers={
+                        "x-tvv-funnel-session": pet_session,
+                        "x-tvv-landing-path": "/pet",
+                        "x-tvv-utm-campaign": "passport-test",
+                    },
+                ),
+            )
+
+            send("food.landing_view", food_session, "/food/dog", slug="food-dog", pet_type="dog", utm_campaign="food-test")
+            send("food.submit", food_session, "/food/dog", slug="food-dog", pet_type="dog", utm_campaign="food-test")
+            send(
+                "food.result_shown",
+                food_session,
+                "/food/dog",
+                slug="food-dog",
+                pet_type="dog",
+                level="avoid",
+                utm_campaign="food-test",
+            )
+            send("food.card_start_click", food_session, "/food/dog", slug="food-dog", pet_type="dog", utm_campaign="food-test")
+            send("auth.dialog_open", food_session, "/food/dog", utm_campaign="food-test")
+            food_user, _ = login("food-funnel-owner@example.ru")
+            api._track_funnel(
+                request(
+                    "/api/auth/email/verify",
+                    headers={
+                        "x-tvv-funnel-session": food_session,
+                        "x-tvv-landing-path": "/food/dog",
+                        "x-tvv-utm-campaign": "food-test",
+                    },
+                ),
+                "auth.login_success",
+                user_id=int(food_user["id"]),
+            )
+            api.create_pet(
+                api.PetPayload(pet_type="собака", pet_name="Другая секретная кличка"),
+                user=food_user,
+                request=request(
+                    "/api/pets",
+                    headers={
+                        "x-tvv-funnel-session": food_session,
+                        "x-tvv-landing-path": "/food/dog",
+                        "x-tvv-utm-campaign": "food-test",
+                    },
+                ),
+            )
+            send("food.landing_view", food_loss_session, "/food/cat", slug="food-cat", pet_type="cat", utm_campaign="food-test")
+
+            spoofed = api.funnel_event(
+                api.FunnelEventRequest(
+                    event_type="pet.created",
+                    session_id="spoofed-pet-created",
+                    metadata={"pet_name": "Не сохранять", "first_pet": True},
+                ),
+                request("/api/funnel/event"),
+            )
+            self.assertTrue(spoofed.get("ignored"))
+
+            after = api._admin_dashboard_payload()
+            after_pet = {
+                item["step"]: item["unique_count"]
+                for item in after["conversion_funnel_72h_pet"]["steps"]
+            }
+            after_food = {
+                item["step"]: item["unique_count"]
+                for item in after["conversion_funnel_72h_food"]["steps"]
+            }
+            for step in ("pet_landing", "pet_card_start", "auth_open", "login_success", "pet_created"):
+                self.assertEqual(after_pet[step], before_pet[step] + 1)
+            for step in ("food_landing", "food_submit", "food_result", "food_card_start", "auth_open", "login_success", "pet_created"):
+                expected_delta = 2 if step == "food_landing" else 1
+                self.assertEqual(after_food[step], before_food[step] + expected_delta)
+            self.assertEqual(
+                after["conversion_funnel_72h_food"]["loss_reasons"]["not_submitted"],
+                before_food_loss + 1,
+            )
+
+            pet_landings = {row["name"] for row in after["conversion_funnel_72h_pet"]["cuts"]["landing"]}
+            food_landings = {row["name"] for row in after["conversion_funnel_72h_food"]["cuts"]["landing"]}
+            self.assertIn("pet", pet_landings)
+            self.assertNotIn("food-dog", pet_landings)
+            self.assertIn("food-dog", food_landings)
+            self.assertIn("food-cat", food_landings)
+            self.assertNotIn("pet", food_landings)
+            self.assertTrue(
+                any(
+                    row["name"] == "avoid" and row["sessions"] >= 1
+                    for row in after["conversion_funnel_72h_food"]["result_levels"]
+                )
+            )
+
+            with db.connect(api.settings.database_path) as conn:
+                pet_created_rows = conn.execute(
+                    "SELECT metadata FROM funnel_events WHERE event_type = 'pet.created' AND session_hash IN (?, ?)",
+                    tuple(
+                        api.hash_value(value, api.settings.session_secret)[:24]
+                        for value in (pet_session, food_session)
+                    ),
+                ).fetchall()
+            self.assertEqual(len(pet_created_rows), 2)
+            for row in pet_created_rows:
+                metadata = json.loads(row["metadata"] or "{}")
+                self.assertIn(metadata.get("pet_type"), {"cat", "dog"})
+                self.assertIs(metadata.get("first_pet"), True)
+                self.assertNotIn("pet_name", metadata)
+                self.assertNotIn("Секрет", json.dumps(metadata, ensure_ascii=False))
+        finally:
+            with db.connect(api.settings.database_path) as conn:
+                for raw_session in session_ids:
+                    session_hash = api.hash_value(raw_session, api.settings.session_secret)[:24]
+                    conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (session_hash,))
+                conn.commit()
+
+    def test_backend_funnel_uses_browser_session_header(self) -> None:
+        user, _ = login("funnel-session-owner@example.ru")
+        raw_session = "browser-funnel-session-1"
+        expected_hash = api.hash_value(raw_session, api.settings.session_secret)[:24]
+        api._track_funnel(
+            request(
+                "/api/auth/email/verify",
+                headers={
+                    "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+                    "x-tvv-funnel-session": raw_session,
+                    "x-tvv-traffic-source": "yandex_direct",
+                    "x-tvv-landing-path": "/check/cat-not-eating",
+                },
+            ),
+            "auth.login_success",
+            user_id=int(user["id"]),
+            metadata={"provider": "email"},
+        )
+
+        try:
+            with db.connect(api.settings.database_path) as conn:
+                row = conn.execute(
+                    "SELECT session_hash, source, path FROM funnel_events WHERE session_hash = ? ORDER BY id DESC LIMIT 1",
+                    (expected_hash,),
+                ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["session_hash"], expected_hash)
+            self.assertEqual(row["source"], "yandex_direct")
+            self.assertEqual(row["path"], "/check/cat-not-eating")
+        finally:
+            with db.connect(api.settings.database_path) as conn:
+                conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (expected_hash,))
+                conn.commit()
+
+    def test_current_flow_keeps_check_and_food_first_touches_out_of_pet_conversion(self) -> None:
+        user, _ = login("current-flow-owner@example.ru")
+        self._activate_plus(user)
+        flows = (
+            ("flow-check-to-pet", "/check", "check-first", "Кошка из pet-flow"),
+            ("flow-food-to-pet", "/food/dog", "food-first", "Собака из pet-flow"),
+        )
+        before = api._admin_dashboard_payload()
+        before_pet_created = next(
+            item["unique_count"]
+            for item in before["conversion_funnel_72h_pet"]["steps"]
+            if item["step"] == "pet_created"
+        )
+        before_food_created = next(
+            item["unique_count"]
+            for item in before["conversion_funnel_72h_food"]["steps"]
+            if item["step"] == "pet_created"
+        )
+
+        try:
+            for index, (flow_id, first_path, first_campaign, pet_name) in enumerate(flows):
+                api.create_pet(
+                    api.PetPayload(
+                        pet_type="кошка" if index == 0 else "собака",
+                        pet_name=pet_name,
+                    ),
+                    user=user,
+                    request=request(
+                        "/api/pets",
+                        headers={
+                            "x-tvv-current-flow-id": flow_id,
+                            "x-tvv-funnel-session": flow_id,
+                            "x-tvv-traffic-source": "yandex",
+                            "x-tvv-utm-source": "yandex",
+                            "x-tvv-utm-medium": "cpc",
+                            "x-tvv-utm-campaign": "pet-current",
+                            "x-tvv-landing-path": "/pet",
+                            "x-tvv-has-yclid": "1",
+                            "x-tvv-first-traffic-source": "yandex",
+                            "x-tvv-first-utm-source": "yandex",
+                            "x-tvv-first-utm-medium": "cpc",
+                            "x-tvv-first-utm-campaign": first_campaign,
+                            "x-tvv-first-landing-path": first_path,
+                            "x-tvv-first-has-yclid": "1",
+                        },
+                    ),
+                )
+
+            with db.connect(api.settings.database_path) as conn:
+                rows = conn.execute(
+                    "SELECT session_hash, path, metadata FROM funnel_events WHERE session_hash IN (?, ?)",
+                    tuple(api.hash_value(flow_id, api.settings.session_secret)[:24] for flow_id, *_ in flows),
+                ).fetchall()
+            self.assertEqual(len(rows), 2)
+            metadata_by_session = {
+                str(row["session_hash"]): json.loads(row["metadata"] or "{}")
+                for row in rows
+            }
+            for flow_id, first_path, first_campaign, _pet_name in flows:
+                session_hash = api.hash_value(flow_id, api.settings.session_secret)[:24]
+                metadata = metadata_by_session[session_hash]
+                self.assertEqual(metadata["current_flow_id"], flow_id)
+                self.assertEqual(metadata["landing_path"], "/pet")
+                self.assertEqual(metadata["current_landing_path"], "/pet")
+                self.assertEqual(metadata["utm_campaign"], "pet-current")
+                self.assertEqual(metadata["current_utm_campaign"], "pet-current")
+                self.assertEqual(metadata["first_landing_path"], first_path)
+                self.assertEqual(metadata["first_utm_campaign"], first_campaign)
+
+            after = api._admin_dashboard_payload()
+            after_pet_created = next(
+                item["unique_count"]
+                for item in after["conversion_funnel_72h_pet"]["steps"]
+                if item["step"] == "pet_created"
+            )
+            after_food_created = next(
+                item["unique_count"]
+                for item in after["conversion_funnel_72h_food"]["steps"]
+                if item["step"] == "pet_created"
+            )
+            self.assertEqual(after_pet_created, before_pet_created + 2)
+            self.assertEqual(after_food_created, before_food_created)
+        finally:
+            with db.connect(api.settings.database_path) as conn:
+                for flow_id, *_ in flows:
+                    session_hash = api.hash_value(flow_id, api.settings.session_secret)[:24]
+                    conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (session_hash,))
+                conn.commit()
+
+    def test_admin_dashboard_separates_public_and_auth_funnel_data(self) -> None:
+        before = api._admin_dashboard_payload()
+        before_public = {
+            item["step"]: item
+            for item in before["conversion_funnel_72h_public"]["steps"]
+        }
+        before_auth = {
+            item["step"]: item
+            for item in before["conversion_funnel_72h_auth"]["steps"]
+        }
+        before_totals = before["funnel_cuts_72h"]
+
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.view",
+                session_id="admin-public-split-check-view",
+                metadata={
+                    "path": "/check/cat-not-eating",
+                    "landing_path": "/check/cat-not-eating",
+                    "utm_campaign": "split-public-campaign",
+                },
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.start_click",
+                session_id="admin-public-split-check-view",
+                metadata={
+                    "landing_path": "/check/cat-not-eating",
+                    "utm_campaign": "split-public-campaign",
+                },
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.submit",
+                session_id="admin-public-split-check-view",
+                metadata={"landing_path": "/check/cat-not-eating", "utm_campaign": "split-public-campaign"},
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X)"},
+            ),
+        )
+        user, _ = login("admin-auth-split-owner@example.ru")
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="landing.primary_cta_click",
+                session_id="admin-auth-split-session",
+                metadata={"path": "/check/cat-not-eating", "utm_campaign": "split-auth-campaign"},
+            ),
+            request("/"),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="auth.login_success",
+                session_id="admin-auth-split-session",
+                metadata={"provider": "email"},
+            ),
+            request("/api/auth/email/verify"),
+        )
+        api._track_funnel(
+            request("/api/auth/email/verify"),
+            "auth.login_success",
+            user_id=int(user["id"]),
+            session_id="admin-auth-split-session",
+            metadata={"provider": "email"},
+        )
+
+        admin_session_ids = [
+            "admin-public-split-check-view",
+            "admin-auth-split-session",
+        ]
+        admin_site_ips = ["bot-visit-hash-admin-1", "human-visit-hash-admin-1"]
+
+        try:
+            after = api._admin_dashboard_payload()
+            after_public = {
+                item["step"]: item
+                for item in after["conversion_funnel_72h_public"]["steps"]
+            }
+            after_auth = {
+                item["step"]: item
+                for item in after["conversion_funnel_72h_auth"]["steps"]
+            }
+            cuts = after["funnel_cuts_72h"]
+            public_cuts = cuts.get("public", {})
+
+            self.assertGreaterEqual(
+                int(after_public["check_view"]["unique_count"]),
+                int(before_public["check_view"]["unique_count"]) + 1,
+            )
+            self.assertGreaterEqual(
+                int(after_public["check_submit"]["unique_count"]),
+                int(before_public["check_submit"]["unique_count"]) + 1,
+            )
+            self.assertGreaterEqual(
+                int(after_auth["primary_cta"]["unique_count"]),
+                int(before_auth["primary_cta"]["unique_count"]) + 1,
+            )
+            self.assertGreaterEqual(
+                int(after_auth["login_success"]["unique_count"]),
+                int(before_auth["login_success"]["unique_count"]) + 1,
+            )
+            self.assertIn("split-public-campaign", {row["name"] for row in public_cuts["campaign"]})
+            self.assertIn("cat-not-eating", {row["name"] for row in public_cuts["landing"]})
+
+            before_new = next(
+                (row["sessions"] for row in before_totals.get("returning", []) if row["name"] == "new"),
+                0,
+            )
+            after_new = next(
+                (row["sessions"] for row in cuts.get("returning", []) if row["name"] == "new"),
+                0,
+            )
+            self.assertGreater(after_new, before_new)
+        finally:
+            with db.connect(api.settings.database_path) as conn:
+                for raw_session in admin_session_ids:
+                    session_hash = api.hash_value(raw_session, api.settings.session_secret)[:24]
+                    conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (session_hash,))
+                conn.execute(
+                    "DELETE FROM site_visits WHERE ip_hash IN (?, ?)",
+                    tuple(admin_site_ips),
+                )
+                conn.commit()
+
+    def test_admin_dashboard_exposes_service_activation_and_return_metrics(self) -> None:
+        user, _ = login("admin-service-funnel@example.ru")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="собака", pet_name="Рой", client_request_id="admin-service-pet"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        api.add_pet_observation(
+            int(pet["id"]),
+            api.ObservationPayload(obs_type="note", text="Активность обычная"),
+            request(f"/api/pets/{pet['id']}/observations"),
+            user=user,
+        )
+        dashboard = api._admin_dashboard_payload()
+        service_steps = {
+            item["step"]: item
+            for item in dashboard["conversion_funnel_72h_service"]["steps"]
+        }
+        self.assertIn("pet_created", service_steps)
+        self.assertIn("first_record", service_steps)
+        self.assertIn("service_activated", service_steps)
+        self.assertGreaterEqual(service_steps["service_activated"]["unique_count"], 1)
+        self.assertIn("return_d1_users_30d", dashboard["overview"])
+        self.assertIn("return_d7_users_30d", dashboard["overview"])
+
+    def test_admin_dashboard_keeps_raw_bot_logs_and_tracks_public_loss_reasons(self) -> None:
+        before = api._admin_dashboard_payload()
+        before_loss = before["funnel_loss_reasons_72h"]
+        before_visits_total = before["overview"]["site_visits_24h"]
+        before_visits_human = before["overview"]["site_visits_24h_human"]
+        before_visits_technical = before["overview"]["site_visits_24h_technical"]
+        before_public_views = next(
+            item["unique_count"]
+            for item in before["conversion_funnel_72h_public"]["steps"]
+            if item["step"] == "check_view"
+        )
+        before_synthetic_events = before["funnel_technical_72h"]["events"]
+
+        db.create_site_visit(
+            api.settings.database_path,
+            method="GET",
+            path="/check/cat-not-eating",
+            status_code=200,
+            user_id=None,
+            ip_hash="bot-visit-hash-admin-1",
+            source="scanner.example",
+            device="Бот/проверка",
+            browser="Бот/проверка",
+            is_bot=True,
+        )
+        db.create_site_visit(
+            api.settings.database_path,
+            method="GET",
+            path="/check/cat-not-eating",
+            status_code=200,
+            user_id=None,
+            ip_hash="human-visit-hash-admin-1",
+            source="yandex",
+            device="Телефон",
+            browser="Chrome",
+            is_bot=False,
+        )
+        db.create_site_visit(
+            api.settings.database_path,
+            method="GET",
+            path="/wp-admin/install.php",
+            status_code=200,
+            user_id=None,
+            ip_hash="scanner-path-hash-admin-1",
+            source="Прямой заход",
+            device="Компьютер",
+            browser="Неизвестно",
+            is_bot=False,
+        )
+
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.view",
+                session_id="qa-synthetic-session",
+                metadata={
+                    "landing_path": "/check/cat-not-eating",
+                    "traffic_source": "codex_test",
+                    "utm_campaign": "marketing_funnel_qa",
+                },
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            ),
+        )
+
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.view",
+                session_id="loss-not-started-session",
+                metadata={"landing_path": "/check/cat-not-eating", "utm_campaign": "loss-public"},
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.start_click",
+                session_id="loss-start-only-session",
+                metadata={"landing_path": "/check/cat-not-eating", "utm_campaign": "loss-public"},
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.save_click",
+                session_id="loss-save-incomplete-session",
+                metadata={"landing_path": "/check/cat-not-eating", "utm_campaign": "loss-public"},
+            ),
+            request(
+                "/check/cat-not-eating",
+                headers={"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="check.submit",
+                session_id="loss-result-missing-session",
+                metadata={"landing_path": "/check", "utm_campaign": "loss-public"},
+            ),
+            request(
+                "/check",
+                headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"},
+            ),
+        )
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="landing.login_cta_click",
+                session_id="loss-login-opened-session",
+                metadata={"landing_path": "/check/cat-not-eating"},
+            ),
+            request("/check/cat-not-eating"),
+        )
+        user, _ = login("loss-login-success-owner@example.ru")
+        api.funnel_event(
+            api.FunnelEventRequest(
+                event_type="auth.login_success",
+                session_id="loss-login-success-session",
+                metadata={"provider": "email"},
+            ),
+            request("/check/cat-not-eating"),
+        )
+        api._track_funnel(
+            request("/check/cat-not-eating"),
+            "auth.login_success",
+            user_id=int(user["id"]),
+            session_id="loss-login-success-session",
+            metadata={"provider": "email"},
+        )
+
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="check.preview_blocked",
+            status="warning",
+            actor="test",
+            metadata={"reason": "already_used"},
+        )
+        db.create_security_audit_event(
+            api.settings.database_path,
+            event_type="llm.check_preview_failed",
+            status="error",
+            actor="test",
+            provider="openai",
+            metadata={"reason": "simulated failure"},
+        )
+
+        loss_session_ids = [
+            "loss-not-started-session",
+            "loss-start-only-session",
+            "loss-save-incomplete-session",
+            "loss-result-missing-session",
+            "loss-login-opened-session",
+            "loss-login-success-session",
+            "qa-synthetic-session",
+        ]
+        loss_site_ips = [
+            "bot-visit-hash-admin-1",
+            "human-visit-hash-admin-1",
+            "scanner-path-hash-admin-1",
+        ]
+
+        try:
+            after = api._admin_dashboard_payload()
+            after_loss = after["funnel_loss_reasons_72h"]
+            after_recent_visits = after["recent_site_visits"]
+            after_product_visits = after["recent_site_visits_product"]
+            after_technical_visits = after["recent_site_visits_technical"]
+            campaign_rows = after["funnel_cuts_72h"].get("public", {}).get("campaign", [])
+            after_public_views = next(
+                item["unique_count"]
+                for item in after["conversion_funnel_72h_public"]["steps"]
+                if item["step"] == "check_view"
+            )
+
+            self.assertEqual(after["overview"]["site_visits_24h"], before_visits_total + 3)
+            self.assertEqual(after["overview"]["site_visits_24h_human"], before_visits_human + 1)
+            self.assertEqual(after["overview"]["site_visits_24h_technical"], before_visits_technical + 2)
+            self.assertEqual(after_public_views, before_public_views + 1)
+            self.assertEqual(after["funnel_technical_72h"]["events"], before_synthetic_events + 1)
+            self.assertTrue(
+                any(
+                    item.get("path") == "/check/cat-not-eating"
+                    and item.get("source") == "scanner.example"
+                    and item.get("is_bot") in (1, True)
+                    for item in after_recent_visits
+                )
+            )
+            self.assertTrue(any(item.get("path") == "/wp-admin/install.php" for item in after_technical_visits))
+            self.assertFalse(any(item.get("path") == "/wp-admin/install.php" for item in after_product_visits))
+            self.assertTrue(
+                any(item.get("source") == "codex_test" for item in after["recent_funnel_events_technical"])
+            )
+            self.assertFalse(
+                any(item.get("source") == "codex_test" for item in after["recent_funnel_events_product"])
+            )
+            self.assertTrue(
+                any(
+                    row["name"] == "loss-public"
+                    and row["sessions"] >= 1
+                    for row in campaign_rows
+                )
+            )
+            self.assertGreaterEqual(after_loss["not_started"], before_loss["not_started"] + 1)
+            self.assertGreaterEqual(after_loss["not_submitted"], before_loss["not_submitted"] + 1)
+            self.assertGreaterEqual(
+                after_loss["result_not_received"], before_loss["result_not_received"] + 1
+            )
+            self.assertGreaterEqual(after_loss["save_incomplete"], before_loss["save_incomplete"] + 1)
+            self.assertGreaterEqual(after_loss["login_opened"], before_loss["login_opened"] + 1)
+            self.assertGreaterEqual(after_loss["login_successful"], before_loss["login_successful"] + 1)
+            self.assertGreaterEqual(after_loss["repeat_limit"], before_loss["repeat_limit"] + 1)
+            self.assertGreaterEqual(after_loss["model_error"], before_loss["model_error"] + 1)
+        finally:
+            with db.connect(api.settings.database_path) as conn:
+                for raw_session in loss_session_ids:
+                    session_hash = api.hash_value(raw_session, api.settings.session_secret)[:24]
+                    conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (session_hash,))
+                conn.execute(
+                    "DELETE FROM site_visits WHERE ip_hash IN (?, ?, ?)",
+                    tuple(loss_site_ips),
+                )
+                conn.execute(
+                    """
+                    DELETE FROM security_audit_events
+                    WHERE actor = 'test'
+                      AND ((event_type = 'check.preview_blocked' AND json_extract(metadata, '$.reason') = 'already_used')
+                           OR (event_type = 'llm.check_preview_failed' AND json_extract(metadata, '$.reason') = 'simulated failure'))
+                    """,
+                )
+                conn.commit()
 
     def test_public_check_preview_red_flag_does_not_call_llm_or_save_history(self) -> None:
         original_llm = api.call_triage_llm
@@ -358,6 +1515,7 @@ class ApiTests(unittest.TestCase):
 
             self.assertEqual(calls, [])
             self.assertEqual(before, after)
+            self.assertFalse(result["usage_consumed"])
             self.assertEqual(result["urgency"], "red")
             self.assertIn("невозможность мочиться", result["matched"])
             self.assertIn("Срочно", result["answer"])
@@ -462,6 +1620,7 @@ class ApiTests(unittest.TestCase):
             self.assertIn("7 лет", captured["complaint_text"])
             self.assertIn("кошка не ест второй день", captured["complaint_text"])
             self.assertEqual(before, after)
+            self.assertTrue(result["usage_consumed"])
             self.assertEqual(result["urgency"], "yellow")
             self.assertEqual(result["model"], "gpt-5.1-mini")
             self.assertEqual(result["total_tokens"], 220)
@@ -685,6 +1844,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(after_logs, before_logs + 1)
         self.assertIsNotNone(log)
         self.assertIsNotNone(history)
+        visible_history = api.pet_history(
+            int(result["pet"]["id"]),
+            request(f"/api/pets/{result['pet']['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        self.assertTrue(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in visible_history))
         self.assertEqual(log["subscription_source"], "public_preview")
         self.assertEqual(log["quota_before"], sub_before.quota_used)
         self.assertEqual(log["quota_after"], sub_before.quota_used)
@@ -703,6 +1868,152 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("запишите воду", audit_metadata)
         funnel_items = db.list_funnel_events(api.settings.database_path, limit=10)
         self.assertTrue(any(item["event_type"] == "check.saved_after_login" and item["step"] == "check_saved" for item in funnel_items))
+
+    def test_public_check_preview_save_uses_single_matching_pet_and_is_visible_in_history(self) -> None:
+        user, _ = login("preview-save-one-same@example.ru")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Муся"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+
+        result = api.save_public_check_preview(
+            self._public_check_save_payload(session_id="preview-save-one-same"),
+            request("/api/check/preview/save"),
+            user,
+        )
+
+        self.assertEqual(int(result["pet"]["id"]), int(pet["id"]))
+        self.assertFalse(result["created_pet"])
+        history = api.pet_history(
+            int(pet["id"]),
+            request(f"/api/pets/{pet['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        self.assertTrue(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in history))
+
+    def test_public_check_preview_save_requires_choice_for_single_different_pet(self) -> None:
+        user, _ = login("preview-save-one-other@example.ru")
+        self._activate_plus(user)
+        dog = api.create_pet(
+            api.PetPayload(pet_type="собака", pet_name="Рекс"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        with db.connect(api.settings.database_path) as conn:
+            logs_before = conn.execute("SELECT COUNT(*) FROM triage_logs WHERE user_id = ?", (int(user["id"]),)).fetchone()[0]
+
+        with self.assertRaises(HTTPException) as required_exc:
+            api.save_public_check_preview(
+                self._public_check_save_payload(session_id="preview-save-one-other-required"),
+                request("/api/check/preview/save"),
+                user,
+            )
+        self.assertEqual(required_exc.exception.status_code, 409)
+        self.assertEqual(required_exc.exception.detail, "check_preview_pet_required")
+
+        with self.assertRaises(HTTPException) as mismatch_exc:
+            api.save_public_check_preview(
+                self._public_check_save_payload(
+                    pet_id=int(dog["id"]),
+                    session_id="preview-save-one-other-mismatch",
+                ),
+                request("/api/check/preview/save"),
+                user,
+            )
+        self.assertEqual(mismatch_exc.exception.status_code, 409)
+        self.assertEqual(mismatch_exc.exception.detail, "check_preview_pet_type_mismatch")
+
+        with db.connect(api.settings.database_path) as conn:
+            logs_after_rejections = conn.execute("SELECT COUNT(*) FROM triage_logs WHERE user_id = ?", (int(user["id"]),)).fetchone()[0]
+        self.assertEqual(logs_after_rejections, logs_before)
+
+        result = api.save_public_check_preview(
+            self._public_check_save_payload(
+                create_pet=True,
+                session_id="preview-save-one-other-create",
+            ),
+            request("/api/check/preview/save"),
+            user,
+        )
+        self.assertTrue(result["created_pet"])
+        self.assertEqual(result["pet"]["pet_type"], "кошка")
+        self.assertNotEqual(int(result["pet"]["id"]), int(dog["id"]))
+        created_history = api.pet_history(
+            int(result["pet"]["id"]),
+            request(f"/api/pets/{result['pet']['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        dog_history = api.pet_history(
+            int(dog["id"]),
+            request(f"/api/pets/{dog['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        self.assertTrue(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in created_history))
+        self.assertFalse(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in dog_history))
+
+    def test_public_check_preview_save_requires_owned_choice_for_multiple_pets(self) -> None:
+        user, _ = login("preview-save-multi@example.ru")
+        self._activate_plus(user)
+        other_user, _ = login("preview-save-multi-other@example.ru")
+        first = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Луна"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        second = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Сима"),
+            request("/api/pets"),
+            user=user,
+        )["item"]
+        foreign = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Чужая карточка"),
+            request("/api/pets"),
+            user=other_user,
+        )["item"]
+
+        with self.assertRaises(HTTPException) as required_exc:
+            api.save_public_check_preview(
+                self._public_check_save_payload(session_id="preview-save-multi-required"),
+                request("/api/check/preview/save"),
+                user,
+            )
+        self.assertEqual(required_exc.exception.status_code, 409)
+        self.assertEqual(required_exc.exception.detail, "check_preview_pet_required")
+
+        with self.assertRaises(HTTPException) as ownership_exc:
+            api.save_public_check_preview(
+                self._public_check_save_payload(
+                    pet_id=int(foreign["id"]),
+                    session_id="preview-save-multi-foreign",
+                ),
+                request("/api/check/preview/save"),
+                user,
+            )
+        self.assertEqual(ownership_exc.exception.status_code, 404)
+        self.assertEqual(ownership_exc.exception.detail, "check_preview_pet_not_found")
+
+        result = api.save_public_check_preview(
+            self._public_check_save_payload(
+                pet_id=int(second["id"]),
+                session_id="preview-save-multi-selected",
+            ),
+            request("/api/check/preview/save"),
+            user,
+        )
+        self.assertEqual(int(result["pet"]["id"]), int(second["id"]))
+        first_history = api.pet_history(
+            int(first["id"]),
+            request(f"/api/pets/{first['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        second_history = api.pet_history(
+            int(second["id"]),
+            request(f"/api/pets/{second['id']}/history", "GET"),
+            user=user,
+        )["items"]
+        self.assertFalse(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in first_history))
+        self.assertTrue(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in second_history))
 
     def test_email_code_is_single_use(self) -> None:
         email = "single-use@example.ru"
@@ -726,31 +2037,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reuse_exc.exception.status_code, 400)
         self.assertEqual(reuse_exc.exception.detail, "code_expired_or_not_found")
 
-    def test_foreign_email_registration_is_blocked_but_existing_login_allowed(self) -> None:
-        blocked_email = "new-foreign-registration@gmail.com"
-        with self.assertRaises(HTTPException) as blocked_exc:
-            api.auth_email_start(api.EmailStartRequest(email=blocked_email), request("/api/auth/email/start"))
-        self.assertEqual(blocked_exc.exception.status_code, 400)
-        self.assertEqual(blocked_exc.exception.detail, "email_registration_russian_domain_required")
-        self.assertIsNone(db.get_user_by_email(api.settings.database_path, blocked_email))
-
-        events = db.list_security_audit_events(
-            api.settings.database_path,
-            event_type="auth.email_registration_blocked",
-        )
-        self.assertTrue(any((item.get("metadata") or {}).get("domain") == "gmail.com" for item in events))
-
-        existing_email = "existing-foreign-login@gmail.com"
-        db.get_or_create_user_by_email(api.settings.database_path, existing_email)
-        start = api.auth_email_start(api.EmailStartRequest(email=existing_email), request("/api/auth/email/start"))
+    def test_foreign_email_registration_is_allowed_while_domain_restriction_is_disabled(self) -> None:
+        email = "new-foreign-registration@gmail.com"
+        start = api.auth_email_start(api.EmailStartRequest(email=email), request("/api/auth/email/start"))
         self.assertTrue(start.debug_code)
         response = Response()
         session = api.auth_email_verify(
-            api.EmailVerifyRequest(email=existing_email, code=start.debug_code),
+            api.EmailVerifyRequest(email=email, code=start.debug_code),
             request("/api/auth/email/verify"),
             response,
         )
-        self.assertEqual(session.user["email"], existing_email)
+        self.assertEqual(session.user["email"], email)
 
     def test_email_registration_accepts_russian_domain_names(self) -> None:
         for email in ("new-russian-domain@example.ru", "new-russian-idn@почта.рф"):
@@ -894,6 +2191,7 @@ class ApiTests(unittest.TestCase):
 
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Лео", birth_year=2018),
+            request("/api/pets"),
             user=user_a,
         )["item"]
         reminder = api.add_reminder(
@@ -928,6 +2226,7 @@ class ApiTests(unittest.TestCase):
         user_b, _ = login("reminder-sync-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Сима", birth_year=2019),
+            request("/api/pets"),
             user=user_a,
         )["item"]
         reminder = api.add_reminder(
@@ -975,6 +2274,7 @@ class ApiTests(unittest.TestCase):
         user_b, _ = login("pet-mutation-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="собака", pet_name="Рэй", birth_year=2020),
+            request("/api/pets"),
             user=user_a,
         )["item"]
 
@@ -1101,6 +2401,7 @@ class ApiTests(unittest.TestCase):
         user_b, _ = login("pet-delete-owner-b@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Тиша", birth_year=2017),
+            request("/api/pets"),
             user=user_a,
         )["item"]
         telegram_pet_id = 98765
@@ -1163,6 +2464,7 @@ class ApiTests(unittest.TestCase):
         user, _ = login("sync-success-owner@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Луна", birth_year=2021),
+            request("/api/pets"),
             user=user,
         )["item"]
 
@@ -1343,6 +2645,7 @@ class ApiTests(unittest.TestCase):
         email_user, _ = login("telegram-linking@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="собака", pet_name="Барс", birth_year=2020),
+            request("/api/pets"),
             user=email_user,
         )["item"]
 
@@ -1412,6 +2715,7 @@ class ApiTests(unittest.TestCase):
         email_user, _ = login("max-linking@example.ru")
         pet = api.create_pet(
             api.PetPayload(pet_type="кошка", pet_name="Мия", birth_year=2021),
+            request("/api/pets"),
             user=email_user,
         )["item"]
 
@@ -1842,6 +3146,12 @@ class ApiTests(unittest.TestCase):
     def test_admin_audit_hides_empty_push_followup_checks(self) -> None:
         db.create_security_audit_event(
             api.settings.database_path,
+            event_type="admin.dashboard_view",
+            status="ok",
+            actor="admin",
+        )
+        db.create_security_audit_event(
+            api.settings.database_path,
             event_type="push.followups_send",
             status="ok",
             actor="system",
@@ -1867,8 +3177,15 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(len(explicit), 2)
 
+        dashboard = api._admin_dashboard_payload()
+        self.assertFalse(any(item["event_type"] == "admin.dashboard_view" for item in dashboard["recent_audit"]))
+        self.assertTrue(any(item["event_type"] == "admin.dashboard_view" for item in dashboard["recent_audit_raw"]))
+
         with db.connect(api.settings.database_path) as conn:
-            conn.execute("DELETE FROM security_audit_events WHERE event_type = ?", ("push.followups_send",))
+            conn.execute(
+                "DELETE FROM security_audit_events WHERE event_type IN (?, ?)",
+                ("push.followups_send", "admin.dashboard_view"),
+            )
 
     def test_security_audit_metadata_filters_medical_text(self) -> None:
         complaint = "кошка вялая второй день, была рвота желтым"

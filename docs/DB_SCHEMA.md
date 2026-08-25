@@ -27,7 +27,7 @@
 
 | Таблица | Что хранит | Важные поля |
 | --- | --- | --- |
-| `pets` | карточки питомцев | `owner_id`, `pet_type`, `pet_name`, `birth_year`, `sex`, `weight_kg`, `breed`, `is_main`, `external_source`, `external_id` |
+| `pets` | карточки питомцев | `owner_id`, `pet_type`, `pet_name`, `birth_year`, `sex`, `weight_kg`, `breed`, `is_main`, `client_request_id`, `external_source`, `external_id` |
 | `pet_history` | события истории здоровья | `pet_id`, `event_type`, `title`, `details`, `triage_id`, `reminder_id`, `metadata`, `external_source`, `external_id` |
 | `pet_observations` | наблюдения владельца | `user_id`, `pet_id`, `obs_type`, `payload`, `source`, `external_source`, `external_id` |
 | `pet_measurements` | вес и измерения | `pet_id`, `weight_kg`, `note`, `metadata`, `external_source`, `external_id` |
@@ -43,6 +43,7 @@
 | `triage_followups` | follow-up после разбора | `triage_id`, `user_id`, `pet_id`, `urgency_level`, `scheduled_at`, `answered_at`, `status`, `answer`, `payload`, `push_notified_at`, `push_last_error` |
 | `push_subscriptions` | PWA push-устройства | `user_id`, `endpoint`, `p256dh`, `auth`, `user_agent`, `revoked_at` |
 | `feedback` | обратная связь команде сервиса | `user_id`, `text`, `category`, `created_at` |
+| `funnel_events` | продуктовые события и воронки | `event_type`, `step`, `user_id`, `session_hash`, `source`, `path`, `metadata`, `created_at` |
 
 ## Безопасность И Синхронизация
 
@@ -58,6 +59,8 @@
 - `users.email` уникален.
 - `external_accounts(provider, provider_user_id)` уникален.
 - Внешние сущности питомцев, истории, наблюдений, измерений, напоминаний и разборов имеют уникальные partial indexes по `external_source/external_id`.
+- `pets(owner_id, client_request_id)` уникален при наличии `client_request_id`, поэтому повторная отправка формы не создаёт второго питомца.
+- `service.first_record_saved` и `service.activated` уникальны для пользователя и записываются только один раз.
 - `payments(provider, provider_payment_id)` уникален.
 - Пользовательские и админские сессии ищутся по `token_hash`.
 - Частые списки оптимизированы индексами по `user_id`, `pet_id`, `created_at`, `status`, `due_date`.

@@ -21,7 +21,45 @@ SUBSCRIPTION_PLANS: dict[str, dict[str, Any]] = {
     "vip": {"title": "VIP — 2500 ₽/мес", "quota_total": 25, "price": 2500},
 }
 
+PLAN_ENTITLEMENTS: dict[str, dict[str, Any]] = {
+    "free": {
+        "pets": 1,
+        "active_reminders": 3,
+        "summary_periods": ["30"],
+        "summary_export": False,
+    },
+    "plus": {
+        "pets": 3,
+        "active_reminders": 20,
+        "summary_periods": ["30", "90", "all"],
+        "summary_export": True,
+    },
+    "pro": {
+        "pets": 5,
+        "active_reminders": 50,
+        "summary_periods": ["30", "90", "all"],
+        "summary_export": True,
+    },
+    "vip": {
+        "pets": 10,
+        "active_reminders": 100,
+        "summary_periods": ["30", "90", "all"],
+        "summary_export": True,
+    },
+}
+
 PLAN_RANK = {"free": 0, "plus": 1, "pro": 2, "vip": 3}
+
+
+def plan_entitlements(plan: str | None) -> dict[str, Any]:
+    normalized = _normalize_plan(plan)
+    source = PLAN_ENTITLEMENTS.get(normalized, PLAN_ENTITLEMENTS["free"])
+    return {
+        "pets": int(source["pets"]),
+        "active_reminders": int(source["active_reminders"]),
+        "summary_periods": list(source["summary_periods"]),
+        "summary_export": bool(source["summary_export"]),
+    }
 
 
 @dataclass(frozen=True)
@@ -50,6 +88,7 @@ class SubscriptionRef:
             "quota_left": self.quota_left,
             "period_start": self.period_start,
             "period_end": self.period_end,
+            "limits": plan_entitlements(self.plan),
         }
 
 

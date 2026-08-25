@@ -26,8 +26,11 @@ const METRIKA_ID = 109726654;
 let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
 const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more"]);
+const PENDING_STARTUP_ACTION_KEY = "tvv_pending_startup_action";
 let consumedStartupAction = "";
 let checkLandingViewTrackedPath = "";
+let campaignLandingViewTrackedPath = "";
+let authDialogContextLead = "";
 
 const METRIKA_GOALS = {
   "check.start_click": "check_start_click",
@@ -35,64 +38,176 @@ const METRIKA_GOALS = {
   "check.result_shown": "check_result_shown",
   "check.save_click": "check_save_click",
   "check.saved_after_login": "check_saved_after_login",
-  "auth.login_success": "auth_login_success"
+  "auth.login_success": "auth_login_success",
+  "food.result_shown": "food_result_shown",
+  "food.card_start_click": "food_passport_start_click",
+  "pet.card_start_click": "pet_passport_start_click",
+  "pet.created": "pet_created",
+  "service.first_record_saved": "first_health_record_saved",
+  "service.activated": "service_activated",
+  "summary.viewed": "doctor_summary_open",
+  "payment.succeeded": "plus_payment_success"
 };
 
 const CHECK_LANDING_VARIANTS = {
   general: {
     slug: "general",
-    title: "Питомцу нездоровится? Проверьте, почему",
-    lead: "Опишите симптомы собаки или кошки. TemichevVet покажет тревожные признаки и поможет понять, что сделать сейчас.",
-    label: "Пробный разбор без регистрации",
+    title: "Что случилось с питомцем?",
+    lead: "Расскажите простыми словами — как есть.",
+    label: "Здоровье питомца",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Оценка состояния собаки и кошки в TemichevVet",
+    imageAlt: "Собака и кошка рядом с владельцем",
     defaultPet: "",
-    placeholder: "Например: кошка не ест второй день, собака хромает после прогулки, была рвота после еды",
-    examples: ["кошка не ест", "собаку рвёт", "питомец вялый", "хромает после прогулки"]
+    placeholder: "Например: кошка второй день не ест, прячется и почти не пьёт"
+  },
+  "what-to-do-now": {
+    slug: "what-to-do-now",
+    title: "Здоровье питомца — не только один ответ",
+    lead: "Расскажите, что изменилось, и сохраните разбор в общей истории питомца.",
+    label: "Здоровье питомца",
+    image: "/static/assets/doctor-konstantin-cat-table-retouched.jpg",
+    imageAlt: "Ветеринарный врач Константин Темичев с кошкой",
+    defaultPet: "",
+    placeholder: "Например: кошка второй день не ест, прячется и почти не пьёт"
+  },
+  "find-out-what-to-do": {
+    slug: "find-out-what-to-do",
+    title: "Ответ станет частью истории питомца",
+    lead: "Сохраните изменения рядом с весом, питанием и важными датами.",
+    label: "Здоровье питомца",
+    image: "/static/assets/doctor-konstantin-cat-table-retouched.jpg",
+    imageAlt: "Ветеринарный врач Константин Темичев с кошкой",
+    defaultPet: "",
+    placeholder: "Например: кошка второй день не ест, прячется и почти не пьёт"
   },
   "cat-not-eating": {
     slug: "cat-not-eating",
-    title: "Кошка не ест? Проверьте, почему",
-    lead: "Ответьте на несколько вопросов и получите понятный ориентир: можно наблюдать, нужна консультация или лучше не откладывать клинику.",
-    label: "Для тревожных кошачьих симптомов",
+    title: "Кошка не ест?",
+    lead: "Напишите, как давно и что ещё изменилось.",
+    label: "Здоровье питомца",
     image: "/static/assets/check-ad-cat.png",
-    imageAlt: "Владелец кошки оценивает состояние питомца",
+    imageAlt: "Кошка рядом с владельцем",
     defaultPet: "cat",
-    placeholder: "Например: кошка не ест второй день, прячется, пьёт меньше обычного, была рвота",
-    examples: ["не ест второй день", "прячется", "вялая", "была рвота"]
+    placeholder: "Например: кошка второй день не ест, прячется и почти не пьёт"
   },
   "dog-vomiting": {
     slug: "dog-vomiting",
-    title: "Собаку рвёт? Проверьте, почему",
-    lead: "Короткий пробный разбор поможет понять, на что обратить внимание и когда лучше сразу ехать в клинику.",
-    label: "Для ситуаций с рвотой и слабостью",
+    title: "Собаку рвёт?",
+    lead: "Напишите, сколько раз была рвота и как собака ведёт себя сейчас.",
+    label: "Здоровье питомца",
     image: "/static/assets/check-ad-dog.png",
-    imageAlt: "Владелец собаки оценивает состояние питомца",
+    imageAlt: "Собака рядом с владельцем",
     defaultPet: "dog",
-    placeholder: "Например: собаку вырвало два раза после еды, вялая, воду пьёт, температуры не знаю",
-    examples: ["рвота после еды", "вялая", "пьёт воду", "отказывается от корма"]
+    placeholder: "Например: собаку вырвало два раза, она стала вялой и мало пьёт"
   },
   urination: {
     slug: "urination",
-    title: "Питомец не может нормально помочиться?",
-    lead: "Это может быть срочным симптомом. Пробная оценка поможет быстро отделить тревожные признаки от менее опасной ситуации.",
-    label: "Для проблем с мочеиспусканием",
+    title: "Кот не может пописать?",
+    lead: "Если моча есть, но её мало, напишите, что происходит.",
+    label: "Здоровье питомца",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Быстрая оценка состояния питомца",
-    defaultPet: "",
-    placeholder: "Например: кот часто ходит в лоток, сидит долго, мочи мало или совсем нет",
-    examples: ["часто ходит в лоток", "мочи мало", "плачет", "живот напряжён"]
+    imageAlt: "Кот рядом с владельцем",
+    defaultPet: "cat",
+    placeholder: "Например: кот часто садится в лоток, мочи выходит очень мало"
   },
   poisoning: {
     slug: "poisoning",
     title: "Питомец съел что-то опасное?",
-    lead: "Укажите, что именно произошло. Сервис подсветит признаки, при которых нельзя ждать и нужно обращаться в клинику.",
-    label: "Для подозрения на отравление",
+    lead: "Напишите, что именно, сколько и когда это произошло.",
+    label: "Здоровье питомца",
     image: "/static/assets/check-ad-general.png",
-    imageAlt: "Оценка опасных признаков у питомца",
+    imageAlt: "Питомец рядом с владельцем",
     defaultPet: "",
-    placeholder: "Например: собака съела шоколад, прошло около часа, пока ведёт себя обычно",
-    examples: ["шоколад", "виноград", "лекарство", "бытовая химия"]
+    placeholder: "Например: собака съела шоколад около часа назад, пока ведёт себя обычно"
+  }
+};
+
+const PUBLIC_CAMPAIGN_LANDINGS = {
+  pet: {
+    slug: "pet",
+    path: "/pet",
+    kind: "service",
+    title: "Здоровье питомца в одном месте",
+    headline: "Карточка здоровья питомца",
+    description: "Сохраняйте изменения, вес, питание и важные даты. Вся история питомца всегда рядом.",
+    label: "Весь сервис",
+    image: "/static/assets/campaign-home-pet.jpg",
+    imageAlt: "Семья с собакой и кошкой пользуется карточкой питомца",
+    benefits: ["Карточка каждого питомца", "Вес и наблюдения", "Питание и важные даты", "История для визита к врачу"]
+  },
+  "pet-history": {
+    slug: "pet-history",
+    path: "/pet-history",
+    kind: "service",
+    title: "История здоровья питомца",
+    headline: "История питомца, которую не нужно вспоминать заново",
+    description: "Сохраняйте наблюдения, изменения, ответы по питанию и важные события в одной хронологии.",
+    label: "История здоровья",
+    image: "/static/assets/campaign-home-pet.jpg",
+    imageAlt: "Владелец ведёт историю здоровья питомца",
+    benefits: ["Наблюдения по датам", "Сохранённые разборы", "Питание в общей истории", "Сводка перед посещением врача"]
+  },
+  "pet-reminders": {
+    slug: "pet-reminders",
+    path: "/pet-reminders",
+    kind: "service",
+    title: "Важные даты питомца",
+    headline: "Прививки, обработки и осмотры — вовремя",
+    description: "Добавляйте важные даты в карточку питомца и держите ближайшие события перед глазами.",
+    label: "Важные даты",
+    image: "/static/assets/campaign-home-pet.jpg",
+    imageAlt: "Владелец добавляет важную дату питомца",
+    benefits: ["Прививки", "Обработки", "Осмотры", "Свои важные события"]
+  },
+  "pet-food": {
+    slug: "pet-food",
+    path: "/pet-food",
+    kind: "service",
+    title: "Питание питомца",
+    headline: "Проверяйте питание и сохраняйте ответы",
+    description: "Узнавайте, что можно и нельзя питомцу, и храните полезные ответы в его карточке.",
+    label: "Питание",
+    image: "/static/assets/campaign-food-dog.jpg",
+    imageAlt: "Владелец проверяет питание питомца",
+    benefits: ["Проверка продуктов", "Проверка состава блюда", "Сохранение ответа", "Связь с историей питомца"]
+  },
+  "doctor-summary": {
+    slug: "doctor-summary",
+    path: "/doctor-summary",
+    kind: "service",
+    title: "Сводка для ветеринарного врача",
+    headline: "Подготовьте историю питомца к визиту в клинику",
+    description: "Вес, наблюдения, важные даты и сохранённые изменения собираются в понятную хронологию.",
+    label: "Сводка для врача",
+    image: "/static/assets/doctor-konstantin-cat-table-retouched.jpg",
+    imageAlt: "Ветеринарный врач изучает историю питомца",
+    benefits: ["Период 30 или 90 дней", "Вся история для Plus", "Печать и PDF", "Без нового диагноза"]
+  },
+  "food/dog": {
+    slug: "food-dog",
+    kind: "food",
+    petType: "dog",
+    petLabel: "собаки",
+    title: "Можно ли собаке этот продукт или блюдо?",
+    description: "Проверьте продукт или состав блюда по общей базе для кошек и собак.",
+    label: "База продуктов",
+    placeholder: "Например: виноград, морковь или борщ",
+    examples: ["Виноград", "Морковь", "Борщ"],
+    image: "/static/assets/campaign-food-dog.jpg",
+    imageAlt: "Владелец собаки проверяет продукт"
+  },
+  "food/cat": {
+    slug: "food-cat",
+    kind: "food",
+    petType: "cat",
+    petLabel: "кошки",
+    title: "Можно ли кошке этот продукт или блюдо?",
+    description: "Проверьте продукт или состав блюда по общей базе для кошек и собак.",
+    label: "База продуктов",
+    placeholder: "Например: молоко, курица или шоколад",
+    examples: ["Молоко", "Курица", "Шоколад"],
+    image: "/static/assets/campaign-food-cat.jpg",
+    imageAlt: "Владелица кошки пользуется TemichevVet"
   }
 };
 
@@ -108,20 +223,23 @@ function clearAuthLinkRequest() {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-const FUNNEL_SESSION_KEY = "tvv_funnel_session";
 const FIRST_TOUCH_KEY = "tvv_first_touch";
+const CURRENT_TOUCH_KEY = "tvv_current_touch";
 const FIRST_TOUCH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CURRENT_TOUCH_TTL_MS = 24 * 60 * 60 * 1000;
 const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
-const CHECK_SAVE_CTA = "Сохранить результат и получить ещё 5 бесплатных оценок";
+const PENDING_FOOD_SAVE_KEY = "tvv_pending_food_save";
+const PENDING_PET_CREATE_KEY = "tvv_pending_pet_create";
+const PUBLIC_CHECK_USED_KEY = "tvv_public_check_preview_used";
+const CHECK_SAVE_CTA = "Сохранить случай";
 const AUTH_DIALOG_DEFAULT_LEAD =
-  "Выберите удобный способ входа. Если аккаунта ещё нет, он создастся автоматически, а результат можно будет сохранить в истории питомца.";
+  "Войдите удобным способом. Если аккаунта ещё нет, он создастся автоматически.";
+let currentTouchAttribution = null;
+const sentMetrikaGoalKeys = new Set();
+const visibleFunnelEventKeys = new Set();
 
-function getFunnelSessionId() {
-  let value = localStorage.getItem(FUNNEL_SESSION_KEY) || "";
-  if (value) return value;
-  value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  localStorage.setItem(FUNNEL_SESSION_KEY, value);
-  return value;
+function createFlowId() {
+  return window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function cleanAttributionValue(value, maxLength = 120) {
@@ -131,27 +249,7 @@ function cleanAttributionValue(value, maxLength = 120) {
     .slice(0, maxLength);
 }
 
-function readFirstTouchAttribution() {
-  try {
-    const raw = localStorage.getItem(FIRST_TOUCH_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw);
-    const capturedAt = Date.parse(value?.captured_at || "");
-    if (!value || typeof value !== "object" || !Number.isFinite(capturedAt) || Date.now() - capturedAt > FIRST_TOUCH_TTL_MS) {
-      localStorage.removeItem(FIRST_TOUCH_KEY);
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function captureFirstTouchAttribution() {
-  if (isAdminRoute) return {};
-  const existing = readFirstTouchAttribution();
-  if (existing) return existing;
-
+function attributionFromCurrentLocation() {
   const params = new URLSearchParams(window.location.search);
   let referrerHost = "";
   try {
@@ -165,7 +263,7 @@ function captureFirstTouchAttribution() {
 
   const utmSource = cleanAttributionValue(params.get("utm_source"), 80);
   const hasYclid = Boolean(cleanAttributionValue(params.get("yclid"), 120));
-  const attribution = {
+  return {
     traffic_source: utmSource || (hasYclid ? "yandex_direct" : cleanAttributionValue(referrerHost, 80) || "direct"),
     utm_source: utmSource,
     utm_medium: cleanAttributionValue(params.get("utm_medium"), 80),
@@ -176,33 +274,168 @@ function captureFirstTouchAttribution() {
     landing_path: cleanAttributionValue(window.location.pathname || "/", 160) || "/",
     captured_at: new Date().toISOString()
   };
+}
+
+function storedAttribution(storage, key, ttlMs, { requireFlowId = false } = {}) {
   try {
-    localStorage.setItem(FIRST_TOUCH_KEY, JSON.stringify(attribution));
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    const capturedAt = Date.parse(value?.captured_at || "");
+    const flowId = cleanAttributionValue(value?.flow_id, 128);
+    if (
+      !value
+      || typeof value !== "object"
+      || !Number.isFinite(capturedAt)
+      || Date.now() - capturedAt > ttlMs
+      || (requireFlowId && !flowId)
+    ) {
+      storage.removeItem(key);
+      return null;
+    }
+    return requireFlowId ? { ...value, flow_id: flowId } : value;
+  } catch {
+    return null;
+  }
+}
+
+function readFirstTouchAttribution() {
+  try {
+    return storedAttribution(window.localStorage, FIRST_TOUCH_KEY, FIRST_TOUCH_TTL_MS);
+  } catch {
+    return null;
+  }
+}
+
+function captureFirstTouchAttribution() {
+  if (isAdminRoute) return {};
+  const existing = readFirstTouchAttribution();
+  if (existing) return existing;
+  const attribution = attributionFromCurrentLocation();
+  try {
+    window.localStorage.setItem(FIRST_TOUCH_KEY, JSON.stringify(attribution));
   } catch {
     // Attribution must never block the product flow.
   }
   return attribution;
 }
 
-function attributionRequestHeaders() {
-  const attribution = captureFirstTouchAttribution();
-  const headers = {
-    "X-Tvv-Traffic-Source": attribution.traffic_source,
-    "X-Tvv-Utm-Source": attribution.utm_source,
-    "X-Tvv-Utm-Medium": attribution.utm_medium,
-    "X-Tvv-Utm-Campaign": attribution.utm_campaign,
-    "X-Tvv-Utm-Content": attribution.utm_content,
-    "X-Tvv-Utm-Term": attribution.utm_term,
-    "X-Tvv-Landing-Path": attribution.landing_path,
-    "X-Tvv-Has-Yclid": attribution.has_yclid ? "1" : "0"
+function isAdvertisingEntryLocation() {
+  const path = (window.location.pathname || "/").replace(/\/+$/, "") || "/";
+  const campaignPath = path === "/pet" || path === "/food/dog" || path === "/food/cat"
+    || path === "/check" || path.startsWith("/check/");
+  const params = new URLSearchParams(window.location.search);
+  const campaignQuery = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "yclid"]
+    .some((key) => Boolean(cleanAttributionValue(params.get(key), 120)));
+  return campaignPath || campaignQuery;
+}
+
+function readCurrentTouchAttribution() {
+  try {
+    return storedAttribution(window.sessionStorage, CURRENT_TOUCH_KEY, CURRENT_TOUCH_TTL_MS, { requireFlowId: true });
+  } catch {
+    return null;
+  }
+}
+
+function captureCurrentTouchAttribution() {
+  if (isAdminRoute) return {};
+  if (currentTouchAttribution) return currentTouchAttribution;
+
+  if (!isAdvertisingEntryLocation()) {
+    const existing = readCurrentTouchAttribution();
+    if (existing) {
+      currentTouchAttribution = existing;
+      return currentTouchAttribution;
+    }
+  }
+
+  currentTouchAttribution = {
+    ...attributionFromCurrentLocation(),
+    flow_id: cleanAttributionValue(createFlowId(), 128)
   };
-  return Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined && value !== ""));
+  try {
+    window.sessionStorage.setItem(CURRENT_TOUCH_KEY, JSON.stringify(currentTouchAttribution));
+  } catch {
+    // Attribution must never block the product flow.
+  }
+  return currentTouchAttribution;
+}
+
+function getFunnelSessionId() {
+  return captureCurrentTouchAttribution().flow_id || cleanAttributionValue(createFlowId(), 128);
+}
+
+function attributionEventMetadata() {
+  const first = captureFirstTouchAttribution();
+  const current = captureCurrentTouchAttribution();
+  return {
+    traffic_source: current.traffic_source,
+    utm_source: current.utm_source,
+    utm_medium: current.utm_medium,
+    utm_campaign: current.utm_campaign,
+    utm_content: current.utm_content,
+    utm_term: current.utm_term,
+    has_yclid: Boolean(current.has_yclid),
+    landing_path: current.landing_path,
+    current_flow_id: current.flow_id,
+    current_traffic_source: current.traffic_source,
+    current_utm_source: current.utm_source,
+    current_utm_medium: current.utm_medium,
+    current_utm_campaign: current.utm_campaign,
+    current_utm_content: current.utm_content,
+    current_utm_term: current.utm_term,
+    current_has_yclid: Boolean(current.has_yclid),
+    current_landing_path: current.landing_path,
+    first_traffic_source: first.traffic_source,
+    first_utm_source: first.utm_source,
+    first_utm_medium: first.utm_medium,
+    first_utm_campaign: first.utm_campaign,
+    first_utm_content: first.utm_content,
+    first_utm_term: first.utm_term,
+    first_has_yclid: Boolean(first.has_yclid),
+    first_landing_path: first.landing_path
+  };
+}
+
+function attributionRequestHeaders() {
+  const first = captureFirstTouchAttribution();
+  const current = captureCurrentTouchAttribution();
+  const headers = {
+    "X-Tvv-Traffic-Source": current.traffic_source,
+    "X-Tvv-Utm-Source": current.utm_source,
+    "X-Tvv-Utm-Medium": current.utm_medium,
+    "X-Tvv-Utm-Campaign": current.utm_campaign,
+    "X-Tvv-Utm-Content": current.utm_content,
+    "X-Tvv-Utm-Term": current.utm_term,
+    "X-Tvv-Landing-Path": current.landing_path,
+    "X-Tvv-Has-Yclid": current.has_yclid ? "1" : "0",
+    "X-Tvv-Current-Flow-Id": current.flow_id,
+    "X-Tvv-Funnel-Session": current.flow_id,
+    "X-Tvv-First-Traffic-Source": first.traffic_source,
+    "X-Tvv-First-Utm-Source": first.utm_source,
+    "X-Tvv-First-Utm-Medium": first.utm_medium,
+    "X-Tvv-First-Utm-Campaign": first.utm_campaign,
+    "X-Tvv-First-Utm-Content": first.utm_content,
+    "X-Tvv-First-Utm-Term": first.utm_term,
+    "X-Tvv-First-Landing-Path": first.landing_path,
+    "X-Tvv-First-Has-Yclid": first.has_yclid ? "1" : "0"
+  };
+  return Object.fromEntries(
+    Object.entries(headers)
+      .filter(([, value]) => value !== undefined && value !== "")
+      .map(([name, value]) => [name, encodeURIComponent(String(value))])
+  );
 }
 
 function safeMetrikaParams(metadata = {}) {
   const allowedKeys = new Set([
     "slug", "pet_type", "level", "urgency", "target", "provider", "path", "has_pet",
-    "traffic_source", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "landing_path"
+    "traffic_source", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "landing_path",
+    "current_flow_id", "current_traffic_source", "current_utm_source", "current_utm_medium",
+    "current_utm_campaign", "current_utm_content", "current_utm_term", "current_has_yclid", "current_landing_path",
+    "first_traffic_source", "first_utm_source", "first_utm_medium", "first_utm_campaign",
+    "first_utm_content", "first_utm_term", "first_has_yclid", "first_landing_path"
   ]);
   const params = {};
   for (const [key, value] of Object.entries(metadata || {})) {
@@ -216,21 +449,40 @@ function safeMetrikaParams(metadata = {}) {
 
 function trackMetrikaGoal(eventType, metadata = {}) {
   const goal = METRIKA_GOALS[eventType];
-  if (!goal || typeof window.ym !== "function") return;
+  if (!goal || typeof window.ym !== "function") return false;
   try {
     window.ym(METRIKA_ID, "reachGoal", goal, safeMetrikaParams(metadata));
+    return true;
   } catch {
     // Metrics must never break the product flow.
+    return false;
   }
+}
+
+function trackMetrikaGoalOnce(eventType, dedupeKey, metadata = {}) {
+  const cleanKey = cleanAttributionValue(dedupeKey, 160);
+  if (!cleanKey) return false;
+  const key = `${eventType}:${cleanKey}`;
+  if (sentMetrikaGoalKeys.has(key)) return false;
+  const sent = trackMetrikaGoal(eventType, metadata);
+  if (sent) sentMetrikaGoalKeys.add(key);
+  return sent;
+}
+
+function analyticsPetType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["cat", "кошка", "кот"].includes(normalized)) return "cat";
+  if (["dog", "собака", "пес", "пёс"].includes(normalized)) return "dog";
+  return "other";
 }
 
 function trackFunnel(eventType, metadata = {}) {
   if (isAdminRoute) return;
-  const enrichedMetadata = { ...captureFirstTouchAttribution(), ...metadata };
+  const enrichedMetadata = { ...metadata, ...attributionEventMetadata() };
   trackMetrikaGoal(eventType, enrichedMetadata);
   fetch("/api/funnel/event", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...attributionRequestHeaders() },
     credentials: "same-origin",
     body: JSON.stringify({
       event_type: eventType,
@@ -242,7 +494,7 @@ function trackFunnel(eventType, metadata = {}) {
 
 function trackAuthLoginSuccess(provider) {
   trackMetrikaGoal("auth.login_success", {
-    ...captureFirstTouchAttribution(),
+    ...attributionEventMetadata(),
     provider
   });
 }
@@ -268,7 +520,8 @@ function getMaxMiniAppStartParam() {
 
 function getStartupAction() {
   const queryAction = new URLSearchParams(window.location.search).get("action") || "";
-  const action = normalizeStartupAction(queryAction || getMaxMiniAppStartParam());
+  const queuedAction = sessionStorage.getItem(PENDING_STARTUP_ACTION_KEY) || "";
+  const action = normalizeStartupAction(queryAction || getMaxMiniAppStartParam() || queuedAction);
   return action && action !== consumedStartupAction ? action : "";
 }
 let maxMiniAppAuthTried = false;
@@ -307,7 +560,12 @@ let adminSystemData = null;
 let adminCurrentPage = "overview";
 const openCheckBtn = document.querySelector("#openCheckBtn");
 const openLoginBtn = document.querySelector("#openLoginBtn");
+const petOnboardingDialog = document.querySelector("#petOnboardingDialog");
+const petOnboardingCloseBtn = document.querySelector("#petOnboardingCloseBtn");
+const publicPetOnboardingForm = document.querySelector("#publicPetOnboardingForm");
+const petOnboardingHint = document.querySelector("#petOnboardingHint");
 const authDialog = document.querySelector("#authDialog");
+const authDialogTitle = document.querySelector("#authDialogTitle");
 const authDialogLead = document.querySelector("#authDialogLead");
 const authCloseBtn = document.querySelector("#authCloseBtn");
 const emailForm = document.querySelector("#emailForm");
@@ -335,51 +593,40 @@ const DASHBOARD_VIEW_HTML = `
     <div class="dashboard-head">
       <div>
         <p class="section-label">Личный кабинет</p>
-        <h1>Выберите действие</h1>
+        <h1>Здоровье питомца</h1>
       </div>
+      <button class="profile-button" data-action="account" type="button">
+        <span class="app-icon icon-user-round" aria-hidden="true"></span>
+        <span>Профиль</span>
+      </button>
     </div>
 
-    <div class="action-grid">
-      <button class="action-tile" data-action="triage" type="button">
-        <span class="tile-icon">🩺</span>
-        <span>Оценить состояние питомца</span>
+    <nav class="app-navigation" aria-label="Разделы личного кабинета">
+      <button class="app-nav-item is-active" data-action="home" type="button">
+        <span class="app-icon icon-house" aria-hidden="true"></span>
+        <span>Главная</span>
       </button>
-      <button class="action-tile" data-action="pets" type="button">
-        <span class="tile-icon">🐾</span>
-        <span>Мои питомцы</span>
+      <button class="app-nav-item" data-action="pets" type="button">
+        <span class="app-icon icon-paw-print" aria-hidden="true"></span>
+        <span>Питомцы</span>
       </button>
-      <button class="action-tile" data-action="reminders" type="button">
-        <span class="tile-icon">⏰</span>
+      <button class="app-nav-item" data-action="triage" type="button">
+        <span class="app-icon icon-heart-pulse" aria-hidden="true"></span>
+        <span>Изменения</span>
+      </button>
+      <button class="app-nav-item" data-action="reminders" type="button">
+        <span class="app-icon icon-bell" aria-hidden="true"></span>
         <span>Напоминания</span>
       </button>
-      <button class="action-tile" data-action="history" type="button">
-        <span class="tile-icon">📜</span>
-        <span>История здоровья</span>
+      <button class="app-nav-item" data-action="more" type="button">
+        <span class="app-icon icon-ellipsis" aria-hidden="true"></span>
+        <span>Ещё</span>
       </button>
-      <button class="action-tile" data-action="food" type="button">
-        <span class="tile-icon">🍽️</span>
-        <span>Питание</span>
-      </button>
-      <button class="action-tile" data-action="care" type="button">
-        <span class="tile-icon">🧴</span>
-        <span>Уход и привычки</span>
-      </button>
-      <button class="action-tile" data-action="faq" type="button">
-        <span class="tile-icon">❓</span>
-        <span>Вопросы и ответы</span>
-      </button>
-      <button class="action-tile" data-action="subscription" type="button">
-        <span class="tile-icon">💳</span>
-        <span>Подписка</span>
-      </button>
-    </div>
-    <div class="secondary-menu-row">
-      <button class="secondary-button" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
-    </div>
+    </nav>
 
     <div class="workspace" id="workspace">
-      <h2>Личный кабинет готов</h2>
-      <p>Начните с карточки питомца: после этого можно сохранять историю, наблюдения, вес и напоминания.</p>
+      <h2>Ваш кабинет</h2>
+      <p>Добавьте питомца или расскажите, что случилось.</p>
     </div>
   </section>
 `;
@@ -414,6 +661,10 @@ const periodicityOptions = [
   ["yearly", "Раз в год"]
 ];
 
+function periodicityLabel(value) {
+  return periodicityOptions.find(([key]) => key === value)?.[1] || "Один раз";
+}
+
 function createElementFromHtml(html) {
   const template = document.createElement("template");
   template.innerHTML = html.trim();
@@ -434,6 +685,16 @@ function removeDashboardView() {
   if (dashboardView && document.body.contains(dashboardView)) dashboardView.remove();
   dashboardView = null;
   workspace = null;
+}
+
+function setDashboardActiveAction(action) {
+  const navAction = ["home", "pets", "triage", "reminders"].includes(action) ? action : "more";
+  document.querySelectorAll(".app-nav-item").forEach((button) => {
+    const isActive = button.dataset.action === navAction;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
 }
 
 function ensureAdminView() {
@@ -471,12 +732,18 @@ function setAdminMode(isAuthed) {
   document.body.classList.remove("is-authed");
 }
 
-function openAuthDialog() {
+function openAuthDialog({ lead = "", startupAction = "" } = {}) {
+  authDialogContextLead = String(lead || "").trim();
+  const normalizedAction = normalizeStartupAction(startupAction);
+  if (normalizedAction) {
+    consumedStartupAction = "";
+    sessionStorage.setItem(PENDING_STARTUP_ACTION_KEY, normalizedAction);
+  }
   trackFunnel("auth.dialog_open", { source: "dialog" });
-  updateAuthDialogForPendingCheck();
+  updateAuthDialogForPendingSave();
   authDialog.hidden = false;
   authDialog.setAttribute("aria-hidden", "false");
-  const focusTarget = pendingPublicCheckSave() ? telegramBtn || maxBtn || emailInput : emailInput;
+  const focusTarget = emailInput || maxBtn || telegramBtn;
   setTimeout(() => focusTarget?.focus(), 0);
 }
 
@@ -491,6 +758,28 @@ function closeAuthDialog() {
   if (!authDialog) return;
   authDialog.hidden = true;
   authDialog.setAttribute("aria-hidden", "true");
+  authDialogContextLead = "";
+  updateAuthDialogForPendingSave();
+}
+
+function openPetOnboarding() {
+  if (!petOnboardingDialog) return;
+  const pending = pendingPetCreate();
+  if (pending && publicPetOnboardingForm) {
+    const typeInput = publicPetOnboardingForm.querySelector(`input[name="pet_type"][value="${pending.pet_type}"]`);
+    if (typeInput) typeInput.checked = true;
+    const nameInput = publicPetOnboardingForm.querySelector("input[name='pet_name']");
+    if (nameInput) nameInput.value = pending.pet_name;
+  }
+  petOnboardingDialog.hidden = false;
+  petOnboardingDialog.setAttribute("aria-hidden", "false");
+  setTimeout(() => publicPetOnboardingForm?.querySelector("input[name='pet_type']:checked, input[name='pet_type']")?.focus(), 0);
+}
+
+function closePetOnboarding() {
+  if (!petOnboardingDialog) return;
+  petOnboardingDialog.hidden = true;
+  petOnboardingDialog.setAttribute("aria-hidden", "true");
 }
 
 async function performLogout() {
@@ -509,6 +798,9 @@ async function performLogout() {
 
 function readableError(message) {
   const text = String(message || "");
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(text)) {
+    return "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.";
+  }
   const messages = {
     email_not_configured: "Вход по email временно недоступен. Попробуйте позже или используйте Telegram/MAX для подтверждения входа.",
     email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
@@ -523,17 +815,26 @@ function readableError(message) {
     payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
     payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
     payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку.",
-    push_not_configured: "PWA-уведомления временно недоступны. Основные функции кабинета работают без них.",
-    push_unsupported: "Этот браузер не поддерживает PWA-уведомления.",
+    push_not_configured: "Напоминания на этом устройстве временно недоступны. Остальные функции работают как обычно.",
+    push_unsupported: "Этот браузер не поддерживает напоминания.",
     push_permission_denied: "Браузер не дал разрешение на уведомления.",
     rate_limited: "Слишком много запросов. Подождите немного и попробуйте снова.",
     check_preview_already_used: "Пробный разбор уже использован. Войдите или зарегистрируйтесь, чтобы делать следующие разборы в личном кабинете.",
-    check_preview_rate_limited: "Пробные оценки временно ограничены. Войдите через Telegram или MAX, чтобы продолжить в личном кабинете.",
-    check_preview_ip_limit: "Слишком много пробных оценок с этой сети. Попробуйте позже или войдите через Telegram/MAX.",
+    check_preview_rate_limited: "Пробные разборы временно ограничены. Войдите через Telegram или MAX, чтобы продолжить в личном кабинете.",
+    check_preview_ip_limit: "Слишком много пробных разборов с этой сети. Попробуйте позже или войдите через Telegram/MAX.",
     check_preview_burst_limit: "Слишком много быстрых запросов подряд. Подождите минуту и попробуйте снова.",
     check_preview_text_too_short: "Опишите состояние чуть подробнее: что произошло, когда началось и как питомец ведёт себя сейчас.",
     invalid_check_preview: "Не удалось принять форму. Обновите страницу и попробуйте ещё раз.",
-    invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте следующую оценку там.",
+    invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте новый разбор там.",
+    invalid_check_preview_pet_selection: "Выберите одну карточку питомца или создание новой.",
+    check_preview_pet_required: "Выберите питомца, в историю которого нужно сохранить результат.",
+    check_preview_pet_not_found: "Выбранная карточка питомца больше недоступна. Выберите другую.",
+    check_preview_pet_type_mismatch: "Результат можно сохранить только в карточку питомца того же вида.",
+    food_species_mismatch: "Сервер вернул ответ для другого вида питомца. Обновите страницу и попробуйте снова.",
+    pet_limit_reached: "Лимит питомцев по текущему тарифу исчерпан. Существующие карточки и записи остаются доступны.",
+    reminder_limit_reached: "Лимит активных напоминаний по текущему тарифу исчерпан.",
+    summary_period_plus_required: "Периоды 90 дней и вся история доступны в Plus.",
+    summary_export_plus_required: "Печать и сохранение сводки в PDF доступны в Plus.",
     invalid_deletion_confirmation: "Для запроса удаления нужно ввести слово УДАЛИТЬ."
   };
   return messages[text] || text || "Не удалось выполнить действие.";
@@ -566,16 +867,201 @@ function pendingPublicCheckSave() {
   }
 }
 
+function pendingPublicFoodSave() {
+  try {
+    const raw = localStorage.getItem(PENDING_FOOD_SAVE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== "object") return null;
+    if (!payload.query || !payload.pet_type) return null;
+    return payload;
+  } catch {
+    localStorage.removeItem(PENDING_FOOD_SAVE_KEY);
+    return null;
+  }
+}
+
+function pendingPublicSave() {
+  return pendingPublicCheckSave() || pendingPublicFoodSave();
+}
+
+function pendingPetCreate() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_PET_CREATE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload?.pet_name || !["собака", "кошка"].includes(payload.pet_type)) return null;
+    return payload;
+  } catch {
+    sessionStorage.removeItem(PENDING_PET_CREATE_KEY);
+    return null;
+  }
+}
+
+function storePendingPetCreate(payload) {
+  if (!payload?.pet_name || !payload?.pet_type) return;
+  sessionStorage.setItem(PENDING_PET_CREATE_KEY, JSON.stringify(payload));
+  updateAuthDialogForPendingSave();
+}
+
+function clearPendingPetCreate() {
+  sessionStorage.removeItem(PENDING_PET_CREATE_KEY);
+  updateAuthDialogForPendingSave();
+}
+
+function trackServiceGoals(data, keyPrefix = "record") {
+  const service = data?.service || {};
+  if (service.first_record_saved) {
+    trackMetrikaGoalOnce("service.first_record_saved", `${keyPrefix}:first-record`, attributionEventMetadata());
+  }
+  if (service.activated) {
+    trackMetrikaGoalOnce("service.activated", `${keyPrefix}:activated`, attributionEventMetadata());
+  }
+}
+
+function publicCheckPreviewAlreadyUsed() {
+  try {
+    return localStorage.getItem(PUBLIC_CHECK_USED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markPublicCheckPreviewUsed() {
+  try {
+    localStorage.setItem(PUBLIC_CHECK_USED_KEY, "1");
+  } catch {
+    // A storage failure must not hide a medical result or block authentication.
+  }
+}
+
 function storePendingPublicCheckSave(payload) {
   if (!payload?.text || !payload?.answer) return;
+  localStorage.removeItem(PENDING_FOOD_SAVE_KEY);
   localStorage.setItem(PENDING_CHECK_SAVE_KEY, JSON.stringify(payload));
-  publicCheckView?.classList.add("has-pending-save");
 }
 
 function clearPendingPublicCheckSave() {
   localStorage.removeItem(PENDING_CHECK_SAVE_KEY);
   publicCheckView?.classList.remove("has-pending-save");
-  updateAuthDialogForPendingCheck();
+  updateAuthDialogForPendingSave();
+}
+
+function storePendingPublicFoodSave(payload) {
+  if (!payload?.query || !payload?.pet_type) return;
+  localStorage.removeItem(PENDING_CHECK_SAVE_KEY);
+  localStorage.setItem(PENDING_FOOD_SAVE_KEY, JSON.stringify(payload));
+}
+
+function clearPendingPublicFoodSave() {
+  localStorage.removeItem(PENDING_FOOD_SAVE_KEY);
+  publicCheckView?.classList.remove("has-pending-save");
+  updateAuthDialogForPendingSave();
+}
+
+function storePendingPublicSave(payload) {
+  if (payload?.save_kind === "food") storePendingPublicFoodSave(payload);
+  else storePendingPublicCheckSave(payload);
+}
+
+function pendingPublicCheckPetType(pending) {
+  const value = String(pending?.pet_type || "").trim().toLowerCase();
+  if (["cat", "кошка", "кот"].includes(value)) return "кошка";
+  if (["dog", "собака", "пес", "пёс"].includes(value)) return "собака";
+  return "питомец";
+}
+
+function pendingPublicCheckPetMatches(pet, pending) {
+  const expectedType = pendingPublicCheckPetType(pending);
+  if (expectedType === "питомец") return true;
+  return String(pet?.pet_type || "").trim().toLowerCase() === expectedType;
+}
+
+function pendingPublicCheckNeedsPetSelection(pending) {
+  if (pending?.pet_id || pending?.create_pet) return false;
+  if (!state.pets.length) return false;
+  return state.pets.length !== 1 || !pendingPublicCheckPetMatches(state.pets[0], pending);
+}
+
+function pendingSaveCopy(pending) {
+  if (pending?.save_kind === "food") {
+    return {
+      section: "Сохранение ответа",
+      pending: "Ответ ещё не сохранён.",
+      submit: "Сохранить ответ",
+    };
+  }
+  return {
+    section: "Сохранение случая",
+    pending: "Случай ещё не сохранён.",
+    submit: "Сохранить случай",
+  };
+}
+
+function renderPendingPublicCheckPetSelection(pending) {
+  ensureDashboardView();
+  const copy = pendingSaveCopy(pending);
+  const expectedType = pendingPublicCheckPetType(pending);
+  const compatiblePets = state.pets.filter((pet) => pendingPublicCheckPetMatches(pet, pending));
+  const petTypeLabel = expectedType === "кошка" ? "кошки" : expectedType === "собака" ? "собаки" : "питомца";
+  const existingChoices = compatiblePets
+    .map((pet) => `
+      <label class="checkbox-row">
+        <input name="pet_choice" value="${Number(pet.id)}" type="radio" required />
+        Сохранить в историю «${escapeHtml(pet.pet_name || "Питомец")}»
+      </label>
+    `)
+    .join("");
+
+  setWorkspace(`
+    <div class="workspace-head">
+      <div>
+        <p class="section-label">${copy.section}</p>
+        <h2>Выберите питомца</h2>
+      </div>
+      <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
+    </div>
+    <div class="notice">
+      <strong>${copy.pending}</strong>
+      <p>Чтобы он появился в истории, укажите карточку ${petTypeLabel}.</p>
+    </div>
+    ${compatiblePets.length ? "" : `<div class="care-note">Подходящей карточки ${petTypeLabel} пока нет. Можно создать новую и сохранить результат в неё.</div>`}
+    <form class="form-grid one-column" id="pendingCheckPetForm">
+      <fieldset>
+        <legend>Куда сохранить результат?</legend>
+        ${existingChoices}
+        <label class="checkbox-row">
+          <input name="pet_choice" value="new" type="radio" required />
+          Создать новую карточку ${petTypeLabel}
+        </label>
+      </fieldset>
+      <p class="field-error" data-pet-choice-error role="alert" hidden>Выберите карточку или создание новой.</p>
+      <button class="primary-button" type="submit">${copy.submit}</button>
+    </form>
+  `);
+
+  document.querySelector("#pendingCheckPetForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const choice = String(new FormData(form).get("pet_choice") || "");
+    const errorEl = form.querySelector("[data-pet-choice-error]");
+    if (!choice) {
+      if (errorEl) errorEl.hidden = false;
+      form.querySelector("input[name='pet_choice']")?.focus();
+      return;
+    }
+
+    const nextPending = { ...pending, create_pet: choice === "new" };
+    delete nextPending.pet_id;
+    if (choice !== "new") nextPending.pet_id = Number(choice);
+    storePendingPublicSave(nextPending);
+    const submitButton = form.querySelector("button[type='submit']");
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Сохраняю…";
+    }
+    await completePendingSaveAfterLogin();
+  });
 }
 
 function publicCheckSavePayload(data, variant, formValues) {
@@ -593,7 +1079,7 @@ function publicCheckSavePayload(data, variant, formValues) {
     total_tokens: data.total_tokens || 0,
     landing_slug: variant.slug,
     session_id: getFunnelSessionId(),
-    ...captureFirstTouchAttribution(),
+    ...attributionEventMetadata(),
     created_at: new Date().toISOString()
   };
 }
@@ -602,8 +1088,8 @@ function renderCheckSaveCallout() {
   return `
     <div class="check-save-callout">
       <div>
-        <strong>Разбор готов — сохраните его и получите ещё 5 оценок</strong>
-        <p>Telegram, MAX или почта · без телефона · результат не потеряется</p>
+        <strong>Сохранить случай</strong>
+        <p>Вернитесь к результату и проверьте, стало ли питомцу лучше или хуже.</p>
       </div>
       <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
@@ -612,71 +1098,280 @@ function renderCheckSaveCallout() {
 
 function renderCheckStickySave() {
   return `
-    <div class="check-sticky-save" role="region" aria-label="Сохранить разбор">
-      <span>Разбор готов · ещё 5 оценок бесплатно</span>
-      <button class="primary-button compact" data-check-save type="button">Сохранить результат</button>
+    <div class="check-sticky-save" data-check-save-sticky role="region" aria-live="polite" aria-label="Сохранить случай" hidden>
+      <div>
+        <strong>Сохранить случай</strong>
+        <span>Проверить позже, стало ли лучше или хуже</span>
+      </div>
+      <button class="primary-button compact" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
   `;
 }
 
-function updateAuthDialogForPendingCheck() {
-  const hasPendingCheck = Boolean(pendingPublicCheckSave());
-  authDialog?.classList.toggle("auth-save-intent", hasPendingCheck);
+function scheduleCheckStickySave(resultEl, level) {
+  const sticky = resultEl?.querySelector("[data-check-save-sticky]");
+  const callout = resultEl?.querySelector(".check-save-callout");
+  if (!sticky || !callout) return;
+  let revealed = false;
+  let observer = null;
+  const reveal = () => {
+    if (revealed || !sticky.isConnected) return;
+    revealed = true;
+    sticky.hidden = false;
+    sticky.classList.add("is-visible");
+    observer?.disconnect();
+  };
+  if ("IntersectionObserver" in window) {
+    observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.35)) reveal();
+    }, { threshold: [0.35] });
+    observer.observe(callout);
+  }
+  if (level !== "red") window.setTimeout(reveal, 8000);
+}
+
+function updateAuthDialogForPendingSave() {
+  const pendingPet = pendingPetCreate();
+  const pendingCheck = pendingPublicCheckSave();
+  const pendingFood = pendingPublicFoodSave();
+  const pending = pendingPet || pendingCheck || pendingFood;
+  authDialog?.classList.toggle("auth-save-intent", Boolean(pending));
+  if (authDialogTitle) {
+    const petType = pendingPublicCheckPetType(pending);
+    const petLabel = petType === "собака" ? "собаки" : petType === "кошка" ? "кошки" : "питомца";
+    authDialogTitle.textContent = pendingPet
+      ? `Сохранить карточку «${pendingPet.pet_name}»`
+      : pendingCheck
+        ? `Сохранить случай для ${petLabel}`
+        : pendingFood
+          ? `Сохранить ответ для ${petLabel}`
+          : "Войдите или создайте личный кабинет";
+  }
   if (!authDialogLead) return;
-  authDialogLead.textContent = hasPendingCheck
-    ? "Войдите через Telegram, MAX или российскую почту. Сразу после входа мы сохраним текущий разбор в кабинет."
-    : AUTH_DIALOG_DEFAULT_LEAD;
+  authDialogLead.textContent = pendingPet
+    ? "После входа карточка питомца создастся автоматически и только один раз."
+    : pending
+    ? "После входа автоматически вернём вас к результату и сохраним его."
+    : authDialogContextLead || AUTH_DIALOG_DEFAULT_LEAD;
+}
+
+async function completePendingSaveAfterLogin() {
+  if (pendingPetCreate()) return completePendingPetAfterLogin();
+  if (pendingPublicFoodSave()) return completePendingPublicFoodAfterLogin();
+  return completePendingPublicCheckAfterLogin();
+}
+
+async function completePendingPetAfterLogin() {
+  const pending = pendingPetCreate();
+  if (!pending) return false;
+  ensureDashboardView();
+  setWorkspace(`<div class="notice" role="status"><strong>Создаю карточку питомца…</strong></div>`);
+  try {
+    const data = await api("/api/pets", {
+      method: "POST",
+      body: JSON.stringify({
+        pet_type: pending.pet_type,
+        pet_name: pending.pet_name,
+        client_request_id: pending.client_request_id,
+        is_main: true
+      })
+    });
+    clearPendingPetCreate();
+    await refreshAccountState();
+    await refreshPets();
+    state.currentPetId = data.item.id;
+    if (data.created) {
+      trackMetrikaGoalOnce("pet.created", `pet:${data.item.id}`, {
+        ...attributionEventMetadata(),
+        pet_type: analyticsPetType(data.item.pet_type),
+        has_pet: true
+      });
+    }
+    setWorkspace(`
+      <div class="workspace-head">
+        <div><p class="section-label">Карточка создана</p><h2>Что сохраним первым для «${escapeHtml(data.item.pet_name)}»?</h2></div>
+      </div>
+      <div class="care-note">Первая запись активирует постоянную историю питомца.</div>
+      <div class="pet-action-grid first-value-actions">
+        <button class="menu-card" data-pet-view="weight" data-pet-id="${data.item.id}" type="button">${renderAppIcon("scale")}<span><strong>Записать вес</strong><small>Начать динамику веса</small></span></button>
+        <button class="menu-card" data-pet-view="observations" data-pet-id="${data.item.id}" type="button">${renderAppIcon("clipboard-list")}<span><strong>Сохранить наблюдение</strong><small>Аппетит, активность, поведение</small></span></button>
+        <button class="menu-card" data-pet-view="reminders" data-pet-id="${data.item.id}" type="button">${renderAppIcon("bell")}<span><strong>Добавить важную дату</strong><small>Прививка, обработка или осмотр</small></span></button>
+        <button class="menu-card" data-action="food" type="button">${renderAppIcon("utensils")}<span><strong>Проверить продукт</strong><small>Сохранить ответ в карточку</small></span></button>
+        <button class="menu-card" data-pet-view="triage" data-pet-id="${data.item.id}" type="button">${renderAppIcon("heart-pulse")}<span><strong>Рассказать, что изменилось</strong><small>Сохранить разбор в историю</small></span></button>
+      </div>
+    `);
+    return true;
+  } catch (error) {
+    setWorkspace(`<div class="notice danger" role="alert"><strong>Не удалось создать карточку</strong><p>${escapeHtml(readableError(error.message))}</p><button class="secondary-button compact" data-action="pets" type="button">Открыть питомцев</button></div>`);
+    return true;
+  }
 }
 
 async function completePendingPublicCheckAfterLogin() {
   const pending = pendingPublicCheckSave();
   if (!pending) return false;
   ensureDashboardView();
-  setWorkspace(`<div class="notice check-saved-state">Сохраняю пробный разбор в личный кабинет...</div>`);
   try {
+    await refreshPets();
+    if (pendingPublicCheckNeedsPetSelection(pending)) {
+      renderPendingPublicCheckPetSelection(pending);
+      return true;
+    }
+
+    const savePayload = { ...pending };
+    if (!savePayload.pet_id && !savePayload.create_pet) {
+      if (!state.pets.length) savePayload.create_pet = true;
+      else if (state.pets.length === 1 && pendingPublicCheckPetMatches(state.pets[0], savePayload)) {
+        savePayload.pet_id = Number(state.pets[0].id);
+      }
+    }
+    storePendingPublicCheckSave(savePayload);
+    setWorkspace(`<div class="notice check-saved-state">Сохраняю пробный разбор в личный кабинет...</div>`);
     const data = await api("/api/check/preview/save", {
       method: "POST",
-      body: JSON.stringify(pending)
+      body: JSON.stringify(savePayload)
     });
+    if (!data.pet?.id) throw new Error("check_preview_pet_required");
+    trackServiceGoals(data, `check:${data.item?.id || data.pet.id}`);
     clearPendingPublicCheckSave();
     await refreshAccountState();
     await refreshPets();
-    if (data.pet?.id) state.currentPetId = data.pet.id;
-    const petName = data.pet?.pet_name ? `«${escapeHtml(data.pet.pet_name)}»` : "питомца";
+    state.currentPetId = data.pet.id;
+    const petName = `«${escapeHtml(data.pet.pet_name || "Питомец")}»`;
     trackMetrikaGoal("check.saved_after_login", {
-      ...captureFirstTouchAttribution(),
-      slug: pending.landing_slug || "general",
-      pet_type: pending.pet_type || "unknown",
-      urgency: pending.urgency || "",
-      has_pet: Boolean(data.pet)
+      ...attributionEventMetadata(),
+      slug: savePayload.landing_slug || "general",
+      pet_type: savePayload.pet_type || "unknown",
+      urgency: savePayload.urgency || "",
+      has_pet: true
     });
     setWorkspace(`
       <div class="workspace-head">
-        <h2>Разбор сохранён</h2>
-        <button class="secondary-button compact" data-action="home" type="button">В меню</button>
+        <h2>Результат сохранён</h2>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
       </div>
       <div class="notice success check-saved-state">
-        <strong>Готово: первый разбор уже в истории ${petName}.</strong>
-        <p>В кабинете доступны следующие оценки состояния, карточки питомцев, история и напоминания.</p>
+        <strong>Готово: результат появился в истории ${petName}.</strong>
+        <p>Теперь к нему можно вернуться в любой момент.</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Оценить состояние питомца</button>
-          <button class="secondary-button" data-action="pets" type="button">Открыть питомцев</button>
-          <button class="secondary-button" data-action="home" type="button">На главную</button>
+          <button class="primary-button" data-action="triage" type="button">Рассказать ещё раз</button>
+          <button class="secondary-button" data-open-pet="${Number(data.pet.id)}" type="button">Открыть карточку питомца</button>
         </div>
       </div>
     `);
     return true;
   } catch (error) {
+    const selectionErrors = new Set([
+      "check_preview_pet_required",
+      "check_preview_pet_not_found",
+      "check_preview_pet_type_mismatch",
+      "invalid_check_preview_pet_selection"
+    ]);
+    if (selectionErrors.has(error.message)) {
+      const retryPending = { ...(pendingPublicCheckSave() || pending), create_pet: false };
+      delete retryPending.pet_id;
+      storePendingPublicCheckSave(retryPending);
+      try {
+        await refreshPets();
+      } catch {
+        // The selection screen still gives the user an honest retry path.
+      }
+      renderPendingPublicCheckPetSelection(retryPending);
+      return true;
+    }
     setWorkspace(`
       <div class="workspace-head">
-        <h2>Личный кабинет открыт</h2>
-        <button class="secondary-button compact" data-action="home" type="button">В меню</button>
+        <h2>Сохранение не завершено</h2>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
       </div>
       <div class="notice danger check-saved-state">
         <strong>Не удалось автоматически сохранить пробный разбор.</strong>
         <p>${escapeHtml(readableError(error.message))}</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Оценить состояние в кабинете</button>
+          <button class="primary-button" data-action="triage" type="button">Рассказать ещё раз</button>
+          <button class="secondary-button" data-action="home" type="button">На главную</button>
+        </div>
+      </div>
+    `);
+    return true;
+  }
+}
+
+async function completePendingPublicFoodAfterLogin() {
+  const pending = pendingPublicFoodSave();
+  if (!pending) return false;
+  ensureDashboardView();
+  try {
+    await refreshPets();
+    if (pendingPublicCheckNeedsPetSelection(pending)) {
+      renderPendingPublicCheckPetSelection(pending);
+      return true;
+    }
+
+    const savePayload = { ...pending };
+    if (!savePayload.pet_id && !savePayload.create_pet) {
+      if (!state.pets.length) savePayload.create_pet = true;
+      else if (state.pets.length === 1 && pendingPublicCheckPetMatches(state.pets[0], savePayload)) {
+        savePayload.pet_id = Number(state.pets[0].id);
+      }
+    }
+    storePendingPublicFoodSave(savePayload);
+    setWorkspace(`<div class="notice check-saved-state">Сохраняю ответ в карточку питомца…</div>`);
+    const data = await api("/api/food/check/save", {
+      method: "POST",
+      body: JSON.stringify(savePayload),
+    });
+    if (!data.pet?.id) throw new Error("check_preview_pet_required");
+    trackServiceGoals(data, `food:${data.item?.id || data.pet.id}`);
+    clearPendingPublicFoodSave();
+    await refreshAccountState();
+    await refreshPets();
+    state.currentPetId = data.pet.id;
+    const petName = `«${escapeHtml(data.pet.pet_name || "Питомец")}»`;
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>Ответ сохранён</h2>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
+      </div>
+      <div class="notice success check-saved-state">
+        <strong>Готово: ответ появился в наблюдениях ${petName}.</strong>
+        <p>Теперь к нему можно вернуться в карточке питомца.</p>
+        <div class="next-actions">
+          <button class="primary-button" data-pet-view="observations" data-pet-id="${Number(data.pet.id)}" type="button">Открыть сохранённый ответ</button>
+          <button class="secondary-button" data-action="food" type="button">Проверить ещё продукт</button>
+        </div>
+      </div>
+    `);
+    return true;
+  } catch (error) {
+    const selectionErrors = new Set([
+      "check_preview_pet_required",
+      "check_preview_pet_not_found",
+      "check_preview_pet_type_mismatch",
+      "invalid_check_preview_pet_selection",
+    ]);
+    if (selectionErrors.has(error.message)) {
+      const retryPending = { ...(pendingPublicFoodSave() || pending), create_pet: false };
+      delete retryPending.pet_id;
+      storePendingPublicFoodSave(retryPending);
+      try {
+        await refreshPets();
+      } catch {
+        // The selection screen still gives the user an honest retry path.
+      }
+      renderPendingPublicCheckPetSelection(retryPending);
+      return true;
+    }
+    setWorkspace(`
+      <div class="workspace-head">
+        <h2>Сохранение не завершено</h2>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
+      </div>
+      <div class="notice danger check-saved-state">
+        <strong>Не удалось автоматически сохранить ответ.</strong>
+        <p>${escapeHtml(readableError(error.message))}</p>
+        <div class="next-actions">
+          <button class="primary-button" data-action="food" type="button">Проверить продукт ещё раз</button>
           <button class="secondary-button" data-action="home" type="button">На главную</button>
         </div>
       </div>
@@ -701,10 +1396,9 @@ function renderExampleChips(examples) {
 }
 
 function publicCheckResultLabel(data) {
-  if (data.urgency_label) return data.urgency_label;
-  if (data.urgency === "red") return "Срочно в клинику";
-  if (data.urgency === "green") return "Можно наблюдать";
-  return "Нужна консультация";
+  if (data.urgency === "red") return "Нужна клиника сейчас";
+  if (data.urgency === "green") return "Ответ готов";
+  return "Обратите внимание";
 }
 
 function publicCheckResultClass(data) {
@@ -737,14 +1431,44 @@ function revealPublicCheckState(element, { block = "start", settleViewport = fal
   window.setTimeout(finishViewportScroll, 350);
 }
 
+function trackFunnelWhenVisible(element, eventType, metadata = {}, key = eventType) {
+  if (!element || visibleFunnelEventKeys.has(key)) return;
+  const send = () => {
+    if (visibleFunnelEventKeys.has(key)) return;
+    visibleFunnelEventKeys.add(key);
+    trackFunnel(eventType, metadata);
+  };
+  if (!("IntersectionObserver" in window)) {
+    send();
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.5)) return;
+    observer.disconnect();
+    send();
+  }, { threshold: [0.5] });
+  observer.observe(element);
+}
+
+function setPublicCheckGateState() {
+  const promise = publicCheckView?.querySelector(".check-promise");
+  const promiseTitle = promise?.querySelector("strong");
+  const promiseHint = promise?.querySelector("span");
+  const form = publicCheckView?.querySelector("#publicCheckForm");
+  if (promiseTitle) promiseTitle.textContent = "Пробный разбор уже получен";
+  if (promiseHint) promiseHint.textContent = "Войдите, чтобы сохранить результат и продолжить";
+  if (form) form.hidden = true;
+}
+
 function renderPublicCheckAuthPrompt(message) {
   const resultEl = publicCheckView?.querySelector("#publicCheckResult");
   if (!resultEl) return;
+  setPublicCheckGateState();
   publicCheckView?.classList.remove("has-pending-save");
   resultEl.innerHTML = `
     <div class="notice check-auth-notice">
       <strong>${escapeHtml(message)}</strong>
-      <p>Чтобы продолжить, войдите через Telegram, MAX или российскую почту. В кабинете доступны следующие оценки состояния и история питомца.</p>
+      <p>Чтобы продолжить, войдите через Telegram, MAX или электронную почту. В кабинете сохраняется история питомца.</p>
       <div class="next-actions check-result-actions">
         <button class="primary-button" data-check-save type="button">Войти и продолжить в кабинете</button>
         <a class="secondary-link compact" href="/">На главную TemichevVet</a>
@@ -763,22 +1487,34 @@ function renderPublicCheckResult(data, variant, petType, formValues) {
   const className = publicCheckResultClass(data);
   const label = publicCheckResultLabel(data);
   const answer = data.answer || "Не удалось сформировать разбор.";
+  if (data.usage_consumed) markPublicCheckPreviewUsed();
   storePendingPublicCheckSave(publicCheckSavePayload(data, variant, formValues));
+  publicCheckView.classList.add("has-pending-save");
   resultEl.innerHTML = `
-    ${renderCheckSaveCallout()}
     <div class="result-box check-result ${className}" data-triage-answer="${escapeHtml(answer)}">
       <span class="check-result-badge">${escapeHtml(label)}</span>
+      <h2>Что важно сейчас</h2>
       ${formatTriageAnswer(answer)}
-      <div class="next-actions check-result-actions">
-        <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
-        <a class="secondary-link compact" href="/">На главную TemichevVet</a>
-        <a class="secondary-link compact" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
-        <a class="secondary-link compact" href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
-      </div>
     </div>
+    ${renderCheckSaveCallout()}
     ${renderCheckStickySave()}
   `;
   trackFunnel("check.result_shown", { slug: variant.slug, pet_type: petType || "unknown", level });
+  const saveCtaViewKey = `check-save-cta:${getFunnelSessionId()}:${variant.slug}`;
+  const saveCtaMetadata = { slug: variant.slug, pet_type: petType || "unknown", level };
+  trackFunnelWhenVisible(
+    resultEl.querySelector(".check-save-callout"),
+    "check.save_cta_view",
+    saveCtaMetadata,
+    saveCtaViewKey,
+  );
+  trackFunnelWhenVisible(
+    resultEl.querySelector("[data-check-save-sticky]"),
+    "check.save_cta_view",
+    saveCtaMetadata,
+    saveCtaViewKey,
+  );
+  scheduleCheckStickySave(resultEl, level);
   if (level === "red") {
     trackFunnel("check.red_flag", { slug: variant.slug, pet_type: petType || "unknown", level });
   }
@@ -788,7 +1524,20 @@ function renderPublicCheckResult(data, variant, petType, formValues) {
 function renderPublicCheckLanding() {
   if (!publicCheckView || !isCheckLandingRoute()) return false;
   const variant = getCheckLandingVariant();
+  const previewAlreadyUsed = !state.user && publicCheckPreviewAlreadyUsed();
   document.body.classList.add("is-check-landing");
+  document.title = `${variant.title} — TemichevVet`;
+  const checkDescription = document.querySelector('meta[name="description"]');
+  if (checkDescription) checkDescription.setAttribute("content", "Разберите изменение и сохраните ответ в истории питомца рядом с весом, питанием и важными датами.");
+  const checkCanonical = document.querySelector('link[rel="canonical"]');
+  if (checkCanonical) checkCanonical.setAttribute("href", "https://temichevvet.ru/check");
+  let robots = document.querySelector('meta[name="robots"]');
+  if (!robots) {
+    robots = document.createElement("meta");
+    robots.setAttribute("name", "robots");
+    document.head.append(robots);
+  }
+  robots.setAttribute("content", "noindex,follow");
   publicCheckView.hidden = false;
   publicCheckView.classList.remove("has-pending-save");
   publicCheckView.innerHTML = `
@@ -796,15 +1545,22 @@ function renderPublicCheckLanding() {
       <div class="check-hero-copy">
         <p class="section-label">${escapeHtml(variant.label)}</p>
         <h1>${escapeHtml(variant.title)}</h1>
-        <div class="check-promise" aria-label="Условия оценки">
-          <strong>Бесплатно, без регистрации до результата</strong>
-          <span>Обычно 15–30 секунд</span>
+        <div class="check-promise" aria-label="Условия сервиса">
+          <strong>${previewAlreadyUsed ? "Пробный разбор уже получен" : "Бесплатно · без регистрации"}</strong>
+          <span>${previewAlreadyUsed ? "Войдите, чтобы сохранить результат и продолжить" : "Обычно 15–30 секунд"}</span>
         </div>
         <p class="lead">${escapeHtml(variant.lead)}</p>
+        <div class="check-expert-trust">
+          <img src="/static/assets/doctor-konstantin-cat-table-retouched.jpg" alt="Ветеринарный врач Константин Темичев с кошкой" />
+          <div>
+            <strong>Константин Валерьевич Темичев</strong>
+            <span>ветеринарный врач</span>
+          </div>
+        </div>
       </div>
       <section class="check-hero-form" id="checkFormPanel" aria-labelledby="checkFormTitle">
-        <h2 id="checkFormTitle">Что происходит с питомцем?</h2>
-      <form class="form-grid one-column check-form" id="publicCheckForm" novalidate>
+        <h2 id="checkFormTitle">Расскажите, что происходит</h2>
+      <form class="form-grid one-column check-form" id="publicCheckForm" novalidate ${previewAlreadyUsed ? "hidden" : ""}>
         <div class="check-species-control" role="radiogroup" aria-label="Тип питомца">
           <label>
             <input type="radio" name="pet_type" value="dog" ${variant.defaultPet === "dog" ? "checked" : ""} required />
@@ -817,7 +1573,7 @@ function renderPublicCheckLanding() {
         </div>
         <p class="field-error" id="checkSpeciesError" role="alert" hidden>Выберите: кошка или собака.</p>
         <label>
-          <span>Опишите симптомы простыми словами</span>
+          <span>Что изменилось?</span>
           <textarea name="text" placeholder="${escapeHtml(variant.placeholder)}" minlength="10" maxlength="1200" required></textarea>
         </label>
         <p class="field-error" id="checkTextError" role="alert" hidden>Добавьте немного деталей: что произошло, когда началось и как питомец ведёт себя сейчас.</p>
@@ -840,38 +1596,33 @@ function renderPublicCheckLanding() {
             <label class="checkbox-row"><input name="red_flags" value="bleeding" type="checkbox" /> Кровь, сильная боль или резкое ухудшение</label>
           </fieldset>
         </details>
-        <button class="primary-button" type="submit">Бесплатно оценить состояние</button>
-        <p class="check-form-disclaimer">Это не диагноз и не замена осмотра врача.</p>
+        <p class="check-urgent-warning">
+          Если питомцу тяжело дышать, он теряет сознание, не может помочиться или есть сильное кровотечение — не ждите онлайн-разбора, сразу обратитесь в клинику.
+        </p>
+        <button class="primary-button" type="submit">Получить разбор</button>
+        <p class="check-form-disclaimer">Сервис не ставит диагноз и не заменяет консультацию ветеринара.</p>
       </form>
       <div id="publicCheckResult"></div>
       </section>
-      <aside class="check-example" aria-label="Пример результата">
-        <div>
-          <p class="section-label">Пример готового результата</p>
-          <strong><span aria-hidden="true">●</span> Можно наблюдать</strong>
-          <p>Свежая вода и спокойное место · отмечать еду, воду и туалет · при ухудшении обратиться к врачу.</p>
-        </div>
-        <small>Пример формата, не рекомендация для вашего питомца.</small>
-      </aside>
     </div>
 
     <section class="content-section check-benefits" aria-labelledby="checkBenefitsTitle">
       <div class="section-head">
-        <p class="section-label">Зачем это владельцу</p>
-        <h2 id="checkBenefitsTitle">Сначала польза, потом регистрация</h2>
+        <p class="section-label">После ответа</p>
+        <h2 id="checkBenefitsTitle">Всё важное останется перед глазами</h2>
       </div>
       <div class="feature-card-grid">
         <article class="feature-card">
-          <strong>Понять уровень риска</strong>
-          <p>Сервис отделяет тревожные признаки от ситуаций, где можно спокойно собрать данные и наблюдать.</p>
+          <strong>Понятный ответ</strong>
+          <p>Вы получите понятный разбор изменений и сможете сохранить его в историю питомца.</p>
         </article>
         <article class="feature-card">
-          <strong>Подготовиться к врачу</strong>
-          <p>Разбор помогает вспомнить важное: когда началось, как часто повторяется, что изменилось в поведении.</p>
+          <strong>Опасные признаки сразу</strong>
+          <p>Предупреждения об опасных признаках показываются до регистрации и не скрываются.</p>
         </article>
         <article class="feature-card">
           <strong>Сохранить динамику</strong>
-          <p>После результата можно войти через Telegram, MAX или российскую почту и сохранить разбор в истории питомца.</p>
+          <p>После результата можно войти и сохранить его в истории питомца.</p>
         </article>
       </div>
     </section>
@@ -907,7 +1658,8 @@ function renderPublicCheckLanding() {
   });
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const submittedForm = event.currentTarget;
+    const formData = new FormData(submittedForm);
     const text = String(formData.get("text") || "").trim();
     const redFlags = formData.getAll("red_flags").map(String);
     const petType = String(formData.get("pet_type") || "");
@@ -918,7 +1670,7 @@ function renderPublicCheckLanding() {
     if (speciesError) speciesError.hidden = hasSpecies;
     if (textError) textError.hidden = hasEnoughText;
     if (!hasSpecies || !hasEnoughText) {
-      (hasSpecies ? symptomsInput : form.querySelector("input[name='pet_type']"))?.focus();
+      (hasSpecies ? symptomsInput : submittedForm.querySelector("input[name='pet_type']"))?.focus();
       return;
     }
     const previewInput = {
@@ -930,18 +1682,18 @@ function renderPublicCheckLanding() {
       session_id: getFunnelSessionId()
     };
     const resultEl = publicCheckView.querySelector("#publicCheckResult");
-    const submitButton = event.currentTarget.querySelector("button[type='submit']");
+    const submitButton = submittedForm.querySelector("button[type='submit']");
     if (submitButton?.disabled) return;
     trackFunnel("check.submit", { slug: variant.slug, pet_type: petType });
-    event.currentTarget.setAttribute("aria-busy", "true");
+    submittedForm.setAttribute("aria-busy", "true");
     if (submitButton) {
       submitButton.disabled = true;
-      submitButton.textContent = "Оцениваем состояние…";
+      submitButton.textContent = "Готовим ответ…";
     }
     if (resultEl) {
       resultEl.innerHTML = `
         <div class="notice check-loading" role="status" aria-live="polite" aria-atomic="true">
-          <strong>Оцениваем состояние питомца</strong>
+          <strong>Готовим ответ…</strong>
           <span>Обычно это занимает 15–30 секунд. Не закрывайте страницу.</span>
         </div>
       `;
@@ -965,32 +1717,344 @@ function renderPublicCheckLanding() {
           "check_preview_burst_limit"
         ].includes(error.message);
         if (authRequired) {
+          if (error.message === "check_preview_already_used") markPublicCheckPreviewUsed();
           renderPublicCheckAuthPrompt(readableError(error.message));
         } else {
-          resultEl.innerHTML = `<div class="notice danger" role="alert"><strong>Не удалось получить результат.</strong><p>${escapeHtml(readableError(error.message))}</p><p>Ваш текст сохранён в форме — можно попробовать ещё раз.</p></div>`;
+          resultEl.innerHTML = `<div class="notice danger" role="alert"><strong>Не получилось загрузить результат</strong><p>${escapeHtml(readableError(error.message))}</p><p>Текст остался в форме.</p><button class="secondary-button compact" data-check-retry type="button">Попробовать ещё раз</button></div>`;
           revealPublicCheckState(resultEl.querySelector(".notice.danger"));
         }
       }
     } finally {
-      event.currentTarget.removeAttribute("aria-busy");
+      submittedForm.removeAttribute("aria-busy");
       if (submitButton) {
         submitButton.disabled = false;
-        submitButton.textContent = "Бесплатно оценить состояние";
+        submitButton.textContent = "Узнать, что делать";
       }
     }
   });
   publicCheckView.addEventListener("click", async (event) => {
+    const retryButton = event.target.closest("[data-check-retry]");
+    if (retryButton) {
+      form?.requestSubmit();
+      return;
+    }
     const saveButton = event.target.closest("[data-check-save]");
     if (saveButton) {
       trackFunnel("check.save_click", { slug: variant.slug });
       if (state.user) {
         saveButton.disabled = true;
-        await completePendingPublicCheckAfterLogin();
+        await completePendingSaveAfterLogin();
         saveButton.disabled = false;
         return;
       }
       openAuthDialog();
       return;
+    }
+  });
+  if (previewAlreadyUsed) {
+    renderPublicCheckAuthPrompt(readableError("check_preview_already_used"));
+  }
+  return true;
+}
+
+function getPublicCampaignLanding() {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  return PUBLIC_CAMPAIGN_LANDINGS[path] || null;
+}
+
+function setPublicCampaignMetadata(variant) {
+  const canonicalUrl = `https://temichevvet.ru${variant.path || (variant.kind === "food" ? `/food/${variant.petType}` : "/pet")}`;
+  document.title = `${variant.title} — TemichevVet`;
+  const description = document.querySelector('meta[name="description"]');
+  if (description) description.setAttribute("content", variant.description);
+  const canonical = document.querySelector('link[rel="canonical"]');
+  if (canonical) canonical.setAttribute("href", canonicalUrl);
+  const ogTitle = document.querySelector('meta[property="og:title"]');
+  if (ogTitle) ogTitle.setAttribute("content", `${variant.title} — TemichevVet`);
+  const ogDescription = document.querySelector('meta[property="og:description"]');
+  if (ogDescription) ogDescription.setAttribute("content", variant.description);
+  const ogUrl = document.querySelector('meta[property="og:url"]');
+  if (ogUrl) ogUrl.setAttribute("content", canonicalUrl);
+  const ogImage = document.querySelector('meta[property="og:image"]');
+  if (ogImage && variant.image) ogImage.setAttribute("content", `https://temichevvet.ru${variant.image}`);
+  let robots = document.querySelector('meta[name="robots"]');
+  if (!robots) {
+    robots = document.createElement("meta");
+    robots.setAttribute("name", "robots");
+    document.head.append(robots);
+  }
+  robots.setAttribute("content", "index,follow");
+}
+
+async function openPublicCampaignCabinet(variant, target) {
+  const eventType = variant.kind === "food" ? "food.card_start_click" : "pet.card_start_click";
+  trackFunnel(eventType, { slug: variant.slug, pet_type: variant.petType || "unknown", target });
+  openPetOnboarding();
+}
+
+function renderPetCampaignLanding(variant) {
+  const benefits = (variant.benefits || []).map((item, index) => {
+    const icons = ["paw-print", "scale", "book-open", "calendar-days"];
+    return `<li>${renderAppIcon(icons[index] || "heart-pulse")}<span>${escapeHtml(item)}</span></li>`;
+  }).join("");
+  publicCheckView.innerHTML = `
+    <div class="campaign-page pet-campaign-page">
+      <section class="intro-panel campaign-hero pet-passport-landing" aria-labelledby="petCampaignTitle">
+        <div class="campaign-hero-copy pet-passport-copy">
+          <p class="section-label">${escapeHtml(variant.label)}</p>
+          <h1 id="petCampaignTitle">${escapeHtml(variant.headline)}</h1>
+          <p class="lead">${escapeHtml(variant.description)}</p>
+          <ul class="passport-benefit-list" aria-label="Что хранится в карточке питомца">
+            ${benefits}
+          </ul>
+          <div class="campaign-hero-actions">
+            <button class="primary-button" data-public-campaign-auth data-target="hero" type="button">Добавить питомца</button>
+          </div>
+          <p class="campaign-microcopy">Бесплатно. Для начала достаточно клички и вида питомца.</p>
+        </div>
+        <div class="campaign-hero-media campaign-pet-media">
+          <img src="${escapeHtml(variant.image)}" alt="${escapeHtml(variant.imageAlt)}" />
+        </div>
+      </section>
+      <aside class="passport-legal-note" aria-label="Важное уточнение">
+        <strong>Личный журнал владельца.</strong>
+        <span>Не заменяет официальный ветеринарный паспорт.</span>
+      </aside>
+    </div>
+  `;
+}
+
+function publicFoodSavePayload(variant, formValues) {
+  return {
+    save_kind: "food",
+    pet_type: variant.petType,
+    species: variant.petType,
+    query: formValues.query || "",
+    ingredients: formValues.ingredients || "",
+    landing_slug: variant.slug,
+    session_id: getFunnelSessionId(),
+    ...attributionEventMetadata(),
+    created_at: new Date().toISOString(),
+  };
+}
+
+function renderFoodSaveCallout() {
+  return `
+    <div class="campaign-result-next food-save-callout">
+      <div>
+        <strong>Сохраните ответ в карточку питомца</strong>
+        <p>Он останется вместе с наблюдениями, чтобы к нему можно было вернуться.</p>
+      </div>
+      <button class="primary-button" data-food-save type="button">Сохранить ответ</button>
+    </div>
+  `;
+}
+
+function renderPublicFoodResult(data, variant, formValues) {
+  const resultEl = publicCheckView.querySelector("#publicFoodResult");
+  if (!resultEl) return;
+  const item = data.item || null;
+  const ingredientDanger = Array.isArray(data.items) && data.items.some((entry) => entry && entry.allowed === false);
+  const isDanger = Boolean(item && item.allowed === false) || ingredientDanger;
+  const requiresImmediateContact = Boolean(data.requires_immediate_vet_contact);
+  const exposureAdvice = data.exposure_advice
+    || "Если питомец уже съел этот продукт, немедленно свяжитесь с ветеринарной клиникой или ветеринарной токсикологической службой, даже если симптомов пока нет.";
+  const sharedDatabaseDisclaimer = data.disclaimer
+    || "Ответ сформирован по общей справочной базе для кошек и собак и не является анализом корма, этикетки или индивидуальной рекомендацией.";
+  const resultLevel = isDanger ? "avoid" : item?.allowed ? "allowed" : data.status || "unknown";
+  const resultClass = isDanger ? "danger" : item?.allowed ? "success" : "warning";
+  let answerMarkup = "";
+  if (item) {
+    const details = [
+      ["Сведения из общей базы", item.effects],
+      ["Уровень риска в базе", item.risk_level],
+      ["О количестве", item.dose_note],
+      ["Общая рекомендация", item.advice]
+    ].filter(([, value]) => String(value || "").trim());
+    answerMarkup = `
+      <div class="campaign-food-answer-head">
+        <span>${item.allowed ? "Можно понемногу" : "Лучше не давать"}</span>
+        <h2>${escapeHtml(item.name || "Продукт")}</h2>
+      </div>
+      <dl class="campaign-food-answer-details">
+        ${details.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}
+      </dl>
+    `;
+  } else {
+    const fallbackTitle = isDanger
+      ? "Лучше не давать"
+      : data.status === "ingredients_checked"
+        ? "Состав проверен"
+        : "Нужно уточнение";
+    answerMarkup = `
+      <div class="campaign-food-answer-head">
+        <h2>${escapeHtml(fallbackTitle)}</h2>
+      </div>
+      <p class="campaign-food-answer-message">${escapeHtml(data.message || "Не удалось найти ответ.")}</p>
+    `;
+  }
+  const resultMarkup = `<div class="result-box campaign-food-result ${resultClass}">${answerMarkup}</div>`;
+  const safetyMarkup = requiresImmediateContact
+    ? `
+      <div class="campaign-food-safety">
+        <strong>Питомец уже съел этот продукт?</strong>
+        <p>${escapeHtml(exposureAdvice)}</p>
+      </div>
+    `
+    : `
+      <div class="campaign-food-safety">
+        <strong>После продукта появились симптомы?</strong>
+        <p>При рвоте, слабости, судорогах, тяжёлом дыхании или быстром ухудшении срочно обратитесь в клинику.</p>
+        <a class="secondary-link compact" href="/check/poisoning">Узнать, что делать</a>
+      </div>
+    `;
+
+  resultEl.innerHTML = `
+    ${resultMarkup}
+    ${safetyMarkup}
+    <p class="campaign-food-disclaimer">Запрос для ${escapeHtml(data.species_label || variant.petLabel)}. ${escapeHtml(sharedDatabaseDisclaimer)}</p>
+    ${renderFoodSaveCallout()}
+  `;
+  storePendingPublicFoodSave(publicFoodSavePayload(variant, formValues));
+  trackFunnel("food.result_shown", { slug: variant.slug, pet_type: data.species || variant.petType, level: resultLevel });
+  trackFunnelWhenVisible(
+    resultEl.querySelector(".food-save-callout"),
+    "food.save_cta_view",
+    { slug: variant.slug, pet_type: data.species || variant.petType, level: resultLevel },
+    `food-save-cta:${getFunnelSessionId()}:${variant.slug}`,
+  );
+  revealPublicCheckState(resultEl.querySelector(".campaign-food-result"));
+}
+
+function renderFoodCampaignLanding(variant) {
+  const exampleButtons = variant.examples
+    .map((example) => `<button type="button" data-food-example="${escapeHtml(example)}">${escapeHtml(example)}</button>`)
+    .join("");
+  publicCheckView.innerHTML = `
+    <div class="campaign-page food-campaign-page">
+      <section class="intro-panel campaign-food-hero" aria-labelledby="foodCampaignTitle">
+        <div class="campaign-food-copy">
+          <div class="campaign-food-photo">
+            <img src="${escapeHtml(variant.image)}" alt="${escapeHtml(variant.imageAlt)}" />
+          </div>
+          <p class="section-label">${escapeHtml(variant.label)}</p>
+          <h1 id="foodCampaignTitle">${escapeHtml(variant.title)}</h1>
+          <p class="lead">Сверим продукт или состав блюда с общей справочной базой.</p>
+          <div class="campaign-food-points" aria-label="Условия проверки">
+            <span>Бесплатно</span>
+            <span>Без регистрации</span>
+          </div>
+          <p class="campaign-food-note">Запрос для ${escapeHtml(variant.petLabel)}. База общая для кошек и собак, не содержит отдельных правил по виду и не является анализом корма или этикетки.</p>
+        </div>
+        <section class="campaign-food-form-panel" aria-labelledby="foodFormTitle">
+          <h2 id="foodFormTitle">Какой продукт проверить?</h2>
+          <form class="form-grid one-column campaign-food-form" id="publicFoodForm">
+            <label>
+              <span>Название продукта или блюда</span>
+              <input name="query" maxlength="160" placeholder="${escapeHtml(variant.placeholder)}" required />
+            </label>
+            <div class="campaign-food-examples" aria-label="Примеры продуктов">${exampleButtons}</div>
+            <label>
+              <span>Если это готовое блюдо, напишите состав <small>необязательно</small></span>
+              <textarea name="ingredients" maxlength="1000" placeholder="Например: мясо, рис, лук, соль"></textarea>
+            </label>
+            <button class="primary-button" type="submit">Узнать, можно ли давать</button>
+            <p class="campaign-microcopy">Ответ сразу на странице</p>
+          </form>
+          <div id="publicFoodResult" aria-live="polite"></div>
+        </section>
+      </section>
+    </div>
+  `;
+
+  const form = publicCheckView.querySelector("#publicFoodForm");
+  const queryInput = form?.querySelector("input[name='query']");
+  publicCheckView.querySelectorAll("[data-food-example]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!queryInput) return;
+      queryInput.value = button.dataset.foodExample || "";
+      queryInput.focus();
+    });
+  });
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submittedForm = event.currentTarget;
+    const formData = new FormData(submittedForm);
+    const query = String(formData.get("query") || "").trim();
+    const ingredients = String(formData.get("ingredients") || "").trim();
+    if (!query) {
+      queryInput?.focus();
+      return;
+    }
+    const resultEl = publicCheckView.querySelector("#publicFoodResult");
+    const submitButton = submittedForm.querySelector("button[type='submit']");
+    if (submitButton?.disabled) return;
+    trackFunnel("food.submit", { slug: variant.slug, pet_type: variant.petType });
+    submittedForm.setAttribute("aria-busy", "true");
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Проверяю…";
+    }
+    if (resultEl) {
+      resultEl.innerHTML = `<div class="notice check-loading" role="status"><strong>Проверяю продукт…</strong><span>Ответ появится здесь.</span></div>`;
+    }
+    try {
+      const data = await api("/api/food/check", {
+        method: "POST",
+        body: JSON.stringify({ species: variant.petType, query, ingredients })
+      });
+      if (data.species !== variant.petType) throw new Error("food_species_mismatch");
+      renderPublicFoodResult(data, variant, { query, ingredients });
+    } catch (error) {
+      if (resultEl) {
+        resultEl.innerHTML = `<div class="notice danger" role="alert"><strong>Не получилось проверить продукт</strong><p>${escapeHtml(readableError(error.message))}</p><button class="secondary-button compact" data-food-retry type="button">Попробовать ещё раз</button></div>`;
+      }
+    } finally {
+      submittedForm.removeAttribute("aria-busy");
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = "Узнать, можно ли давать";
+      }
+    }
+  });
+}
+
+function renderPublicCampaignLanding() {
+  const variant = getPublicCampaignLanding();
+  if (!publicCheckView || !variant) return false;
+  document.body.classList.add("is-public-campaign", `is-${variant.kind}-campaign`);
+  publicCheckView.hidden = false;
+  publicCheckView.classList.remove("has-pending-save");
+  setPublicCampaignMetadata(variant);
+  if (variant.kind === "food") renderFoodCampaignLanding(variant);
+  else renderPetCampaignLanding(variant);
+
+  if (campaignLandingViewTrackedPath !== window.location.pathname) {
+    campaignLandingViewTrackedPath = window.location.pathname;
+    const eventType = variant.kind === "food" ? "food.landing_view" : "pet.landing_view";
+    trackFunnel(eventType, { slug: variant.slug, pet_type: variant.petType || "unknown", path: window.location.pathname });
+  }
+
+  publicCheckView.addEventListener("click", async (event) => {
+    const retryButton = event.target.closest("[data-food-retry]");
+    if (retryButton) {
+      publicCheckView.querySelector("#publicFoodForm")?.requestSubmit();
+      return;
+    }
+    const foodSaveButton = event.target.closest("[data-food-save]");
+    if (foodSaveButton) {
+      trackFunnel("food.card_start_click", { slug: variant.slug, pet_type: variant.petType, target: "food_result" });
+      foodSaveButton.disabled = true;
+      if (state.user) await completePendingSaveAfterLogin();
+      else openAuthDialog();
+      foodSaveButton.disabled = false;
+      return;
+    }
+    const authButton = event.target.closest("[data-public-campaign-auth]");
+    if (authButton) {
+      authButton.disabled = true;
+      await openPublicCampaignCabinet(variant, authButton.dataset.target || "unknown");
+      authButton.disabled = false;
     }
   });
   return true;
@@ -1028,7 +2092,7 @@ const legalDocuments = {
         <ul>
           <li>создание и защита личного кабинета;</li>
           <li>ведение карточек питомцев, истории, наблюдений, веса и напоминаний;</li>
-          <li>оценка состояния питомца, подсказка по срочности ситуации и подготовка понятных рекомендаций владельцу;</li>
+          <li>проверка опасных признаков, разбор введённых изменений и подготовка понятной информации владельцу;</li>
           <li>синхронизация одного аккаунта между сайтом, PWA, Telegram и MAX;</li>
           <li>поддержка пользователей, обработка обратной связи, улучшение безопасности и качества сервиса;</li>
           <li>учет подписки, лимитов и платежей.</li>
@@ -1163,7 +2227,7 @@ const legalDocuments = {
       <div class="legal-meta">TemichevVet — информационный помощник, а не ветеринарная клиника.</div>
       <section>
         <h3>Что важно понимать</h3>
-        <p>Сервис помогает быстрее сориентироваться по состоянию питомца и срочности ситуации, сохранить историю и подготовить понятные шаги. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.</p>
+        <p>Сервис помогает вести историю питомца, разбирать сохранённые изменения и готовить понятную информацию к визиту. Он не ставит диагноз, не назначает лечение, не подбирает дозировки лекарств и не заменяет очный осмотр ветеринарного врача.</p>
       </section>
       <section>
         <h3>Когда срочно в клинику</h3>
@@ -1280,8 +2344,20 @@ function getCookieConsent() {
   }
 }
 
+function sanitizedAnalyticsUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  return url.toString();
+}
+
+function clearSensitiveMiniAppFragment() {
+  const hash = window.location.hash || "";
+  if (!/^#WebAppData=/i.test(hash)) return;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+}
+
 function loadMetrika() {
-  if (metrikaLoaded || typeof window === "undefined") return;
+  if (metrikaLoaded || typeof window === "undefined" || isAdminRoute) return;
   metrikaLoaded = true;
   window.ym = window.ym || function () {
     (window.ym.a = window.ym.a || []).push(arguments);
@@ -1299,7 +2375,7 @@ function loadMetrika() {
     clickmap: true,
     ecommerce: "dataLayer",
     referrer: document.referrer,
-    url: location.href,
+    url: sanitizedAnalyticsUrl(),
     accurateTrackBounce: true,
     trackLinks: true
   });
@@ -1352,19 +2428,30 @@ function formatPetWeight(pet) {
 }
 
 function petTitle(pet) {
-  const main = pet.is_main ? "⭐ " : "";
-  return `${main}${formatPetSpecies(pet.pet_type)} — ${pet.pet_name || "без имени"}`;
+  return `${formatPetSpecies(pet.pet_type)} — ${pet.pet_name || "без имени"}`;
 }
 
 function observationTypeLabel(value) {
   const labels = {
-    note: "Заметка",
+    note: "Наблюдение",
     appetite: "Аппетит",
     activity: "Активность",
     stool: "Стул",
-    symptom: "Симптом"
+    symptom: "Симптом",
+    triage: "Разбор ситуации",
+    food_check: "Проверка питания"
   };
-  return labels[value] || value || "Заметка";
+  return labels[value] || "Наблюдение";
+}
+
+function observationDisplayText(item) {
+  const payload = item?.payload;
+  if (typeof payload === "string") return payload.trim();
+  for (const key of ["text", "summary", "complaint"]) {
+    const value = payload?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function setWorkspace(html, options = {}) {
@@ -1377,7 +2464,16 @@ function setWorkspace(html, options = {}) {
 }
 
 function showError(message) {
-  setWorkspace(`<div class="notice danger">${escapeHtml(message)}</div>`);
+  ensureDashboardView();
+  if (!workspace) return;
+  workspace.querySelector("[data-workspace-error]")?.remove();
+  const notice = document.createElement("div");
+  notice.className = "notice danger workspace-error";
+  notice.dataset.workspaceError = "true";
+  notice.setAttribute("role", "alert");
+  notice.innerHTML = `<strong>Не получилось выполнить действие</strong><p>${escapeHtml(message)}</p>`;
+  workspace.prepend(notice);
+  notice.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function api(path, options = {}) {
@@ -1740,7 +2836,7 @@ function renderSiteVisitUser(row) {
   if (row.user_id) {
     return adminCell(`User ${row.user_id}`);
   }
-  return `<span>Анонимно</span><small>без входа</small>`;
+  return `<span class="admin-visitor-label">Анонимно<small>без входа</small></span>`;
 }
 
 function renderSiteVisitSource(row) {
@@ -1764,6 +2860,12 @@ function renderAdminMetric(label, value, hint = "") {
   `;
 }
 
+function formatAdminInteger(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "0";
+  return Math.max(0, Math.round(number)).toLocaleString("ru-RU");
+}
+
 function renderAdminTable(title, rows, columns, emptyText = "Данных пока нет") {
   const head = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("");
   const body = rows.length
@@ -1783,6 +2885,16 @@ function renderAdminTable(title, rows, columns, emptyText = "Данных пок
         </table>
       </div>
     </section>
+  `;
+}
+
+function renderAdminTechnicalDetails(summary, content, hint = "") {
+  return `
+    <details class="admin-technical-details">
+      <summary>${escapeHtml(summary)}</summary>
+      ${hint ? `<p>${escapeHtml(hint)}</p>` : ""}
+      <div class="admin-technical-details-content">${content}</div>
+    </details>
   `;
 }
 
@@ -1844,79 +2956,260 @@ function renderAdminPageHead(title, text) {
 
 function renderAdminOverviewPage(data) {
   const overview = data.overview || {};
+  const rawUsers = overview.users_total_raw ?? overview.users_total ?? 0;
+  const serviceUsers = overview.users_service || 0;
+  const productVisits = overview.site_visits_24h_product ?? overview.site_visits_24h_human ?? 0;
+  const technicalVisits = overview.site_visits_24h_technical || 0;
   return `
-    ${renderAdminPageHead("Обзор", "Главные числа по сервису без длинных журналов и технических таблиц.")}
+    ${renderAdminPageHead("Обзор", "Только продуктовые показатели. Боты, сканеры и служебные проверки вынесены в технические разделы.")}
     <div class="summary-grid admin-summary">
-      ${renderAdminMetric("Пользователей", overview.users_total, `+${overview.users_today || 0} сегодня`)}
+      ${renderAdminMetric(
+        "Пользователей",
+        overview.users_total,
+        serviceUsers
+          ? `${rawUsers} всего · ${serviceUsers} служебный · +${overview.users_today || 0} сегодня`
+          : `+${overview.users_today || 0} сегодня`
+      )}
       ${renderAdminMetric("Питомцев", overview.pets_total)}
+      ${renderAdminMetric("Заходов людей за 24 часа", productVisits, `${technicalVisits} технических скрыто`)}
+      ${renderAdminMetric("Уникальных посетителей за 24 часа", overview.site_visitors_24h_product ?? 0)}
+      ${renderAdminMetric("Заходов в кабинет за 24 часа", overview.site_logged_in_visits_24h)}
+      ${renderAdminMetric(
+        "Вошедших пользователей за 72 часа",
+        overview.successful_login_users_72h ?? 0,
+        `${overview.successful_login_events_72h || 0} событий входа`
+      )}
+      ${renderAdminMetric("Проверок в кабинете за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Активный Plus", overview.active_plus)}
+      ${renderAdminMetric("Возврат D1 за 30 дней", overview.return_d1_users_30d || 0)}
+      ${renderAdminMetric("Возврат D7 за 30 дней", overview.return_d7_users_30d || 0)}
       ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
-      ${renderAdminMetric("Заходов на сайт 24ч", overview.site_visits_24h, `${overview.site_visitors_24h || 0} уникальных`)}
-      ${renderAdminMetric("Авторизованных заходов 24ч", overview.site_logged_in_visits_24h)}
-      ${renderAdminMetric("Оценок за 24 часа", overview.triage_24h)}
-      ${renderAdminMetric("Токенов за 30 дней", overview.tokens_30d)}
+      ${renderAdminMetric(
+        "Токенов за 30 дней",
+        formatAdminInteger(overview.tokens_30d),
+        `Публичная проверка: ${formatAdminInteger(overview.tokens_30d_public)} · кабинет: ${formatAdminInteger(overview.tokens_30d_cabinet)}`
+      )}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
-      ${renderAdminMetric("Событий защиты 24ч", overview.security_events_24h, `${overview.security_warnings_24h || 0} предупреждений / ${overview.security_errors_24h || 0} ошибок`)}
     </div>
   `;
 }
 
 function renderAdminFunnelPage(data) {
+  const serviceFunnel = data.conversion_funnel_72h_service || {};
+  const publicFunnel = data.conversion_funnel_72h_public || {};
+  const authFunnel = data.conversion_funnel_72h_auth || {};
+  const petFunnel = data.conversion_funnel_72h_pet || {};
+  const foodFunnel = data.conversion_funnel_72h_food || {};
+  const cuts = data.funnel_cuts_72h || {};
+  const publicCuts = cuts.public || {};
+  const petCuts = petFunnel.cuts || {};
+  const foodCuts = foodFunnel.cuts || {};
+  const lossReasons = data.funnel_loss_reasons_72h || {};
+  const technical = data.funnel_technical_72h || {};
+  const funnelColumns = [
+    { key: "label", label: "Шаг", render: (row) => `<strong>${escapeHtml(row.label || row.step)}</strong>` },
+    { key: "unique_count", label: "Уникальные" },
+    { key: "count", label: "Всего событий" },
+    { key: "conversion_from_previous", label: "Переход", render: (row) => row.conversion_from_previous == null ? "—" : `${escapeHtml(row.conversion_from_previous)}%` },
+    { key: "issues", label: "Ошибки" },
+    { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
+    { key: "help", label: "Что значит" }
+  ];
+  const lossRows = [
+    { name: "Не начат", sessions: lossReasons.not_started || 0 },
+    { name: "Не отправлен", sessions: lossReasons.not_submitted || 0 },
+    { name: "Результат не получен", sessions: lossReasons.result_not_received || 0 },
+    { name: "Не увидели сохранение", sessions: lossReasons.save_cta_not_seen || 0 },
+    { name: "Увидели, но не нажали сохранить", sessions: lossReasons.save_not_clicked || 0 },
+    { name: "Повторный лимит", sessions: lossReasons.repeat_limit || 0 },
+    { name: "Ошибка модели", sessions: lossReasons.model_error || 0 },
+    { name: "Вход открыт", sessions: lossReasons.login_opened || 0 },
+    { name: "Вход успешен", sessions: lossReasons.login_successful || 0 },
+    { name: "Сохранение не завершено", sessions: lossReasons.save_incomplete || 0 },
+  ];
+  const petLoss = petFunnel.loss_reasons || {};
+  const petLossRows = [
+    { name: "Не нажали создать паспорт", sessions: petLoss.cta_not_clicked || 0 },
+    { name: "Не открыли вход", sessions: petLoss.login_not_opened || 0 },
+    { name: "Вход не завершили", sessions: petLoss.login_incomplete || 0 },
+    { name: "Вошли, но питомца не добавили", sessions: petLoss.passport_not_created || 0 }
+  ];
+  const foodLoss = foodFunnel.loss_reasons || {};
+  const foodLossRows = [
+    { name: "Не отправили продукт", sessions: foodLoss.not_submitted || 0 },
+    { name: "Ответ не получен", sessions: foodLoss.result_not_received || 0 },
+    { name: "Не увидели сохранение", sessions: foodLoss.save_cta_not_seen || 0 },
+    { name: "Увидели, но не нажали сохранить", sessions: foodLoss.save_not_clicked || 0 },
+    { name: "Не открыли вход", sessions: foodLoss.login_not_opened || 0 },
+    { name: "Вход не завершили", sessions: foodLoss.login_incomplete || 0 },
+    { name: "Вошли, но ответ не сохранился", sessions: foodLoss.answer_not_saved || 0 }
+  ];
+  const foodLevelLabels = {
+    allowed: "Можно понемногу",
+    avoid: "Лучше не давать",
+    not_found: "Не найдено в базе",
+    need_ingredients: "Нужен состав",
+    ingredients_checked: "Состав проверен",
+    unknown: "Без категории"
+  };
+  const foodResultRows = (foodFunnel.result_levels || []).map((row) => ({
+    ...row,
+    name: foodLevelLabels[row.name] || row.name || "Не указано"
+  }));
+  const returns = cuts.returning || [];
+  const eventColumns = [
+    { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
+    { key: "event_type", label: "Событие" },
+    { key: "step", label: "Шаг" },
+    { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
+    { key: "source", label: "Источник" },
+    { key: "landing_path", label: "Первая страница" },
+    { key: "utm_campaign", label: "Кампания" },
+    { key: "device", label: "Устройство" }
+  ];
   return `
-    ${renderAdminPageHead("Воронка", "Путь от первого открытия сайта до входа, оценки состояния и оплаты.")}
+    ${renderAdminPageHead("Воронка", "Путь людей за последние 72 часа. Автотесты и QA не участвуют в процентах.")}
     <section class="admin-section">
-      <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Email, IP и медицинский текст здесь не хранятся.</p>
+      <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Прямой переход из рекламы на /check считается с шага «Открыли проверку», поэтому главная страница больше не искажает конверсию.</p>
     </section>
-    ${renderAdminTable("Шаги воронки", data.conversion_funnel_72h?.steps || [], [
-      { key: "label", label: "Шаг", render: (row) => `<strong>${escapeHtml(row.label || row.step)}</strong><br><small>${escapeHtml(row.step || "")}</small>` },
-      { key: "unique_count", label: "Уникальные" },
-      { key: "count", label: "Всего событий" },
-      { key: "conversion_from_previous", label: "Переход", render: (row) => row.conversion_from_previous == null ? "—" : `${escapeHtml(row.conversion_from_previous)}%` },
-      { key: "issues", label: "Ошибки" },
-      { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
-      { key: "help", label: "Что значит" }
-    ], "За последние 72 часа событий воронки пока нет.")}
-    ${renderAdminTable("Последние события воронки", data.recent_funnel_events || [], [
-      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
-      { key: "event_type", label: "Событие" },
-      { key: "step", label: "Шаг" },
-      { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
-      { key: "user_id", label: "User" },
-      { key: "source", label: "Источник" },
-      { key: "landing_path", label: "Первая страница" },
-      { key: "utm_campaign", label: "Кампания" },
-      { key: "utm_content", label: "Объявление" },
-      { key: "device", label: "Устройство" }
-    ], "Событий воронки пока нет.")}
+    ${renderAdminTable("Главная продуктовая воронка — последние 72 часа", serviceFunnel.steps || [], funnelColumns, "За последние 72 часа продуктовых событий пока нет.")}
+    ${renderAdminTable("Электронный паспорт — последние 72 часа", petFunnel.steps || [], funnelColumns, "За последние 72 часа событий паспорта пока нет.")}
+    ${renderAdminTable("База продуктов — последние 72 часа", foodFunnel.steps || [], funnelColumns, "За последние 72 часа событий питания пока нет.")}
+    ${renderAdminTable("Публичная проверка симптомов — последние 72 часа", publicFunnel.steps || [], funnelColumns, "За последние 72 часа событий проверки пока нет.")}
+    ${renderAdminTable("Вход и кабинет — последние 72 часа", authFunnel.steps || [], funnelColumns, "За последние 72 часа авторизационных шагов пока нет.")}
+    ${renderAdminTable("Где теряются люди: электронный паспорт — 72 часа", petLossRows, [
+      { key: "name", label: "Причина" },
+      { key: "sessions", label: "Сессии" }
+    ])}
+    ${renderAdminTable("Где теряются люди: база продуктов — 72 часа", foodLossRows, [
+      { key: "name", label: "Причина" },
+      { key: "sessions", label: "Сессии" }
+    ])}
+    ${renderAdminTable("Ответы базы продуктов — 72 часа", foodResultRows, [
+      { key: "name", label: "Результат" },
+      { key: "sessions", label: "Уникальные сессии" },
+      { key: "events", label: "Всего ответов" }
+    ], "Ответов базы продуктов за 72 часа пока нет.")}
+    ${renderAdminTable("Причины потери до полного результата", lossRows, [
+      { key: "name", label: "Причина" },
+      { key: "sessions", label: "Сессии" }
+    ], "Для расчёта причин потерь пока недостаточно данных.")}
+    <p class="admin-data-note">«Результат не получен» означает, что форма отправлена, но показ результата не зафиксирован. «Повторный лимит» и «Ошибка модели» берутся из технического журнала. Директ считает клики, а Метрика — только визиты с разрешённой аналитикой, поэтому их числа могут отличаться.</p>
+    ${renderAdminTable("Срез по рекламной кампании — 72 часа", publicCuts.campaign || [], [
+      { key: "name", label: "Кампания" },
+      { key: "sessions", label: "Сессии" }
+    ], "По кампаниям данных за 72ч пока нет.")}
+    ${renderAdminTable("Срез по посадочным страницам — 72 часа", publicCuts.landing || [], [
+      { key: "name", label: "Посадка" },
+      { key: "sessions", label: "Сессии" }
+    ], "По посадкам данных за 72ч пока нет.")}
+    ${renderAdminTable("Срез по устройствам — 72 часа", publicCuts.device || [], [
+      { key: "name", label: "Устройство" },
+      { key: "sessions", label: "Сессии" }
+    ], "По устройствам данных за 72ч пока нет.")}
+    ${renderAdminTable("Новый или повторный посетитель — 72 часа", returns || [], [
+      { key: "name", label: "Тип" },
+      { key: "sessions", label: "Сессии" }
+    ], "Для новых и повторных посетителей данных за 72ч пока нет.")}
+    ${renderAdminTechnicalDetails(
+      "Срезы рекламы: электронный паспорт — 72 часа",
+      `${renderAdminTable("Кампании", petCuts.campaign || [], [
+        { key: "name", label: "Кампания" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Посадочные страницы", petCuts.landing || [], [
+        { key: "name", label: "Посадка" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Устройства", petCuts.device || [], [
+        { key: "name", label: "Устройство" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Новые и повторные", petFunnel.returning || [], [
+        { key: "name", label: "Тип" },
+        { key: "sessions", label: "Сессии" }
+      ])}`,
+      "Срезы не смешиваются с проверкой симптомов."
+    )}
+    ${renderAdminTechnicalDetails(
+      "Срезы рекламы: база продуктов — 72 часа",
+      `${renderAdminTable("Кампании", foodCuts.campaign || [], [
+        { key: "name", label: "Кампания" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Посадочные страницы", foodCuts.landing || [], [
+        { key: "name", label: "Посадка" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Устройства", foodCuts.device || [], [
+        { key: "name", label: "Устройство" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Новые и повторные", foodFunnel.returning || [], [
+        { key: "name", label: "Тип" },
+        { key: "sessions", label: "Сессии" }
+      ])}`,
+      "Кошка и собака остаются отдельными посадками."
+    )}
+    ${renderAdminTechnicalDetails(
+      `Технические данные и автотесты: ${technical.events || 0} событий / ${technical.sessions || 0} сессий`,
+      `${renderAdminTable("Автотесты и QA", data.recent_funnel_events_technical || [], eventColumns, "QA-событий за период нет.")}
+       ${renderAdminTable("Сырой журнал продуктовых событий", data.recent_funnel_events_product || [], eventColumns, "Продуктовых событий пока нет.")}`,
+      "Эти строки сохранены для диагностики, но не входят в основные проценты воронки."
+    )}
   `;
 }
 
 function renderAdminTrafficPage(data) {
+  const overview = data.overview || {};
+  const visitColumns = [
+    { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
+    { key: "path", label: "Страница" },
+    { key: "user_email", label: "Кто", render: renderSiteVisitUser },
+    { key: "source", label: "Источник", render: renderSiteVisitSource },
+    { key: "device", label: "Устройство", render: renderSiteVisitDevice },
+    { key: "status_code", label: "HTTP" }
+  ];
   return `
-    ${renderAdminPageHead("Посещения", "Технические заходы на сайт: страница, источник, устройство и авторизация.")}
+    ${renderAdminPageHead("Посещения", "Посещения людей за последние 24 часа. Боты, сканеры и проверки вынесены отдельно.")}
     <section class="admin-section">
-      <p class="admin-explain">Если человек не вошёл в кабинет, он отображается как «Анонимно». IP не хранится в открытом виде, используется только обезличенный хэш для подсчёта уникальных посетителей.</p>
+      <div class="summary-grid admin-summary admin-traffic-summary">
+        ${renderAdminMetric("Заходов людей", overview.site_visits_24h_product ?? 0)}
+        ${renderAdminMetric("Уникальных посетителей", overview.site_visitors_24h_product ?? 0)}
+        ${renderAdminMetric("Технических заходов", overview.site_visits_24h_technical ?? 0, "Не входят в продуктовую статистику")}
+      </div>
+      <p class="admin-explain">«Анонимно» означает, что человек не вошёл. IP не хранится в открытом виде; для уникальности используется только обезличенный хэш.</p>
     </section>
-    ${renderAdminTable("Источники за 24 часа", data.site_sources_24h || [], [
+    ${renderAdminTable("Источники людей — 24 часа", data.site_sources_24h_product || [], [
       { key: "source", label: "Источник" },
       { key: "count", label: "Заходы" },
       { key: "visitors", label: "Уникальные" },
       { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
-    ], "За последние 24 часа заходов на сайт не было.")}
-    ${renderAdminTable("Страницы за 24 часа", data.site_paths_24h || [], [
+    ], "За последние 24 часа посещений людей не было.")}
+    ${renderAdminTable("Страницы людей — 24 часа", data.site_paths_24h_product || [], [
       { key: "path", label: "Страница" },
       { key: "count", label: "Заходы" },
       { key: "visitors", label: "Уникальные" },
       { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
-    ], "За последние 24 часа открытых страниц не было.")}
-    ${renderAdminTable("Последние посещения сайта", data.recent_site_visits || [], [
-      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
-      { key: "path", label: "Страница" },
-      { key: "user_email", label: "Кто", render: renderSiteVisitUser },
-      { key: "source", label: "Источник", render: renderSiteVisitSource },
-      { key: "device", label: "Устройство", render: renderSiteVisitDevice },
-      { key: "status_code", label: "HTTP" }
-    ], "Посещения ещё не записаны.")}
+    ], "За последние 24 часа люди не открывали публичные страницы.")}
+    ${renderAdminTable("Последние посещения людей", data.recent_site_visits_product || [], visitColumns, "Посещения людей ещё не записаны.")}
+    ${renderAdminTechnicalDetails(
+      `Боты, сканеры и автоматические проверки: ${overview.site_visits_24h_technical || 0}`,
+      `${renderAdminTable("Технические источники — 24 часа", data.site_sources_24h_technical || [], [
+        { key: "source", label: "Источник" },
+        { key: "count", label: "Заходы" },
+        { key: "visitors", label: "Уникальные" },
+        { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
+      ], "Технического трафика нет.")}
+      ${renderAdminTable("Технические пути — 24 часа", data.site_paths_24h_technical || [], [
+        { key: "path", label: "Путь" },
+        { key: "count", label: "Запросы" },
+        { key: "visitors", label: "Уникальные" },
+        { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) }
+      ], "Технических путей нет.")}
+      ${renderAdminTable("Последние технические заходы", data.recent_site_visits_technical || [], visitColumns, "Технических заходов нет.")}`,
+      "Ничего не удалено: технический трафик остаётся доступным для диагностики."
+    )}
   `;
 }
 
@@ -1991,24 +3284,24 @@ function renderAdminPaymentsPage(data) {
 }
 
 function renderAdminUsersPage(data) {
+  const userColumns = [
+    { key: "id", label: "ID" },
+    { key: "email", label: "Email" },
+    { key: "providers", label: "Способ входа" },
+    { key: "plan", label: "Тариф" },
+    { key: "pets_count", label: "Питомцы" },
+    { key: "triage_count", label: "Проверки" },
+    { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
+  ];
   return `
-    ${renderAdminPageHead("Пользователи", "Новые аккаунты, оценки состояния и обратная связь.")}
-    ${renderAdminTable("Последние пользователи", data.recent_users || [], [
-      { key: "id", label: "ID" },
-      { key: "email", label: "Email" },
-      { key: "providers", label: "Входы" },
-      { key: "plan", label: "Тариф" },
-      { key: "pets_count", label: "Питомцы" },
-      { key: "triage_count", label: "Оценки" },
-      { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
-    ])}
-    ${renderAdminTable("Последние оценки без медицинского текста", data.recent_triage || [], [
+    ${renderAdminPageHead("Пользователи", "Пользовательские аккаунты, проверки и обратная связь. Служебный аккаунт показан отдельно.")}
+    ${renderAdminTable("Последние пользователи", data.recent_users_product || data.recent_users || [], userColumns)}
+    ${renderAdminTable("Последние проверки без медицинского текста", data.recent_triage || [], [
       { key: "id", label: "ID" },
       { key: "user_id", label: "User" },
       { key: "pet_name", label: "Питомец", render: (row) => adminCell(row.pet_name ? `${row.pet_type || "питомец"} — ${row.pet_name}` : "—") },
       { key: "urgency_level", label: "Срочность" },
-      { key: "total_tokens", label: "Токены" },
-      { key: "model", label: "Модель" },
+      { key: "total_tokens", label: "Токены", render: (row) => adminCell(formatAdminInteger(row.total_tokens)) },
       { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
     ])}
     ${renderAdminTable("Обратная связь", data.recent_feedback || [], [
@@ -2018,22 +3311,33 @@ function renderAdminUsersPage(data) {
       { key: "preview", label: "Кратко" },
       { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
     ])}
+    ${renderAdminTechnicalDetails(
+      `Служебные аккаунты: ${(data.recent_users_service || []).length}`,
+      renderAdminTable("Служебные аккаунты", data.recent_users_service || [], userColumns, "Служебных аккаунтов нет."),
+      "Служебный аккаунт не входит в число пользователей на главном экране, но его данные не удалены."
+    )}
   `;
 }
 
 function renderAdminAuditPage(data) {
+  const auditColumns = [
+    { key: "id", label: "ID" },
+    { key: "event_type", label: "Событие", render: renderAuditEventCell },
+    { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
+    { key: "help", label: "Пояснение", render: renderAuditHelpCell },
+    { key: "actor", label: "Кто" },
+    { key: "user_id", label: "User" },
+    { key: "provider", label: "Канал" },
+    { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
+  ];
   return `
-    ${renderAdminPageHead("Журнал", "Безопасность, входы, ошибки API и служебные события без медицинского текста.")}
-    ${renderAdminTable("Журнал безопасности", data.recent_audit || [], [
-      { key: "id", label: "ID" },
-      { key: "event_type", label: "Событие", render: renderAuditEventCell },
-      { key: "status", label: "Статус", render: (row) => adminCell(adminStatusLabel(row.status)) },
-      { key: "help", label: "Пояснение", render: renderAuditHelpCell },
-      { key: "actor", label: "Кто" },
-      { key: "user_id", label: "User" },
-      { key: "provider", label: "Канал" },
-      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) }
-    ])}
+    ${renderAdminPageHead("Журнал", "Важные входы, предупреждения и ошибки. Обычные просмотры админки скрыты в техническом журнале.")}
+    ${renderAdminTable("Важные события", data.recent_audit || [], auditColumns)}
+    ${renderAdminTechnicalDetails(
+      "Полный технический журнал",
+      renderAdminTable("Все служебные события", data.recent_audit_raw || [], auditColumns),
+      "Здесь остаются просмотры админки и пустые автоматические проверки. Ничего не удалено."
+    )}
   `;
 }
 
@@ -2106,6 +3410,7 @@ function clearStartupAction() {
   const startupAction = getStartupAction();
   if (!startupAction) return;
   consumedStartupAction = startupAction;
+  sessionStorage.removeItem(PENDING_STARTUP_ACTION_KEY);
   const url = new URL(window.location.href);
   url.searchParams.delete("action");
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
@@ -2142,6 +3447,15 @@ async function renderStartupView() {
   if (startupAction === "more") {
     renderMore();
     clearStartupAction();
+    return;
+  }
+  const campaign = getPublicCampaignLanding();
+  if (campaign?.kind === "pet") {
+    await renderPets();
+    return;
+  }
+  if (campaign?.kind === "food") {
+    await renderFood();
     return;
   }
   await renderHome();
@@ -2190,7 +3504,7 @@ async function bootstrap() {
         return;
       }
       clearAuthLinkRequest();
-      if (await completePendingPublicCheckAfterLogin()) return;
+      if (await completePendingSaveAfterLogin()) return;
       await renderStartupView();
       return;
     } catch {
@@ -2220,7 +3534,7 @@ async function bootstrap() {
       return;
     }
     clearAuthLinkRequest();
-    if (await completePendingPublicCheckAfterLogin()) return;
+    if (await completePendingSaveAfterLogin()) return;
     await renderStartupView();
   } catch {
     localStorage.removeItem("tvv_token");
@@ -2274,7 +3588,7 @@ async function loadPushConfig(force = false) {
     state.pushConfig = {
       enabled: false,
       public_key: "",
-      message: "Не удалось получить настройки PWA-уведомлений."
+      message: "Напоминания на этом устройстве временно недоступны."
     };
   }
   return state.pushConfig;
@@ -2296,6 +3610,12 @@ function petOptions(selectedId = "") {
   return state.pets
     .map((pet) => `<option value="${pet.id}" ${String(pet.id) === String(selectedId) ? "selected" : ""}>${escapeHtml(petTitle(pet))}</option>`)
     .join("");
+}
+
+function renderAppIcon(name, extraClass = "") {
+  const safeName = String(name || "activity").replace(/[^a-z0-9-]/g, "");
+  const safeExtraClass = String(extraClass || "").replace(/[^a-z0-9 _-]/gi, "");
+  return `<span class="app-icon icon-${safeName}${safeExtraClass ? ` ${safeExtraClass}` : ""}" aria-hidden="true"></span>`;
 }
 
 function renderPetBadges(pet) {
@@ -2322,7 +3642,7 @@ function subscriptionSummary() {
 
 function connectedProviderLabels() {
   const labels = [];
-  if (state.user?.email) labels.push("Email");
+  if (state.user?.email) labels.push("Электронная почта");
   if (isProviderConnected("telegram")) labels.push("Telegram");
   if (isProviderConnected("max")) labels.push("MAX");
   return labels.length ? labels.join(", ") : "не подключены";
@@ -2339,11 +3659,11 @@ function renderHomeGuide(hasPets) {
       <div class="guide-steps">
         <button class="guide-step" data-action="pets" type="button">
           <strong>${hasPets ? "1. Проверьте карточку" : "1. Добавьте питомца"}</strong>
-          <span>${hasPets ? "Возраст, вес и основной питомец уже помогают оценке." : "Так оценки состояния, вес и напоминания будут храниться в одном месте."}</span>
+          <span>${hasPets ? "Возраст, вес и основной питомец уже сохранены в карточке." : "Так ответы, вес и напоминания будут храниться в одном месте."}</span>
         </button>
         <button class="guide-step" data-action="triage" type="button">
-          <strong>2. Оцените состояние</strong>
-          <span>Опишите, что происходит с питомцем, чтобы получить понятный разбор состояния.</span>
+          <strong>2. Расскажите, что случилось</strong>
+          <span>Опишите ситуацию простыми словами, чтобы получить понятный ответ.</span>
         </button>
         <button class="guide-step" data-action="reminders" type="button">
           <strong>3. Поставьте напоминание</strong>
@@ -2387,7 +3707,7 @@ function parseTriageSections(answer) {
   const text = String(answer || "").trim();
   if (!text) return [];
   const matches = [...text.matchAll(/(?:^|\n)\s*(\d+)[).]\s+([^\n:]+):?/g)];
-  if (matches.length < 2) return [{ title: "Разбор состояния", body: text }];
+  if (matches.length < 2) return [{ title: "Рекомендации", body: text }];
   return matches.map((match, index) => {
     const start = match.index + match[0].length;
     const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
@@ -2429,7 +3749,7 @@ async function copyTextToClipboard(text) {
 }
 
 const historyEventLabels = {
-  triage: "Оценка состояния",
+  triage: "Разбор здоровья",
   reminder: "Напоминание",
   weight: "Вес",
   profile: "Карточка питомца",
@@ -2439,10 +3759,10 @@ const historyEventLabels = {
 
 function humanizeUiText(value) {
   return String(value || "")
-    .replace(/\btriage\b/gi, "Оценка состояния")
+    .replace(/\btriage\b/gi, "Разбор здоровья")
     .replace(/REMINDER_VACCINATION_CREATED/g, "Создано напоминание: вакцинация")
     .replace(/REMINDER_CREATED/g, "Создано напоминание")
-    .replace(/Разбор жалобы/g, "Оценка состояния")
+    .replace(/Разбор жалобы/g, "Разбор здоровья")
     .replace(/красные симптомы/g, "опасные признаки")
     .replace(/онлайн-ответ/g, "ответ сервиса");
 }
@@ -2502,10 +3822,10 @@ function renderHistoryCard(item) {
   `;
 }
 
-function renderEmptyBlock({ icon = "ℹ️", title, text, action, actionText }) {
+function renderEmptyBlock({ icon = "activity", title, text, action, actionText }) {
   return `
     <div class="empty-state empty-card">
-      <div class="empty-icon">${escapeHtml(icon)}</div>
+      <div class="empty-icon">${renderAppIcon(icon)}</div>
       <div>
         <h3>${escapeHtml(title)}</h3>
         <p>${escapeHtml(text)}</p>
@@ -2532,86 +3852,79 @@ function renderDueFollowups(items) {
       return `
         <article class="item-card followup-card">
           <div>
-            <h3>Контроль состояния</h3>
-            <p>Вы разбирали состояние: ${escapeHtml(pet)}. Как питомец чувствует себя сейчас?</p>
+            <h3>Как питомец чувствует себя сейчас?</h3>
+            <p>Недавно вы рассказывали о самочувствии: ${escapeHtml(pet)}.</p>
             <small>Если стало хуже — лучше не ждать и обратиться в клинику.</small>
           </div>
           <div class="inline-actions">
             <button class="secondary-button compact" data-followup-answer="better" data-followup-id="${item.id}" type="button">Стало лучше</button>
             <button class="secondary-button compact" data-followup-answer="same" data-followup-id="${item.id}" type="button">Без изменений</button>
             <button class="secondary-button compact danger-text" data-followup-answer="worse" data-followup-id="${item.id}" type="button">Стало хуже</button>
-            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Новая оценка</button>
+            <button class="primary-button compact" data-followup-answer="retry" data-followup-id="${item.id}" type="button">Рассказать ещё раз</button>
           </div>
         </article>
       `;
     })
     .join("");
-  return `<section class="profile-card due-followups"><h3>Нужно оценить динамику</h3><div class="list-stack">${cards}</div></section>`;
+  return `<section class="profile-card due-followups"><h3>Проверить самочувствие</h3><div class="list-stack">${cards}</div></section>`;
 }
 
 async function renderHome() {
   await refreshAccountState();
   await refreshPets();
   const dueFollowups = await loadDueFollowups();
-  const petCount = state.pets.length;
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
+  const petData = mainPet ? await api(`/api/pets/${mainPet.id}`) : null;
   const sub = subscriptionSummary();
-  const providerLabels = connectedProviderLabels();
+  const latestWeight = petData?.weights?.[0] || null;
+  const previousWeight = petData?.weights?.[1] || null;
+  const weightChange = latestWeight && previousWeight
+    ? Number(latestWeight.weight_kg) - Number(previousWeight.weight_kg)
+    : null;
+  const latestObservation = petData?.observations?.[0] || null;
+  const nearestReminder = petData?.reminders?.[0] || null;
+  const latestHistory = petData?.history?.[0] || null;
+  const observationText = latestObservation ? observationDisplayText(latestObservation) : "Пока нет наблюдений";
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Личный кабинет TemichevVet</h2>
-        <p>Питомцы, оценки состояния, история, наблюдения, вес, напоминания и подписка собраны в одном месте.</p>
+        <p class="section-label">Ваш кабинет</p>
+        <h2>${mainPet ? `Всё важное о «${escapeHtml(mainPet.pet_name)}»` : "Добавьте питомца — и всё важное будет рядом"}</h2>
+        <p>${mainPet ? "Вес, наблюдения, даты и история собраны в одном постоянном контексте." : "Карточка поможет не терять историю, вес и важные даты."}</p>
       </div>
-      <button class="secondary-button compact" data-action="pets" type="button">🐾 Мои питомцы</button>
+      <button class="secondary-button compact icon-text-button" data-action="pets" type="button">${renderAppIcon("paw-print")}<span>Питомцы</span></button>
     </div>
-    <div class="visual-strip">
-      <img src="/static/assets/logo_temichevvet.jpg" alt="" class="visual-logo" />
-      <div>
-        <h3>Личный кабинет открыт</h3>
-        <p>Карточки питомцев, история здоровья, питание, FAQ и напоминания доступны с телефона и ноутбука по одной ссылке.</p>
-      </div>
-    </div>
-    <div class="summary-grid">
-      <div class="summary-card">
-        <strong>${petCount}</strong>
-        <span>питомцев</span>
-      </div>
-      <div class="summary-card">
-        <strong>${mainPet ? escapeHtml(mainPet.pet_name) : "—"}</strong>
-        <span>основной питомец</span>
-      </div>
-      <div class="summary-card">
-        <strong>${escapeHtml(sub.planTitle)}</strong>
-        <span>${sub.quotaLeft} из ${sub.quotaTotal} оценок доступно</span>
-      </div>
-      <div class="summary-card">
-        <strong>${escapeHtml(providerLabels)}</strong>
-        <span>способы входа</span>
-      </div>
-      <div class="summary-card">
-        <strong>${escapeHtml(sub.source)}</strong>
-        <span>источник подписки</span>
-      </div>
-      <div class="summary-card">
-        <strong>${dueFollowups.length}</strong>
-        <span>оценок в обработке</span>
-      </div>
-    </div>
-    ${renderHomeGuide(Boolean(petCount))}
-    ${renderPwaInstallGuide()}
-    <div class="next-actions">
-      <button class="primary-button" data-action="triage" type="button">🩺 Оценить состояние питомца</button>
-      <button class="secondary-button" data-action="pets" type="button">🐾 Мои питомцы</button>
-      <button class="secondary-button" data-action="reminders" type="button">⏰ Напоминания</button>
-      <button class="secondary-button" data-action="history" type="button">📜 История здоровья</button>
-      <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
-      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
-      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
-    </div>
-    <div class="secondary-menu-row inline">
-      <button class="secondary-button compact" data-action="more" type="button">☰ Ещё: питание, FAQ, подписка и настройки</button>
-    </div>
+    ${mainPet ? `
+      <section class="profile-card pet-context-card">
+        <div class="card-title-row">
+          <div class="card-icon large">${renderAppIcon("paw-print")}</div>
+          <div><p class="section-label">Выбранный питомец</p><h3>${escapeHtml(petTitle(mainPet))}</h3>${renderPetBadges(mainPet)}</div>
+        </div>
+        <div class="pet-context-metrics">
+          <div><small>Последний вес</small><strong>${latestWeight ? `${escapeHtml(latestWeight.weight_kg)} кг` : "Не записан"}</strong><span>${weightChange === null ? "Добавьте первую запись" : `${weightChange > 0 ? "+" : ""}${weightChange.toFixed(2)} кг к предыдущей`}</span></div>
+          <div><small>Последнее наблюдение</small><strong>${escapeHtml(compactText(observationText, 58))}</strong><span>${latestObservation ? formatDateTime(latestObservation.created_at) : "История начнётся с первой записи"}</span></div>
+          <div><small>Ближайшая дата</small><strong>${nearestReminder ? escapeHtml(nearestReminder.title) : "Не добавлена"}</strong><span>${nearestReminder ? escapeHtml(nearestReminder.due_date) : "Прививка, обработка или осмотр"}</span></div>
+          <div><small>Последнее действие</small><strong>${latestHistory ? escapeHtml(historyTitle(latestHistory)) : "История пока пустая"}</strong><span>${latestHistory ? formatDateTime(latestHistory.created_at) : "Все события будут по датам"}</span></div>
+        </div>
+        <div class="inline-actions"><button class="text-button" data-open-pet="${mainPet.id}" type="button">Открыть карточку</button><button class="text-button" data-pet-view="summary" data-pet-id="${mainPet.id}" type="button">Подготовить сводку для врача</button></div>
+      </section>
+      <section aria-labelledby="quickActionsTitle">
+        <div class="section-heading"><p class="section-label">Быстрые действия</p><h3 id="quickActionsTitle">Что добавить в историю</h3></div>
+        <div class="pet-action-grid home-service-actions">
+          <button class="menu-card" data-pet-view="observations" data-pet-id="${mainPet.id}" type="button">${renderAppIcon("clipboard-list")}<span><strong>Добавить запись</strong><small>Наблюдение или изменение</small></span></button>
+          <button class="menu-card" data-pet-view="weight" data-pet-id="${mainPet.id}" type="button">${renderAppIcon("scale")}<span><strong>Записать вес</strong><small>Продолжить динамику</small></span></button>
+          <button class="menu-card" data-pet-view="reminders" data-pet-id="${mainPet.id}" type="button">${renderAppIcon("bell")}<span><strong>Добавить дату</strong><small>Прививка, обработка, осмотр</small></span></button>
+          <button class="menu-card" data-action="food" type="button">${renderAppIcon("utensils")}<span><strong>Проверить питание</strong><small>Ответ можно сохранить</small></span></button>
+          <button class="menu-card" data-pet-view="triage" data-pet-id="${mainPet.id}" type="button">${renderAppIcon("heart-pulse")}<span><strong>Рассказать об изменении</strong><small>Сохранить разбор в историю</small></span></button>
+        </div>
+      </section>
+    ` : `
+      <section class="profile-card empty-service-start">
+        ${renderEmptyBlock({ icon: "paw-print", title: "Создайте карточку питомца", text: "Для начала достаточно вида и клички." })}
+        <button class="primary-button" data-open-onboarding type="button">Добавить питомца</button>
+      </section>
+    `}
+    <article class="profile-card plan-status-card"><p class="section-label">Доступ</p><h3>${escapeHtml(sub.planTitle)}</h3><p>${sub.quotaLeft} из ${sub.quotaTotal} разборов доступно. Данные питомцев и записи не удаляются после окончания Plus.</p><button class="text-button" data-action="subscription" type="button">Условия подписки</button></article>
     ${renderDueFollowups(dueFollowups)}
   `, { scroll: false });
 }
@@ -2620,22 +3933,20 @@ function renderMore() {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Ещё</h2>
-        <p>Дополнительные разделы сервиса: справка, питание, подписка, входы и связь с командой.</p>
+        <h2>Все разделы</h2>
+        <p>История здоровья, питание, полезные материалы и настройки.</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
-    <div class="detail-grid more-grid">
-      <button class="secondary-button" data-action="food" type="button">🍽️ Питание</button>
-      <button class="secondary-button" data-action="care" type="button">🧴 Уход и привычки</button>
-      <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
-      <button class="secondary-button" data-action="observations" type="button">📊 Наблюдения</button>
-      <button class="secondary-button" data-action="subscription" type="button">💳 Подписка</button>
-      <button class="secondary-button" data-action="account" type="button">⚙️ Настройки аккаунта</button>
-      <button class="secondary-button" data-action="feedback" type="button">✉️ Обратная связь</button>
-    </div>
-    <div class="care-note">
-      Питание, уход и вопросы-ответы не расходуют лимит оценок состояния. Для срочной ситуации используйте «Оценить состояние питомца».
+    <div class="more-menu-grid">
+      <button class="menu-card" data-action="history" type="button">${renderAppIcon("history")}<span><strong>История здоровья</strong><small>Все сохранённые события</small></span></button>
+      <button class="menu-card" data-action="food" type="button">${renderAppIcon("utensils")}<span><strong>Питание</strong><small>Продукты и готовые блюда</small></span></button>
+      <button class="menu-card" data-action="care" type="button">${renderAppIcon("heart-pulse")}<span><strong>Уход и привычки</strong><small>Ежедневная забота</small></span></button>
+      <button class="menu-card" data-action="faq" type="button">${renderAppIcon("book-open")}<span><strong>Вопросы и ответы</strong><small>Короткие справочные материалы</small></span></button>
+      <button class="menu-card" data-action="observations" type="button">${renderAppIcon("clipboard-list")}<span><strong>Наблюдения</strong><small>Поведение и самочувствие</small></span></button>
+      <button class="menu-card" data-action="subscription" type="button">${renderAppIcon("credit-card")}<span><strong>Подписка</strong><small>Тариф и доступные разборы</small></span></button>
+      <button class="menu-card" data-action="account" type="button">${renderAppIcon("settings")}<span><strong>Настройки</strong><small>Вход, уведомления и данные</small></span></button>
+      <button class="menu-card" data-action="feedback" type="button">${renderAppIcon("mail")}<span><strong>Связаться с нами</strong><small>Вопрос по работе сервиса</small></span></button>
     </div>
   `);
 }
@@ -2651,8 +3962,8 @@ function providerAccount(provider) {
 function telegramSyncReasonText(reason) {
   const reasons = {
     telegram_not_linked: "Telegram ещё не подключён к этому кабинету.",
-    telegram_db_not_configured: "Синхронизация Telegram временно недоступна на сервере.",
-    telegram_user_not_found: "Telegram подключён, но профиль бота пока не найден.",
+    telegram_db_not_configured: "Связь с Telegram временно недоступна.",
+    telegram_user_not_found: "Связь с Telegram установлена не полностью. Откройте мессенджер и вернитесь сюда.",
     sync_error: "Последняя проверка не завершилась. Обычно помогает открыть раздел ещё раз через минуту."
   };
   return reasons[reason] || "Если данные в Telegram и кабинете отличаются, откройте этот раздел ещё раз или напишите в поддержку.";
@@ -2666,13 +3977,13 @@ function renderSyncStatusCard() {
   const telegramConnected = Boolean(telegram);
   const maxConnected = Boolean(max);
   const syncOk = telegramConnected && sync.synced !== false;
-  const statusLabel = !telegramConnected ? "Telegram не подключён" : syncOk ? "Синхронизация штатная" : "Нужна проверка";
+  const statusLabel = !telegramConnected ? "Не подключён" : syncOk ? "Данные обновлены" : "Нужно обновить связь";
   const statusClass = !telegramConnected ? "neutral" : syncOk ? "connected" : "warning";
   const detail = !telegramConnected
-    ? "Подключите Telegram, если хотите видеть питомцев, историю и Plus из Telegram-бота в этом кабинете."
+    ? "Подключите Telegram, чтобы пользоваться одним аккаунтом на сайте и в мессенджере."
     : syncOk
-      ? "При открытии кабинета сервис проверяет Telegram-данные и подтягивает доступные питомцы, историю, наблюдения и подписку."
-      : telegramSyncReasonText(sync.reason);
+      ? "Питомцы, история и подписка доступны в одном аккаунте."
+      : "Откройте настройки ещё раз через минуту. Если связь не восстановится, напишите в поддержку.";
   const imported = syncOk
     ? [
         ["Питомцы", sync.pets_imported, sync.pets_linked],
@@ -2690,15 +4001,19 @@ function renderSyncStatusCard() {
     : "";
   return `
     <div class="profile-card">
-      <h3>Статус синхронизации</h3>
-      <div class="meta-row">
-        <span>Telegram: ${telegramConnected ? "подключён" : "не подключён"}</span>
-        <span>MAX: ${maxConnected ? "подключён" : "не подключён"}</span>
-        <span>Последняя проверка: ${checkedAt}</span>
-      </div>
+      <h3>Связанные сервисы</h3>
       <p><span class="status-badge ${statusClass}">${statusLabel}</span></p>
       <p>${escapeHtml(detail)}</p>
-      ${imported ? `<div class="meta-row">${imported}</div>` : ""}
+      <details class="technical-details">
+        <summary>Диагностика подключения</summary>
+        <div class="meta-row">
+          <span>Telegram: ${telegramConnected ? "подключён" : "не подключён"}</span>
+          <span>MAX: ${maxConnected ? "подключён" : "не подключён"}</span>
+          <span>Проверено: ${checkedAt}</span>
+        </div>
+        ${imported ? `<div class="meta-row">${imported}</div>` : ""}
+        ${!syncOk && telegramConnected ? `<p>${escapeHtml(telegramSyncReasonText(sync.reason))}</p>` : ""}
+      </details>
     </div>
   `;
 }
@@ -2707,23 +4022,22 @@ function renderPushCard(push) {
   const supported = pushSupported();
   const enabled = Boolean(push?.config?.enabled);
   const count = Number(push?.status?.count || 0);
-  const serverMessage = push?.config?.message || "";
-  let statusText = serverMessage || "PWA-уведомления используются для контрольных напоминаний после разбора.";
+  let statusText = "Разрешите напоминания, чтобы не пропустить важную дату или проверку самочувствия.";
   let button = "";
   if (!supported) {
-    statusText = "Этот браузер не поддерживает PWA-уведомления. На iPhone используйте Safari и установите сайт на экран «Домой».";
+    statusText = "На этом устройстве напоминания недоступны. На iPhone откройте сайт в Safari и добавьте его на экран «Домой».";
   } else if (!enabled) {
     button = `<button class="secondary-button compact" type="button" disabled>Готовится</button>`;
   } else if (count > 0) {
-    statusText = `Подключено устройств: ${count}. Уведомления помогут напомнить о контрольном вопросе после разбора.`;
+    statusText = "Напоминания включены на этом устройстве.";
     button = `<button class="secondary-button compact" data-action="disable-push" type="button">Отключить на этом устройстве</button>`;
   } else {
-    statusText = "Можно включить уведомления на этом устройстве: сервис напомнит оценить состояние питомца после разбора.";
+    statusText = "Можно включить напоминания на этом устройстве.";
     button = `<button class="secondary-button compact" data-action="enable-push" type="button">Включить уведомления</button>`;
   }
   return `
     <div class="profile-card">
-      <h3>Уведомления PWA</h3>
+      <h3>Напоминания на этом устройстве</h3>
       <p>${escapeHtml(statusText)}</p>
       ${button ? `<div class="inline-actions">${button}</div>` : ""}
     </div>
@@ -2739,18 +4053,15 @@ async function renderAccountLinks() {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Настройки аккаунта</h2>
-        <p>Способы входа, синхронизация, безопасность сессий и управление персональными данными.</p>
+        <h2>Профиль и настройки</h2>
+        <p>Вход, связанные сервисы, напоминания и ваши данные.</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
     <div class="profile-card">
       <h3>Способы входа</h3>
-      <p>Подключите мессенджеры к текущему кабинету, чтобы не создавать второй аккаунт и не разделять питомцев, историю и подписку.</p>
-    </div>
-    <div class="profile-card">
-      <h3>Email</h3>
-      <p>${email ? `Статус: подключён · ${escapeHtml(maskEmail(email))}` : "Email пока не подключён. Вход по email можно использовать отдельно через окно входа."}</p>
+      <p>${email ? `Электронная почта: ${escapeHtml(maskEmail(email))}` : "Электронная почта пока не подключена."}</p>
+      <p>Подключите мессенджер, чтобы входить удобным способом и видеть один кабинет на всех устройствах.</p>
     </div>
     <div class="summary-grid">
         <div class="summary-card">
@@ -2769,13 +4080,10 @@ async function renderAccountLinks() {
         </div>
     </div>
     ${renderSyncStatusCard()}
-    <div class="care-note">
-      Мессенджер нужен только для подтверждения личности. После подтверждения вернитесь сюда: сайт сам завершит привязку.
-    </div>
     ${renderPushCard(push)}
     <div class="profile-card">
-      <h3>Аккаунт</h3>
-      <p>Здесь можно выйти из текущей сессии, завершить активные входы, скачать данные кабинета или оставить запрос на удаление персональных данных.</p>
+      <h3>Вход и безопасность</h3>
+      <p>Управляйте входами и копией данных кабинета.</p>
       <div class="inline-actions">
         <button class="secondary-button compact" data-action="logout" type="button">Выйти</button>
         <button class="secondary-button compact" data-action="export-account-data" type="button">Скачать мои данные</button>
@@ -2865,18 +4173,42 @@ function renderAccountLinkWaiting(provider, url, loginState) {
   setAccountLinkHint(wrap);
 }
 
-async function startProviderLink(provider) {
+function openDeferredExternalWindow() {
+  const externalWindow = window.open("about:blank", "_blank");
+  if (externalWindow) {
+    externalWindow.opener = null;
+    externalWindow.document.title = "TemichevVet — подтверждение входа";
+  }
+  return externalWindow;
+}
+
+function closeDeferredExternalWindow(externalWindow) {
+  if (!externalWindow || externalWindow.closed) return;
+  externalWindow.close();
+}
+
+function navigateDeferredExternalWindow(externalWindow, url) {
+  if (externalWindow && !externalWindow.closed) {
+    externalWindow.location.href = url;
+    return true;
+  }
+  return false;
+}
+
+async function startProviderLink(provider, externalWindow = openDeferredExternalWindow()) {
   setAccountLinkHint("Готовлю безопасную привязку...");
   try {
     const data = await api(`/api/account/${provider}/start`, { method: "POST", body: "{}" });
     if (!data.enabled || !data.url || !data.state) {
+      closeDeferredExternalWindow(externalWindow);
       setAccountLinkHint(data.message || "Этот способ входа пока не настроен.");
       return;
     }
     renderAccountLinkWaiting(provider, data.url, data.state);
-    window.open(data.url, "_blank", "noopener");
+    navigateDeferredExternalWindow(externalWindow, data.url);
     pollAccountLink(provider, data.state);
   } catch (error) {
+    closeDeferredExternalWindow(externalWindow);
     setAccountLinkHint(readableError(error.message));
   }
 }
@@ -2985,31 +4317,37 @@ async function renderPets() {
         .map(
           (pet) => `
             <article class="item-card pet-card">
-              <div>
+              <div class="pet-card-main">
+                <div class="card-icon">${renderAppIcon("paw-print")}</div>
+                <div>
                 <h3>${escapeHtml(petTitle(pet))}</h3>
-                <p>${pet.is_main ? "Основной питомец для быстрых оценок." : "Карточка питомца: история, вес, наблюдения и напоминания."}</p>
+                <p>${pet.is_main ? "Основной питомец" : "История, вес и напоминания"}</p>
                 ${renderPetBadges(pet)}
+                </div>
               </div>
               <button class="secondary-button compact" data-open-pet="${pet.id}" type="button">Открыть карточку</button>
             </article>
           `
         )
         .join("")
-    : `
-      <div class="empty-state">
-        <img src="/static/assets/onb_step1_add_pet.jpg" alt="" />
-        <p>Питомцев пока нет. Создайте первую карточку, чтобы сохранять историю и напоминания.</p>
-      </div>
-    `;
+    : renderEmptyBlock({
+        icon: "paw-print",
+        title: "Добавьте первого питомца",
+        text: "Кличка, возраст, вес, история и важные даты будут храниться в одной карточке."
+      });
 
   setWorkspace(`
     <div class="workspace-head">
-      <h2>Мои питомцы</h2>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ Назад</button>
+      <div>
+        <h2>Питомцы</h2>
+        <p>Все важные данные — отдельно для каждой собаки или кошки.</p>
+      </div>
+      <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
     <div class="list-stack">${cards}</div>
+    <details class="form-disclosure" ${state.pets.length ? "" : "open"}>
+      <summary>${renderAppIcon("plus")}<span>Добавить питомца</span></summary>
     <form class="form-grid" id="petCreateForm">
-      <h3>Добавить питомца</h3>
       <label><span>Тип</span><select name="pet_type"><option value="кошка">Кошка</option><option value="собака">Собака</option></select></label>
       <label><span>Кличка</span><input name="pet_name" required placeholder="Например: Лео" /></label>
       <label><span>Порода</span><input name="breed" placeholder="Если знаете: бенгальская, шпиц..." /></label>
@@ -3018,21 +4356,31 @@ async function renderPets() {
       <label><span>Месяц</span><input name="birth_month" inputmode="numeric" placeholder="Если знаете: 6" /></label>
       <label><span>День</span><input name="birth_day" inputmode="numeric" placeholder="Если знаете: 15" /></label>
       <label><span>Вес, кг</span><input name="weight_kg" inputmode="decimal" placeholder="6.1" /></label>
-      <label class="checkbox-row full-row"><input name="is_main" type="checkbox" /> <span>Сделать основным: он будет выбран первым в оценках и напоминаниях.</span></label>
+      <label class="checkbox-row full-row"><input name="is_main" type="checkbox" /> <span>Сделать основным питомцем</span></label>
       <button class="primary-button" type="submit">Сохранить питомца</button>
     </form>
+    </details>
   `);
 
   document.querySelector("#petCreateForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    event.currentTarget.dataset.clientRequestId ||= createFlowId();
     const form = new FormData(event.currentTarget);
     const payload = petPayloadFromForm(form);
+    payload.client_request_id = event.currentTarget.dataset.clientRequestId;
     try {
       const data = await api("/api/pets", { method: "POST", body: JSON.stringify(payload) });
       state.currentPetId = data.item.id;
+      if (data.created) {
+        trackMetrikaGoalOnce("pet.created", `pet:${data.item.id}`, {
+          ...attributionEventMetadata(),
+          pet_type: analyticsPetType(data.item.pet_type || payload.pet_type),
+          has_pet: true
+        });
+      }
       await renderPetCard(data.item.id);
     } catch (error) {
-      showError(`Не удалось сохранить питомца: ${error.message}`);
+      showError(`Не удалось сохранить питомца: ${readableError(error.message)}`);
     }
   });
 }
@@ -3068,30 +4416,39 @@ async function renderPetCard(petId) {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Карточка питомца</h2>
-        <p>${escapeHtml(petTitle(pet))}</p>
+        <p class="section-label">Карточка питомца</p>
+        <h2>${escapeHtml(petTitle(pet))}</h2>
       </div>
-      <button class="secondary-button compact" data-action="pets" type="button">⬅️ К списку</button>
+      <button class="secondary-button compact icon-text-button" data-action="pets" type="button">${renderAppIcon("chevron-left")}<span>К списку</span></button>
     </div>
-    <section class="profile-card">
-      <h3>Что важно сейчас</h3>
-      <p>${escapeHtml(data.summary.what_now)}</p>
+    <section class="profile-card pet-hero-card">
+      <div class="card-title-row">
+        <div class="card-icon large">${renderAppIcon("paw-print")}</div>
+        <div><h3>${escapeHtml(pet.pet_name)}</h3><p>${pet.is_main ? "Основной питомец" : "Карточка здоровья"}</p></div>
+      </div>
+      <p>Здесь собраны данные, записи и важные события питомца.</p>
       ${renderPetBadges(pet)}
     </section>
-    <div class="detail-grid">
-      <button class="secondary-button" data-pet-view="history" data-pet-id="${pet.id}" type="button">📜 Вся история</button>
-      <button class="secondary-button" data-pet-view="observations" data-pet-id="${pet.id}" type="button">📊 Наблюдения</button>
-      <button class="secondary-button" data-pet-view="weight" data-pet-id="${pet.id}" type="button">⚖️ Вес</button>
-      <button class="secondary-button" data-pet-view="reminders" data-pet-id="${pet.id}" type="button">⏰ Напоминания</button>
-      <button class="secondary-button" data-pet-view="triage" data-pet-id="${pet.id}" type="button">🩺 Оценить состояние</button>
-      <button class="secondary-button" data-pet-view="edit" data-pet-id="${pet.id}" type="button">✏️ Изменить</button>
-      <button class="secondary-button" data-set-main="${pet.id}" type="button">${pet.is_main ? "⭐ Основной" : "⭐ Сделать основным"}</button>
-      <button class="secondary-button danger-text" data-delete-pet="${pet.id}" data-delete-pet-title="${escapeHtml(petTitle(pet))}" data-delete-pet-linked="${pet.external_source ? "1" : "0"}" type="button">🗑 Удалить</button>
+    <div class="pet-action-grid">
+      <button class="menu-card" data-pet-view="triage" data-pet-id="${pet.id}" type="button">${renderAppIcon("heart-pulse")}<span><strong>Что изменилось?</strong><small>Сохранить разбор в историю</small></span></button>
+      <button class="menu-card" data-pet-view="history" data-pet-id="${pet.id}" type="button">${renderAppIcon("history")}<span><strong>История</strong><small>Ответы и события</small></span></button>
+      <button class="menu-card" data-pet-view="observations" data-pet-id="${pet.id}" type="button">${renderAppIcon("clipboard-list")}<span><strong>Наблюдения</strong><small>Аппетит и поведение</small></span></button>
+      <button class="menu-card" data-pet-view="weight" data-pet-id="${pet.id}" type="button">${renderAppIcon("scale")}<span><strong>Вес</strong><small>Динамика веса</small></span></button>
+      <button class="menu-card" data-pet-view="reminders" data-pet-id="${pet.id}" type="button">${renderAppIcon("bell")}<span><strong>Напоминания</strong><small>Важные даты</small></span></button>
+      <button class="menu-card" data-pet-view="summary" data-pet-id="${pet.id}" type="button">${renderAppIcon("book-open")}<span><strong>Сводка для врача</strong><small>История по выбранному периоду</small></span></button>
+      <button class="menu-card" data-pet-view="edit" data-pet-id="${pet.id}" type="button">${renderAppIcon("settings")}<span><strong>Изменить карточку</strong><small>Основные данные</small></span></button>
     </div>
     <section>
       <h3>Последние события</h3>
       ${history ? `<ul class="event-list">${history}</ul>` : "<p>История пока пустая.</p>"}
     </section>
+    <details class="danger-zone">
+      <summary>Управление карточкой</summary>
+      <div class="inline-actions">
+        ${pet.is_main ? "" : `<button class="secondary-button compact" data-set-main="${pet.id}" type="button">Сделать основным</button>`}
+        <button class="secondary-button compact danger-text icon-text-button" data-delete-pet="${pet.id}" data-delete-pet-title="${escapeHtml(petTitle(pet))}" data-delete-pet-linked="${pet.external_source ? "1" : "0"}" type="button">${renderAppIcon("trash-2")}<span>Удалить карточку</span></button>
+      </div>
+    </details>
   `);
 }
 
@@ -3102,7 +4459,7 @@ function confirmPetDeletion(button) {
     `Удаление карточки: ${title}`,
     "",
     "Будут удалены данные питомца, связанные напоминания, наблюдения, вес и история в веб-кабинете.",
-    isLinked ? "Карточка связана с мессенджером: удаление также уйдёт в очередь синхронизации." : "",
+    isLinked ? "Связанная карточка также будет удалена из подключённого мессенджера." : "",
     "",
     "Если вы уверены, введите УДАЛИТЬ. Если передумали, нажмите «Отмена»."
   ].filter(Boolean).join("\n");
@@ -3119,7 +4476,7 @@ async function renderPetEdit(petId) {
   setWorkspace(`
     <div class="workspace-head">
       <h2>Изменить питомца</h2>
-      <button class="secondary-button compact" data-open-pet="${pet.id}" type="button">⬅️ В карточку</button>
+      <button class="secondary-button compact icon-text-button" data-open-pet="${pet.id}" type="button">${renderAppIcon("chevron-left")}<span>В карточку</span></button>
     </div>
     <form class="form-grid" id="petEditForm">
       <label><span>Тип</span><select name="pet_type"><option value="кошка" ${pet.pet_type === "кошка" ? "selected" : ""}>Кошка</option><option value="собака" ${pet.pet_type === "собака" ? "selected" : ""}>Собака</option></select></label>
@@ -3141,48 +4498,109 @@ async function renderPetEdit(petId) {
       await api(`/api/pets/${petId}`, { method: "PATCH", body: JSON.stringify(payload) });
       await renderPetCard(petId);
     } catch (error) {
-      showError(`Не удалось обновить карточку: ${error.message}`);
+      showError(`Не удалось обновить карточку: ${readableError(error.message)}`);
     }
   });
 }
 
 async function renderPetHistory(petId) {
+  if (!state.pets.length) await refreshPets();
+  const pet = state.pets.find((item) => Number(item.id) === Number(petId));
   const data = await api(`/api/pets/${petId}/history`);
   const items = data.items.length
     ? data.items.map((item) => renderHistoryCard(item)).join("")
     : renderEmptyBlock({
-        icon: "📜",
+        icon: "history",
         title: "История пока пустая",
-        text: "После первой оценки, наблюдения, веса или напоминания события появятся здесь.",
+        text: "После первого разбора, наблюдения, веса или напоминания события появятся здесь.",
         action: "triage",
-        actionText: "Оценить состояние питомца"
+        actionText: "Рассказать, что случилось"
       });
   setWorkspace(`
     <div class="workspace-head">
-      <h2>История здоровья</h2>
-      <button class="secondary-button compact" data-open-pet="${petId}" type="button">⬅️ В карточку</button>
+      <div><h2>История здоровья</h2>${pet ? `<p>${escapeHtml(petTitle(pet))}</p>` : ""}</div>
+      <button class="secondary-button compact icon-text-button" data-open-pet="${petId}" type="button">${renderAppIcon("chevron-left")}<span>В карточку</span></button>
     </div>
     <div class="list-stack">${items}</div>
   `);
 }
 
+const summaryPeriodLabels = { "30": "30 дней", "90": "90 дней", all: "Вся история" };
+
+function renderDoctorSummarySection(title, content, className = "") {
+  if (!content) return "";
+  return `<section class="doctor-summary-section ${className}"><h3>${escapeHtml(title)}</h3>${content}</section>`;
+}
+
+async function renderPetSummary(petId, period = "30") {
+  const data = await api(`/api/pets/${petId}/summary?period=${encodeURIComponent(period)}`);
+  const pet = data.pet;
+  const periodButtons = ["30", "90", "all"].map((value) => {
+    const allowed = data.allowed_periods.includes(value);
+    return `<button class="${value === data.period ? "primary-button" : "secondary-button"} compact" data-summary-period="${value}" data-pet-id="${petId}" type="button" ${allowed ? "" : "disabled title='Доступно в Plus'"}>${summaryPeriodLabels[value]}${allowed ? "" : " · Plus"}</button>`;
+  }).join("");
+  const weightRows = (data.weights || []).map((item) => `<tr><td>${formatDateTime(item.created_at)}</td><td>${escapeHtml(item.weight_kg)} кг</td><td>${escapeHtml(item.note || "—")}</td></tr>`).join("");
+  const observationItems = (data.observations || []).map((item) => `<li><strong>${escapeHtml(observationTypeLabel(item.obs_type))}</strong><span>${escapeHtml(observationDisplayText(item))}</span><small>${formatDateTime(item.created_at)}</small></li>`).join("");
+  const historyItems = (data.history || []).map((item) => `<li><strong>${escapeHtml(historyTitle(item))}</strong><span>${escapeHtml(compactText(humanizeUiText(item.details || ""), 240))}</span><small>${formatDateTime(item.created_at)}</small></li>`).join("");
+  const reminderItems = (data.reminders || []).map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.due_date)}${item.due_time ? `, ${escapeHtml(item.due_time)}` : ""}</span><small>${escapeHtml(periodicityLabel(item.periodicity || "once"))}</small></li>`).join("");
+  const weightChange = data.weight_change_kg === null || data.weight_change_kg === undefined
+    ? ""
+    : `<p class="summary-weight-change">Изменение к предыдущей записи: <strong>${data.weight_change_kg > 0 ? "+" : ""}${escapeHtml(data.weight_change_kg)} кг</strong></p>`;
+  trackMetrikaGoalOnce("summary.viewed", `summary:${petId}:${period}:${new Date().toISOString().slice(0, 10)}`, {
+    ...attributionEventMetadata(),
+    has_pet: true
+  });
+  setWorkspace(`
+    <div class="workspace-head no-print">
+      <div><p class="section-label">Карточка питомца</p><h2>Сводка для врача</h2><p>${escapeHtml(petTitle(pet))}</p></div>
+      <button class="secondary-button compact icon-text-button" data-open-pet="${petId}" type="button">${renderAppIcon("chevron-left")}<span>В карточку</span></button>
+    </div>
+    <div class="summary-periods no-print" aria-label="Период сводки">${periodButtons}</div>
+    <article class="doctor-summary-print" id="doctorSummaryPrint">
+      <header class="doctor-summary-header">
+        <div><p class="section-label">TemichevVet</p><h2>Сводка по истории питомца</h2></div>
+        <div><strong>${escapeHtml(pet.pet_name)}</strong><span>${escapeHtml(pet.pet_type)}${pet.breed ? ` · ${escapeHtml(pet.breed)}` : ""}</span></div>
+      </header>
+      <dl class="doctor-summary-meta">
+        <div><dt>Период</dt><dd>${escapeHtml(summaryPeriodLabels[data.period])}</dd></div>
+        <div><dt>Дата формирования</dt><dd>${formatDateTime(data.generated_at)}</dd></div>
+        ${pet.weight_kg ? `<div><dt>Вес в карточке</dt><dd>${escapeHtml(pet.weight_kg)} кг</dd></div>` : ""}
+      </dl>
+      ${renderDoctorSummarySection("Динамика веса", weightRows ? `${weightChange}<div class="summary-table-wrap"><table><thead><tr><th>Дата</th><th>Вес</th><th>Заметка</th></tr></thead><tbody>${weightRows}</tbody></table></div>` : "")}
+      ${renderDoctorSummarySection("Наблюдения владельца", observationItems ? `<ul class="doctor-summary-list">${observationItems}</ul>` : "")}
+      ${renderDoctorSummarySection("Сохранённые события и разборы", historyItems ? `<ul class="doctor-summary-list timeline">${historyItems}</ul>` : "")}
+      ${renderDoctorSummarySection("Важные даты и активные напоминания", reminderItems ? `<ul class="doctor-summary-list">${reminderItems}</ul>` : "")}
+      ${!weightRows && !observationItems && !historyItems && !reminderItems ? `<div class="notice">За выбранный период записей пока нет.</div>` : ""}
+      <footer class="doctor-summary-footer">Сводка составлена из данных владельца и сохранённых событий. Она не содержит нового диагноза и не заменяет осмотр ветеринарного врача.</footer>
+    </article>
+    <div class="summary-actions no-print">
+      ${data.can_export ? `<button class="primary-button" data-print-summary data-pet-id="${petId}" data-summary-period="${data.period}" type="button">Печать или сохранить в PDF</button>` : `<div class="care-note"><strong>Экспорт доступен в Plus.</strong> Сводку за 30 дней можно просматривать бесплатно.</div><button class="secondary-button" data-action="subscription" type="button">Посмотреть Plus</button>`}
+    </div>
+  `);
+}
+
 async function renderPetObservations(petId) {
+  if (!state.pets.length) await refreshPets();
+  const pet = state.pets.find((item) => Number(item.id) === Number(petId));
   const data = await api(`/api/pets/${petId}/observations`);
   const items = data.items.length
-    ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(observationTypeLabel(item.obs_type))}</h3><p>${escapeHtml(item.payload?.text || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
+    ? data.items.map((item) => {
+        const text = observationDisplayText(item);
+        return `<article class="item-card"><div><h3>${escapeHtml(observationTypeLabel(item.obs_type))}</h3>${text ? `<p>${escapeHtml(text)}</p>` : ""}<small>${formatDateTime(item.created_at)}</small></div></article>`;
+      }).join("")
     : renderEmptyBlock({
-        icon: "📊",
+        icon: "clipboard-list",
         title: "Наблюдений пока нет",
         text: "Добавляйте короткие заметки о состоянии, аппетите, активности, стуле или симптомах.",
       });
   setWorkspace(`
     <div class="workspace-head">
-      <h2>Наблюдения</h2>
-      <button class="secondary-button compact" data-open-pet="${petId}" type="button">⬅️ В карточку</button>
+      <div><h2>Наблюдения</h2>${pet ? `<p>${escapeHtml(petTitle(pet))}</p>` : ""}</div>
+      <button class="secondary-button compact icon-text-button" data-open-pet="${petId}" type="button">${renderAppIcon("chevron-left")}<span>В карточку</span></button>
     </div>
-    <div class="care-note">Наблюдения — это ваши короткие заметки: аппетит, активность, стул, весомые изменения поведения. Оценки состояния хранятся в «Истории здоровья».</div>
+    <div class="care-note">Коротко отмечайте изменения аппетита, активности, туалета или поведения.</div>
     <form class="inline-form" id="observationForm">
-      <input name="text" placeholder="Например: аппетит нормальный, активность ниже обычного" required />
+      <label><span>Что заметили?</span><input name="text" placeholder="Например: аппетит нормальный, активность ниже обычного" required /></label>
       <button class="primary-button compact" type="submit">Добавить наблюдение</button>
     </form>
     <div class="list-stack">${items}</div>
@@ -3191,31 +4609,34 @@ async function renderPetObservations(petId) {
     event.preventDefault();
     const text = String(new FormData(event.currentTarget).get("text") || "");
     try {
-      await api(`/api/pets/${petId}/observations`, { method: "POST", body: JSON.stringify({ obs_type: "note", text }) });
+      const created = await api(`/api/pets/${petId}/observations`, { method: "POST", body: JSON.stringify({ obs_type: "note", text }) });
+      trackServiceGoals(created, `observation:${created.item?.id || petId}`);
       await renderPetObservations(petId);
     } catch (error) {
-      showError(`Не удалось добавить наблюдение: ${error.message}`);
+      showError(`Не удалось добавить наблюдение: ${readableError(error.message)}`);
     }
   });
 }
 
 async function renderPetWeights(petId) {
+  if (!state.pets.length) await refreshPets();
+  const pet = state.pets.find((item) => Number(item.id) === Number(petId));
   const data = await api(`/api/pets/${petId}/weights`);
   const items = data.items.length
     ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.weight_kg)} кг</h3><p>${escapeHtml(item.note || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
     : renderEmptyBlock({
-        icon: "⚖️",
+        icon: "scale",
         title: "Истории веса пока нет",
         text: "Сохраняйте вес периодически, чтобы видеть динамику и быстрее замечать изменения.",
       });
   setWorkspace(`
     <div class="workspace-head">
-      <h2>Вес</h2>
-      <button class="secondary-button compact" data-open-pet="${petId}" type="button">⬅️ В карточку</button>
+      <div><h2>Вес</h2>${pet ? `<p>${escapeHtml(petTitle(pet))}</p>` : ""}</div>
+      <button class="secondary-button compact icon-text-button" data-open-pet="${petId}" type="button">${renderAppIcon("chevron-left")}<span>В карточку</span></button>
     </div>
     <form class="inline-form" id="weightForm">
-      <input name="weight_kg" inputmode="decimal" placeholder="6.1" required />
-      <input name="note" placeholder="Заметка, если нужна" />
+      <label><span>Вес, кг</span><input name="weight_kg" inputmode="decimal" placeholder="6,1" required /></label>
+      <label><span>Заметка</span><input name="note" placeholder="Например: после смены корма" /></label>
       <button class="primary-button compact" type="submit">Сохранить</button>
     </form>
     <div class="list-stack">${items}</div>
@@ -3224,16 +4645,17 @@ async function renderPetWeights(petId) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
-      await api(`/api/pets/${petId}/weights`, {
+      const created = await api(`/api/pets/${petId}/weights`, {
         method: "POST",
         body: JSON.stringify({
           weight_kg: Number(String(form.get("weight_kg") || "").replace(",", ".")),
           note: String(form.get("note") || "")
         })
       });
+      trackServiceGoals(created, `weight:${created.item?.id || petId}`);
       await renderPetWeights(petId);
     } catch (error) {
-      showError(`Не удалось сохранить вес: ${error.message}`);
+      showError(`Не удалось сохранить вес: ${readableError(error.message)}`);
     }
   });
 }
@@ -3243,6 +4665,7 @@ async function renderReminders(petId = null) {
   const data = petId ? await api(`/api/pets/${petId}`) : await api("/api/reminders");
   const reminders = petId ? data.reminders || [] : data.items || [];
   const title = petId ? `Напоминания питомца` : "Напоминания";
+  const petContext = petId ? data.item || state.pets.find((pet) => Number(pet.id) === Number(petId)) : null;
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
   const selectedPetId = petId || mainPet?.id || "";
   const items = reminders.length
@@ -3253,7 +4676,7 @@ async function renderReminders(petId = null) {
               <div>
                 <h3>${escapeHtml(item.title)}</h3>
                 <p>${escapeHtml(item.due_date)} ${escapeHtml(item.due_time || "")}${item.pet_name ? ` · ${escapeHtml(item.pet_name)}` : ""}</p>
-                <small>${escapeHtml(item.periodicity || "once")}</small>
+                <small>${escapeHtml(periodicityLabel(item.periodicity || "once"))}</small>
               </div>
               <button class="secondary-button compact danger-text" data-delete-reminder="${item.id}" data-return-pet="${petId || ""}" type="button">Отключить</button>
             </article>
@@ -3261,18 +4684,20 @@ async function renderReminders(petId = null) {
         )
         .join("")
     : renderEmptyBlock({
-        icon: "⏰",
+        icon: "bell",
         title: "Напоминаний пока нет",
         text: "Создайте напоминание о вакцинации, обработке от паразитов, осмотре, груминге или своей задаче.",
       });
 
   setWorkspace(`
     <div class="workspace-head">
-      <h2>${title}</h2>
-      <button class="secondary-button compact" ${petId ? `data-open-pet="${petId}"` : `data-action="home"`} type="button">⬅️ Назад</button>
+      <div><h2>${title}</h2>${petContext ? `<p>${escapeHtml(petTitle(petContext))}</p>` : ""}</div>
+      <button class="secondary-button compact icon-text-button" ${petId ? `data-open-pet="${petId}"` : `data-action="home"`} type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
+    <div class="list-stack">${items}</div>
+    <details class="form-disclosure" ${reminders.length ? "" : "open"}>
+      <summary>${renderAppIcon("plus")}<span>Добавить напоминание</span></summary>
     <form class="form-grid" id="reminderForm">
-      <h3>Добавить напоминание</h3>
       <label><span>Питомец</span><select name="pet_id">${petOptions(selectedPetId)}</select></label>
       <label><span>Шаблон</span><select name="reminder_type">${reminderTypes.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
       <label><span>Заголовок</span><input name="title" required value="Вакцинация" placeholder="Вакцинация" /></label>
@@ -3282,7 +4707,7 @@ async function renderReminders(petId = null) {
       <label class="full-row"><span>Заметка</span><input name="notes" placeholder="Например: купить препарат заранее" /></label>
       <button class="primary-button" type="submit">Сохранить напоминание</button>
     </form>
-    <div class="list-stack">${items}</div>
+    </details>
   `);
 
   const reminderForm = document.querySelector("#reminderForm");
@@ -3300,7 +4725,7 @@ async function renderReminders(petId = null) {
     const form = new FormData(event.currentTarget);
     const selectedPetId = String(form.get("pet_id") || "");
     try {
-      await api("/api/reminders", {
+      const created = await api("/api/reminders", {
         method: "POST",
         body: JSON.stringify({
           pet_id: selectedPetId ? Number(selectedPetId) : null,
@@ -3312,9 +4737,10 @@ async function renderReminders(petId = null) {
           notes: String(form.get("notes") || "") || null
         })
       });
+      trackServiceGoals(created, `reminder:${created.item?.id || selectedPetId}`);
       await renderReminders(petId);
     } catch (error) {
-      showError(`Не удалось сохранить напоминание: ${error.message}`);
+      showError(`Не удалось сохранить напоминание: ${readableError(error.message)}`);
     }
   });
 }
@@ -3326,28 +4752,21 @@ async function renderTriage(prefillPetId = null) {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>Оценка состояния питомца</h2>
-        <p>Выберите питомца и опишите, что происходит. Если в тексте есть опасные признаки, сервис сразу покажет срочное предупреждение.</p>
+        <h2>Что изменилось у питомца?</h2>
+        <p>Расскажите, что заметили. Ответ можно сохранить в общей истории питомца.</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
-    <div class="care-note">
+    <div class="check-urgent-warning">
       TemichevVet не ставит диагноз и не назначает лечение. Если есть тяжёлое дыхание, судороги,
       потеря сознания, кровь, признаки отравления или резкое ухудшение — сразу обращайтесь в клинику.
     </div>
-    <form class="form-grid one-column" id="triageForm">
-      <label><span>Питомец</span><select name="pet_id"><option value="">Без привязки</option>${petOptions(selectedPetId)}</select></label>
-      <label><span>Что происходит</span><textarea name="text" placeholder="Например: кошка не ест второй день, вялая, была рвота после еды" required></textarea></label>
-      <button class="primary-button" type="submit">Оценить состояние питомца</button>
+    <form class="form-grid one-column premium-form" id="triageForm">
+      <label><span>О ком речь?</span><select name="pet_id"><option value="">Без привязки к карточке</option>${petOptions(selectedPetId)}</select></label>
+      <label><span>Что происходит?</span><textarea name="text" placeholder="Например: кошка второй день не ест, прячется и почти не пьёт" required></textarea></label>
+      <button class="primary-button" type="submit">Получить и сохранить разбор</button>
     </form>
     <div id="triageResult"></div>
-    <div class="visual-strip compact-visual">
-      <img src="/static/assets/hero_pets.jpg" alt="" />
-      <div>
-        <h3>Как работает оценка</h3>
-        <p>Сначала срабатывают опасные признаки. Это помогает не ждать ответ сервиса там, где нужна клиника.</p>
-      </div>
-    </div>
   `);
   document.querySelector("#triageForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -3355,7 +4774,7 @@ async function renderTriage(prefillPetId = null) {
     const petId = String(form.get("pet_id") || "");
     trackFunnel("triage.submit_click", { has_pet: Boolean(petId) });
     const resultEl = document.querySelector("#triageResult");
-    resultEl.innerHTML = `<p class="hint">Оцениваю...</p>`;
+    resultEl.innerHTML = `<div class="notice check-loading" role="status" aria-live="polite"><strong>Готовим ответ…</strong><span>Обычно это занимает несколько секунд.</span></div>`;
     try {
       const data = await api("/api/triage", {
         method: "POST",
@@ -3365,6 +4784,7 @@ async function renderTriage(prefillPetId = null) {
         })
       });
       state.subscription = data.subscription || state.subscription;
+      trackServiceGoals(data, `health-check:${data.triage_id || petId || "unlinked"}`);
       resultEl.innerHTML = `
         <div class="result-box ${data.urgency === "red" ? "danger" : ""}" data-triage-answer="${escapeHtml(data.answer)}">
           ${formatTriageAnswer(data.answer)}
@@ -3373,74 +4793,88 @@ async function renderTriage(prefillPetId = null) {
           </div>
         </div>
         <div class="care-note">
-          Если в ответе есть уточняющие вопросы, не обязательно отвечать здесь сразу.
-          Подготовьте эти данные для ветеринарного врача или добавьте их в новую оценку, если хотите уточнить состояние.
-          Следующая оценка состояния спишет ещё один запрос.
-          ${data.followup ? "Контроль состояния будет показан в кабинете позже; если Telegram подключён, напоминание также уйдёт туда." : ""}
+          Сохраните важные детали для ветеринарного врача.
+          ${data.followup ? "Позже напомним проверить самочувствие ещё раз." : ""}
         </div>
         <div class="next-actions">
-          ${petId ? `<button class="secondary-button" data-open-pet="${petId}" type="button">🐾 Открыть карточку</button>` : ""}
-          ${petId ? `<button class="secondary-button" data-pet-view="reminders" data-pet-id="${petId}" type="button">⏰ Добавить напоминание</button>` : `<button class="secondary-button" data-action="reminders" type="button">⏰ Добавить напоминание</button>`}
-          ${petId ? `<button class="secondary-button" data-pet-view="history" data-pet-id="${petId}" type="button">📜 История питомца</button>` : ""}
-          <button class="primary-button" data-action="triage" type="button">🩺 Уточнить состояние</button>
+          ${petId ? `<button class="secondary-button icon-text-button" data-open-pet="${petId}" type="button">${renderAppIcon("paw-print")}<span>Открыть карточку</span></button>` : ""}
+          ${petId ? `<button class="secondary-button icon-text-button" data-pet-view="reminders" data-pet-id="${petId}" type="button">${renderAppIcon("bell")}<span>Добавить напоминание</span></button>` : `<button class="secondary-button icon-text-button" data-action="reminders" type="button">${renderAppIcon("bell")}<span>Добавить напоминание</span></button>`}
+          ${petId ? `<button class="secondary-button icon-text-button" data-pet-view="history" data-pet-id="${petId}" type="button">${renderAppIcon("history")}<span>История питомца</span></button>` : ""}
+          <button class="primary-button" data-action="triage" type="button">Рассказать ещё раз</button>
         </div>
       `;
     } catch (error) {
-      resultEl.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(error.message)}</div>`;
+      resultEl.innerHTML = `<div class="notice danger"><strong>Не получилось загрузить ответ</strong><p>${escapeHtml(readableError(error.message))}</p></div>`;
     }
   });
 }
 
 async function renderFood() {
-  await refreshPets();
+  if (!state.pets.length) await refreshPets();
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
+  const defaultSpecies = mainPet?.pet_type === "собака" ? "dog" : "cat";
   setWorkspace(`
     <div class="workspace-head">
       <div>
         <h2>Питание</h2>
-        <p>Проверьте отдельный продукт или готовое блюдо. Если это блюдо, лучше указать состав через запятую.</p>
+        <p>Узнайте, можно ли давать питомцу продукт или готовое блюдо.</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="more" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
     <form class="form-grid one-column" id="foodForm">
-      <label><span>Для кого проверяем?</span><select name="food_target">
-        <option value="">Не указывать</option>
-        ${state.pets.map((pet) => `<option value="pet:${pet.id}" ${mainPet && pet.id === mainPet.id ? "selected" : ""}>${escapeHtml(petTitle(pet))}</option>`).join("")}
-        <option value="cat">Кошка</option>
-        <option value="dog">Собака</option>
-      </select></label>
+      <label><span>Сохранить для питомца</span><select name="pet_id"><option value="">Выбрать после ответа</option>${petOptions(mainPet?.id || "")}</select></label>
+      <label><span>Для кого?</span><select name="species" required><option value="dog" ${defaultSpecies === "dog" ? "selected" : ""}>Собака</option><option value="cat" ${defaultSpecies === "cat" ? "selected" : ""}>Кошка</option></select></label>
       <label><span>Продукт или блюдо</span><input name="query" placeholder="борщ, котлета, виноград, куриная грудка" required /></label>
       <label><span>Состав блюда, если известен</span><input name="ingredients" placeholder="мясо, рис, лук, соль" /></label>
-      <div class="care-note">Если блюда нет в базе, укажите ингредиенты. Например: “харчо: говядина, рис, томат, чеснок, специи”. Для отдельного продукта достаточно названия.</div>
-      <button class="primary-button" type="submit">Проверить</button>
+      <div class="care-note">Это общая справочная база для кошек и собак, а не видоспецифичный анализ корма или этикетки. Для готового блюда перечислите известный состав через запятую.</div>
+      <button class="primary-button" type="submit">Проверить продукт</button>
     </form>
     <div id="foodResult"></div>
   `);
   document.querySelector("#foodForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const species = String(form.get("species") || "");
+    const query = String(form.get("query") || "");
+    const ingredients = String(form.get("ingredients") || "");
+    const selectedPetId = Number(form.get("pet_id") || 0);
     const resultEl = document.querySelector("#foodResult");
     resultEl.innerHTML = `<p class="hint">Проверяю...</p>`;
     try {
       const data = await api("/api/food/check", {
         method: "POST",
         body: JSON.stringify({
-          query: String(form.get("query") || ""),
-          ingredients: String(form.get("ingredients") || "")
+          species,
+          query,
+          ingredients
         })
+      });
+      if (data.species !== species) throw new Error("food_species_mismatch");
+      storePendingPublicFoodSave({
+        save_kind: "food",
+        pet_type: species,
+        species,
+        query,
+        ingredients,
+        pet_id: selectedPetId || undefined,
+        landing_slug: "cabinet-food",
+        session_id: getFunnelSessionId(),
+        ...attributionEventMetadata(),
+        created_at: new Date().toISOString()
       });
       resultEl.innerHTML = `
         <div class="result-box ${data.item && !data.item.allowed ? "danger" : ""}">
           <pre>${escapeHtml(data.message)}</pre>
         </div>
         <div class="next-actions">
+          <button class="primary-button" data-auth-food-save type="button">Сохранить в карточку</button>
           <button class="secondary-button" data-action="food" type="button">Проверить ещё продукт</button>
-          <button class="secondary-button" data-action="faq" type="button">❓ Вопросы и ответы</button>
-          <button class="secondary-button" data-action="home" type="button">⬅️ В меню</button>
+          <button class="secondary-button icon-text-button" data-action="faq" type="button">${renderAppIcon("book-open")}<span>Вопросы и ответы</span></button>
+          <button class="secondary-button" data-action="more" type="button">Все разделы</button>
         </div>
       `;
     } catch (error) {
-      resultEl.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(error.message)}</div>`;
+      resultEl.innerHTML = `<div class="notice danger"><strong>Не получилось проверить продукт</strong><p>${escapeHtml(readableError(error.message))}</p></div>`;
     }
   });
 }
@@ -3448,7 +4882,7 @@ async function renderFood() {
 const knowledgeSections = {
   care: {
     title: "Уход и привычки",
-    icon: "🧴",
+    icon: "heart-pulse",
     endpoint: "/api/care",
     intro: "Карточки по уходу, поведению, шерсти, когтям, ушам, зубам, прогулкам и домашней безопасности.",
     label: "Тема ухода",
@@ -3457,7 +4891,7 @@ const knowledgeSections = {
   },
   faq: {
     title: "Вопросы и ответы",
-    icon: "❓",
+    icon: "book-open",
     endpoint: "/api/faq",
     intro: "Справочник по частым вопросам: профилактика, тревожные признаки, подготовка к врачу, уход и бытовые ситуации.",
     label: "Что хотите узнать?",
@@ -3544,10 +4978,10 @@ async function renderKnowledgeSection(kind) {
   setWorkspace(`
     <div class="workspace-head">
       <div>
-        <h2>${config.icon} ${config.title}</h2>
+        <h2 class="icon-heading">${renderAppIcon(config.icon)}<span>${config.title}</span></h2>
         <p>${escapeHtml(config.intro)}</p>
       </div>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="more" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
     <form class="form-grid one-column" id="knowledgeSearchForm">
       <label>
@@ -3557,7 +4991,7 @@ async function renderKnowledgeSection(kind) {
       <button class="primary-button" type="submit">Найти</button>
     </form>
     <div class="care-note">
-      Это справочный раздел. Он не списывает запросы по здоровью и не заменяет оценку состояния питомца или очный осмотр ветеринарного врача.
+      Это справочный раздел. Он не расходует разборы по здоровью и не заменяет очный осмотр ветеринарного врача.
     </div>
     <div id="knowledgeResult"></div>
   `);
@@ -3572,7 +5006,7 @@ async function renderKnowledgeSection(kind) {
       const data = await api(`${config.endpoint}?${params.toString()}`);
       resultEl.innerHTML = renderKnowledgeItems(kind, data.items || [], query);
     } catch (error) {
-      resultEl.innerHTML = `<div class="notice danger">Ошибка: ${escapeHtml(readableError(error.message))}</div>`;
+      resultEl.innerHTML = `<div class="notice danger"><strong>Не получилось загрузить материалы</strong><p>${escapeHtml(readableError(error.message))}</p></div>`;
     }
   }
 
@@ -3609,7 +5043,7 @@ async function startPlusPayment() {
     localStorage.setItem("tvv_last_plus_payment_id", data.payment_id);
     window.location.href = data.confirmation_url;
   } catch (error) {
-    if (resultEl) resultEl.innerHTML = paymentStatusNotice(`Ошибка: ${readableError(error.message)}`, "danger");
+    if (resultEl) resultEl.innerHTML = paymentStatusNotice(`Не удалось открыть оплату. ${readableError(error.message)}`, "danger");
   }
 }
 
@@ -3624,6 +5058,10 @@ async function checkPlusPaymentStatus(options = {}) {
     const data = await api(path);
     state.subscription = data.subscription || state.subscription;
     if (data.status === "succeeded") {
+      trackMetrikaGoalOnce("payment.succeeded", `payment:${paymentId || data.payment_id || "latest"}`, {
+        ...attributionEventMetadata(),
+        provider: "yookassa"
+      });
       state.lastPlusPaymentId = "";
       localStorage.removeItem("tvv_last_plus_payment_id");
     }
@@ -3636,7 +5074,7 @@ async function checkPlusPaymentStatus(options = {}) {
     if (options.replaceHistory) {
       window.history.replaceState({}, "", window.location.pathname);
     }
-    const message = paymentStatusNotice(`Ошибка: ${readableError(error.message)}`, "danger");
+    const message = paymentStatusNotice(`Не удалось проверить оплату. ${readableError(error.message)}`, "danger");
     if (resultEl) resultEl.innerHTML = message;
     else renderSubscription(message);
   }
@@ -3644,7 +5082,6 @@ async function checkPlusPaymentStatus(options = {}) {
 
 function renderSubscription(statusHtml = "") {
   const sub = state.subscription || {};
-  const sourceLabel = sub.source === "telegram" ? "Telegram" : "PWA";
   const plan = sub.title || sub.plan || "Free";
   const quotaTotal = Number.isFinite(Number(sub.quota_total)) ? Number(sub.quota_total) : 0;
   const quotaUsed = Number.isFinite(Number(sub.quota_used)) ? Number(sub.quota_used) : 0;
@@ -3654,69 +5091,40 @@ function renderSubscription(statusHtml = "") {
   const telegramConnected = isProviderConnected("telegram");
   setWorkspace(`
     <div class="workspace-head">
-      <h2>Подписка</h2>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <div><h2>Подписка</h2><p>Текущий тариф и доступные возможности.</p></div>
+      <button class="secondary-button compact icon-text-button" data-action="more" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
-    <div class="visual-strip compact-visual">
-      <img src="/static/assets/subscription_banner.jpg" alt="" />
-      <div>
-        <h3>Plus в веб-кабинете</h3>
-        <p>Расширенные лимиты, история по питомцам и больше активных напоминаний. Автосписаний не будет.</p>
+    <section class="profile-card subscription-current-card">
+      <div class="card-title-row">
+        <div class="card-icon large">${renderAppIcon("credit-card")}</div>
+        <div><p class="section-label">Ваш тариф</p><h3>${escapeHtml(plan)}</h3></div>
       </div>
-    </div>
-    <div class="profile-card">
-      <h3>Ваш текущий доступ</h3>
-      <p><strong>Тариф:</strong> ${escapeHtml(plan)}</p>
-      <p><strong>Использовано оценок:</strong> ${quotaUsed} / ${quotaTotal}. Осталось: ${quotaLeft}.</p>
-      <p><strong>Источник подписки:</strong> ${escapeHtml(sourceLabel)}.</p>
+      <div class="subscription-usage">
+        <strong>${quotaLeft}</strong>
+        <span>из ${quotaTotal} разборов доступно</span>
+      </div>
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
-      ${telegramConnected || sourceLabel === "Telegram" ? `
-        <div class="notice">Telegram подключён: сайт и Telegram используют один аккаунт, историю и подписку.</div>
-      ` : `
-        <div class="notice">Если Plus был оплачен в Telegram, подключите Telegram в разделе «Способы входа» — кабинет подтянет тот же доступ.</div>
-      `}
+      ${telegramConnected || sub.source === "telegram" ? `<p class="hint">Сайт и Telegram используют один аккаунт и одну подписку.</p>` : ""}
       ${canPay ? `
-        <div class="next-actions payment-actions">
-          <button class="primary-button" data-action="pay-plus" type="button">💳 Оплатить Plus — 200 ₽</button>
-          <button class="secondary-button" data-action="check-plus-payment" type="button">Проверить оплату</button>
-        </div>
-        <p class="hint">Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет вернётся на Free.</p>
+        <button class="primary-button icon-text-button" data-action="pay-plus" type="button">${renderAppIcon("credit-card")}<span>Подключить Plus — 200 ₽</span></button>
       ` : `
-        <div class="notice">Plus активен. Повторная оплата сейчас не нужна.</div>
+        <div class="notice success">Plus активен.</div>
       `}
       <div id="paymentResult">${statusHtml}</div>
-    </div>
-    <div class="pricing-grid subscription-pricing" aria-label="Тарифы TemichevVet">
-      <article class="pricing-card">
-        <div>
-          <strong>Free</strong>
-          <span>Бесплатный старт</span>
-        </div>
-        <p>Базовый личный кабинет для первых оценок состояния и ведения питомца.</p>
-        <ul>
-          <li>до 5 оценок состояния в первый месяц;</li>
-          <li>карточка питомца, история, наблюдения и вес;</li>
-          <li>базовый доступ к материалам и проверке питания.</li>
-        </ul>
-      </article>
-      <article class="pricing-card featured">
-        <div>
-          <strong>Plus</strong>
-          <span>200 ₽ за 30 дней</span>
-        </div>
-        <p>Расширенный доступ для регулярного контроля состояния питомца.</p>
-        <ul>
-          <li>до 10 оценок состояния в месяц;</li>
-          <li>расширенная история по питомцам;</li>
-          <li>до 20 активных напоминаний;</li>
-          <li>до 3 питомцев в личном кабинете.</li>
-        </ul>
-      </article>
-    </div>
-    <p class="legal-price-note">
-      Plus оплачивается разово на 30 дней. Автосписаний нет. После окончания срока кабинет
-      возвращается на Free, если Plus не продлить.
-    </p>
+    </section>
+    <section class="profile-card subscription-benefits-card">
+      <h3>Что входит в Plus</h3>
+      <ul class="benefit-list">
+        <li>до 10 разборов по здоровью в месяц;</li>
+        <li>до 3 питомцев в кабинете;</li>
+        <li>расширенная история и до 20 активных напоминаний;</li>
+        <li>сводка за 30/90 дней или всё время;</li>
+        <li>печать и сохранение сводки в PDF.</li>
+      </ul>
+      <p class="legal-price-note">200 ₽ за 30 дней. Оплата разовая, автосписаний нет.</p>
+      <p class="hint">После окончания Plus данные не удаляются. Питомцы и записи сверх Free остаются доступны для чтения.</p>
+      ${canPay ? `<button class="text-button" data-action="check-plus-payment" type="button">Проверить статус оплаты</button>` : ""}
+    </section>
   `);
 }
 
@@ -3724,7 +5132,7 @@ function renderFeedback() {
   setWorkspace(`
     <div class="workspace-head">
       <h2>Обратная связь</h2>
-      <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+      <button class="secondary-button compact icon-text-button" data-action="more" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
     <div class="notice">
       Это связь с командой проекта TemichevVet, а не с ветеринарным врачом. Не отправляйте сюда симптомы, жалобы и срочные медицинские ситуации.
@@ -3758,7 +5166,7 @@ function renderFeedback() {
       resultEl.textContent = data.message;
       event.currentTarget.reset();
     } catch (error) {
-      resultEl.textContent = `Ошибка: ${error.message}`;
+      resultEl.textContent = `Не удалось отправить сообщение: ${readableError(error.message)}`;
     }
   });
 }
@@ -3769,10 +5177,10 @@ async function renderGlobalHistory() {
     setWorkspace(`
       <div class="workspace-head">
         <h2>История здоровья</h2>
-        <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
       </div>
       ${renderEmptyBlock({
-        icon: "📜",
+        icon: "history",
         title: "Сначала добавьте питомца",
         text: "История хранится по карточкам питомцев, чтобы не смешивать разные обращения.",
         action: "pets",
@@ -3781,7 +5189,10 @@ async function renderGlobalHistory() {
     `);
     return;
   }
-  await renderPetHistory(state.currentPetId || state.pets[0].id);
+  const selectedPet = state.pets.find((pet) => Number(pet.id) === Number(state.currentPetId))
+    || state.pets.find((pet) => pet.is_main)
+    || state.pets[0];
+  await renderPetHistory(selectedPet.id);
 }
 
 async function renderGlobalObservations() {
@@ -3790,10 +5201,10 @@ async function renderGlobalObservations() {
     setWorkspace(`
       <div class="workspace-head">
         <h2>Наблюдения</h2>
-        <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+        <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
       </div>
       ${renderEmptyBlock({
-        icon: "📊",
+        icon: "clipboard-list",
         title: "Сначала добавьте питомца",
         text: "Наблюдения лучше вести по конкретной карточке: так видна динамика состояния.",
         action: "pets",
@@ -3802,7 +5213,10 @@ async function renderGlobalObservations() {
     `);
     return;
   }
-  await renderPetObservations(state.currentPetId || state.pets[0].id);
+  const selectedPet = state.pets.find((pet) => Number(pet.id) === Number(state.currentPetId))
+    || state.pets.find((pet) => pet.is_main)
+    || state.pets[0];
+  await renderPetObservations(selectedPet.id);
 }
 
 async function verifyEmailCode() {
@@ -3818,7 +5232,7 @@ async function verifyEmailCode() {
     setAuthMode(true);
     trackAuthLoginSuccess("email");
     emailHint.textContent = "";
-    if (await completePendingPublicCheckAfterLogin()) return;
+    if (await completePendingSaveAfterLogin()) return;
     await renderStartupView();
   } catch (error) {
     emailHint.textContent = readableError(error.message);
@@ -3850,7 +5264,7 @@ emailForm.addEventListener("submit", async (event) => {
   }
 });
 
-async function startMessenger(provider) {
+async function startMessenger(provider, externalWindow = openDeferredExternalWindow()) {
   messengerHint.textContent = "Готовлю вход...";
   try {
     const data = await api(`/api/auth/${provider}/start`, { method: "POST", body: "{}" });
@@ -3859,21 +5273,24 @@ async function startMessenger(provider) {
       if (provider === "telegram" && data.state) {
         saveTelegramLogin(data.state, data.url);
         renderTelegramWaiting(data.url, data.state);
-        window.open(data.url, "_blank", "noopener");
+        navigateDeferredExternalWindow(externalWindow, data.url);
         pollTelegramLogin(data.state);
         return;
       }
       if (provider === "max" && data.state) {
         saveMaxLogin(data.state, data.url);
         renderMaxWaiting(data.url, data.state);
-        window.open(data.url, "_blank", "noopener");
+        navigateDeferredExternalWindow(externalWindow, data.url);
         pollMaxLogin(data.state);
         return;
       }
-      window.location.href = data.url;
+      if (!navigateDeferredExternalWindow(externalWindow, data.url)) window.location.href = data.url;
+      return;
     }
+    closeDeferredExternalWindow(externalWindow);
   } catch (error) {
-    messengerHint.textContent = `Ошибка: ${error.message}`;
+    closeDeferredExternalWindow(externalWindow);
+    messengerHint.textContent = readableError(error.message);
   }
 }
 
@@ -3899,7 +5316,7 @@ async function tryMaxMiniAppLogin() {
       await refreshAccountState();
       setAuthMode(true);
       trackAuthLoginSuccess("max");
-      if (await completePendingPublicCheckAfterLogin()) return true;
+      if (await completePendingSaveAfterLogin()) return true;
       await renderStartupView();
       return true;
     }
@@ -3972,7 +5389,7 @@ async function pollTelegramLogin(loginState, attempt = 0) {
       setAuthMode(true);
       stopTelegramPolling();
       trackAuthLoginSuccess("telegram");
-      if (await completePendingPublicCheckAfterLogin()) return;
+      if (await completePendingSaveAfterLogin()) return;
       await renderStartupView();
       return;
     }
@@ -3985,7 +5402,7 @@ async function pollTelegramLogin(loginState, attempt = 0) {
     messengerHint.firstChild.textContent = data.message || "Ожидаем подтверждение в Telegram...";
   } catch (error) {
     renderTelegramWaiting(state.telegramLoginUrl, loginState);
-    messengerHint.firstChild.textContent = `Ошибка проверки: ${error.message}`;
+    messengerHint.firstChild.textContent = `Не удалось проверить вход: ${readableError(error.message)}`;
   }
   state.telegramPollTimer = setTimeout(() => pollTelegramLogin(loginState, attempt + 1), 3000);
 }
@@ -4053,7 +5470,7 @@ async function pollMaxLogin(loginState, attempt = 0) {
       setAuthMode(true);
       stopMaxPolling();
       trackAuthLoginSuccess("max");
-      if (await completePendingPublicCheckAfterLogin()) return;
+      if (await completePendingSaveAfterLogin()) return;
       await renderStartupView();
       return;
     }
@@ -4066,13 +5483,42 @@ async function pollMaxLogin(loginState, attempt = 0) {
     messengerHint.firstChild.textContent = data.message || "Ожидаем подтверждение в MAX...";
   } catch (error) {
     renderMaxWaiting(state.maxLoginUrl, loginState);
-    messengerHint.firstChild.textContent = `Ошибка проверки: ${error.message}`;
+    messengerHint.firstChild.textContent = `Не удалось проверить вход: ${readableError(error.message)}`;
   }
   state.maxPollTimer = setTimeout(() => pollMaxLogin(loginState, attempt + 1), 3000);
 }
 
 openCheckBtn?.addEventListener("click", () => {
   trackFunnel("landing.primary_cta_click", { target: "hero" });
+  openPetOnboarding();
+});
+petOnboardingCloseBtn?.addEventListener("click", closePetOnboarding);
+petOnboardingDialog?.addEventListener("click", (event) => {
+  if (event.target === petOnboardingDialog) closePetOnboarding();
+});
+publicPetOnboardingForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const petType = String(form.get("pet_type") || "").trim();
+  const petName = String(form.get("pet_name") || "").trim();
+  if (!petType || !petName) {
+    if (petOnboardingHint) petOnboardingHint.textContent = "Выберите собаку или кошку и укажите кличку.";
+    return;
+  }
+  const existing = pendingPetCreate();
+  storePendingPetCreate({
+    pet_type: petType,
+    pet_name: petName,
+    client_request_id: existing?.client_request_id || createFlowId(),
+    created_at: existing?.created_at || new Date().toISOString()
+  });
+  closePetOnboarding();
+  if (state.user) {
+    setAuthMode(true);
+    await completePendingPetAfterLogin();
+    return;
+  }
+  openAuthDialog({ lead: "После входа карточка питомца создастся автоматически." });
 });
 openLoginBtn?.addEventListener("click", () => {
   trackFunnel("landing.login_cta_click", { target: "hero" });
@@ -4129,8 +5575,12 @@ document.addEventListener("click", async (event) => {
   }
 
   const actionButton = event.target.closest("[data-action]");
+  const openOnboardingButton = event.target.closest("[data-open-onboarding]");
   const openPetButton = event.target.closest("[data-open-pet]");
   const petViewButton = event.target.closest("[data-pet-view]");
+  const summaryPeriodButton = event.target.closest("button[data-summary-period]:not([data-print-summary])");
+  const printSummaryButton = event.target.closest("[data-print-summary]");
+  const saveFoodButton = event.target.closest("[data-auth-food-save]");
   const setMainButton = event.target.closest("[data-set-main]");
   const deletePetButton = event.target.closest("[data-delete-pet]");
   const deleteReminderButton = event.target.closest("[data-delete-reminder]");
@@ -4139,6 +5589,26 @@ document.addEventListener("click", async (event) => {
   const copyTriageButton = event.target.closest("[data-copy-triage-result]");
 
   try {
+    if (openOnboardingButton) {
+      openPetOnboarding();
+      return;
+    }
+    if (summaryPeriodButton) {
+      await renderPetSummary(Number(summaryPeriodButton.dataset.petId), summaryPeriodButton.dataset.summaryPeriod || "30");
+      return;
+    }
+    if (printSummaryButton) {
+      const petId = Number(printSummaryButton.dataset.petId);
+      const period = printSummaryButton.dataset.summaryPeriod || "30";
+      await api(`/api/pets/${petId}/summary/export?period=${encodeURIComponent(period)}`, { method: "POST", body: "{}" });
+      window.print();
+      return;
+    }
+    if (saveFoodButton) {
+      saveFoodButton.disabled = true;
+      await completePendingPublicFoodAfterLogin();
+      return;
+    }
     if (copyTriageButton) {
       const resultBox = copyTriageButton.closest("[data-triage-answer]");
       await copyTextToClipboard(resultBox?.dataset.triageAnswer || "");
@@ -4163,7 +5633,7 @@ document.addEventListener("click", async (event) => {
       setWorkspace(`
         <div class="workspace-head">
           <h2>Контроль состояния</h2>
-          <button class="secondary-button compact" data-action="home" type="button">⬅️ В меню</button>
+          <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>На главную</span></button>
         </div>
         <div class="notice">${escapeHtml(data.message || "Ответ сохранён.")}</div>
       `);
@@ -4174,17 +5644,20 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (openPetButton) {
+      setDashboardActiveAction("pets");
       await renderPetCard(Number(openPetButton.dataset.openPet));
       return;
     }
     if (petViewButton) {
       const petId = Number(petViewButton.dataset.petId);
       const view = petViewButton.dataset.petView;
+      setDashboardActiveAction(view === "triage" ? "triage" : view === "reminders" ? "reminders" : "pets");
       if (view === "history") await renderPetHistory(petId);
       if (view === "observations") await renderPetObservations(petId);
       if (view === "weight") await renderPetWeights(petId);
       if (view === "reminders") await renderReminders(petId);
       if (view === "triage") await renderTriage(petId);
+      if (view === "summary") await renderPetSummary(petId);
       if (view === "edit") await renderPetEdit(petId);
       return;
     }
@@ -4211,6 +5684,7 @@ document.addEventListener("click", async (event) => {
     }
     if (!actionButton) return;
     const action = actionButton.dataset.action;
+    setDashboardActiveAction(action);
     if (action === "home") await renderHome();
     if (action === "pets") await renderPets();
     if (action === "triage") await renderTriage();
@@ -4237,7 +5711,7 @@ document.addEventListener("click", async (event) => {
     if (action === "observations") await renderGlobalObservations();
     if (action === "logout") await performLogout();
   } catch (error) {
-    showError(`Ошибка: ${readableError(error.message)}`);
+    showError(readableError(error.message));
   }
 });
 
@@ -4256,11 +5730,20 @@ installBtn.addEventListener("click", async () => {
 });
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js", { scope: "/" })
+    .then(() => navigator.serviceWorker.getRegistrations())
+    .then((registrations) => Promise.all(
+      registrations
+        .filter((registration) => registration.scope.endsWith("/static/"))
+        .map((registration) => registration.unregister())
+    ))
+    .catch(() => {});
 }
 
+clearSensitiveMiniAppFragment();
 showCookieBannerIfNeeded();
 renderPublicCheckLanding();
+renderPublicCampaignLanding();
 if ((location.pathname.replace(/\/+$/, "") || "/") === "/") {
   trackFunnel("landing.view", { path: "/" });
 }

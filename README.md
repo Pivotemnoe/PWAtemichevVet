@@ -12,7 +12,11 @@ This repository is intentionally separate from the Telegram bot repository. The 
 - Telegram deep-link login bridge to the working bot.
 - MAX deep-link login with webhook and local polling support.
 - Optional PWA push notifications for follow-up reminders after health checks.
-- Personal cabinet: pets, pet cards, history, observations, weight, reminders, food checks, feedback.
+- Service-first onboarding that keeps the pet draft through login and creates the card idempotently.
+- Personal cabinet centered on the selected pet: history, observations, weight, reminders, food checks and saved health changes.
+- Owner-only doctor summary for 30/90 days or all history, with Plus print/PDF export.
+- Free/Plus entity limits that keep over-limit historical data readable after Plus expires.
+- Activation analytics for first permanent record, service activation, D1/D7 returns, summary use and Plus payment.
 - SQLite schema for web users, auth challenges, sessions, external account links, pets, reminders, history, and observations.
 - Production deployment notes for VPS + nginx.
 
@@ -33,6 +37,21 @@ http://127.0.0.1:8080
 ```
 
 In development mode the email auth code is returned in the API response so the flow can be tested without SMTP.
+
+## Service Activation And Summary
+
+Product activation is recorded once when a signed-in user has a pet and saves the first permanent record: weight, observation, reminder, saved health check or saved food answer.
+
+Doctor summary endpoints:
+
+```text
+GET  /api/pets/{pet_id}/summary?period=30|90|all
+POST /api/pets/{pet_id}/summary/export?period=30|90|all
+```
+
+Free can view 30 days without export. Plus can select 30/90 days or all history and open the browser print/PDF flow. The summary aggregates existing records and does not generate a new diagnosis.
+
+The prepared, not-uploaded Direct package is in `marketing/service-first-direct-draft.json`. Applying it to campaign `713573600` or creating Metrika goals remains a separate live action and requires explicit approval.
 
 ## Telegram Login Bridge
 
