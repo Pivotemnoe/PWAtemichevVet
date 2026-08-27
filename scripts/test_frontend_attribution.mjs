@@ -28,7 +28,7 @@ class MemoryStorage {
 
 let flowSequence = 0;
 
-function loadPage({ href, localStorage, sessionStorage, referrer = "" }) {
+function loadPage({ href, localStorage, sessionStorage, referrer = "", metrikaReady = true }) {
   const metrikaCalls = [];
   const location = new URL(href);
   const window = {
@@ -36,9 +36,9 @@ function loadPage({ href, localStorage, sessionStorage, referrer = "" }) {
     localStorage,
     sessionStorage,
     crypto: { randomUUID: () => `flow-${++flowSequence}` },
-    history: { replaceState() {} },
-    ym: (...args) => metrikaCalls.push(args)
+    history: { replaceState() {} }
   };
+  if (metrikaReady) window.ym = (...args) => metrikaCalls.push(args);
   const context = {
     window,
     document: { referrer },
@@ -60,16 +60,45 @@ function loadPage({ href, localStorage, sessionStorage, referrer = "" }) {
   vm.runInNewContext(
     `const METRIKA_ID = 109726654;
      const isAdminRoute = false;
+     function getCookieConsent() { return null; }
      ${analyticsSource}
      globalThis.__analytics = {
        attributionEventMetadata,
        attributionRequestHeaders,
        getFunnelSessionId,
-       trackMetrikaGoalOnce
+       trackMetrikaGoalOnce,
+       trackMetrikaGoal,
+       flushPendingMetrikaGoals,
+       clearPendingMetrikaGoals
      };`,
     context
   );
-  return { analytics: context.__analytics, metrikaCalls };
+  return { analytics: context.__analytics, metrikaCalls, window };
+}
+
+{
+  const page = loadPage({
+    href: "https://temichevvet.ru/check/cat-not-eating?utm_source=yandex&utm_campaign=cat-test",
+    localStorage: new MemoryStorage(),
+    sessionStorage: new MemoryStorage(),
+    metrikaReady: false
+  });
+
+  assert.equal(page.analytics.trackMetrikaGoal("check.start_click", { slug: "cat-not-eating" }), true);
+  assert.equal(page.analytics.trackMetrikaGoal("check.submit", { slug: "cat-not-eating", pet_type: "cat" }), true);
+  assert.equal(page.metrikaCalls.length, 0);
+
+  // Consent can initialize Metrika after the first form interactions. Queued goals
+  // must keep their original order so result_shown cannot appear without them.
+  page.window.ym = (...args) => page.metrikaCalls.push(args);
+  assert.equal(page.analytics.flushPendingMetrikaGoals(), true);
+  assert.deepEqual(page.metrikaCalls.map((call) => call[2]), ["check_start_click", "check_submit"]);
+
+  page.analytics.trackMetrikaGoal("check.result_shown", { slug: "cat-not-eating", pet_type: "cat" });
+  assert.deepEqual(
+    page.metrikaCalls.map((call) => call[2]),
+    ["check_start_click", "check_submit", "check_result_shown"]
+  );
 }
 
 function decodedHeader(headers, name) {

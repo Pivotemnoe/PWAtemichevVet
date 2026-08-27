@@ -1,4 +1,4 @@
-const CACHE_NAME = "temichevvet-pwa-20260825-service-first-2";
+const CACHE_NAME = "temichevvet-pwa-20260827-metrika-sequence-1";
 const APP_SHELL = [
   "/",
   "/pet",
@@ -17,7 +17,7 @@ const APP_SHELL = [
   "/check/what-to-do-now",
   "/check/find-out-what-to-do",
   "/static/styles.css?v=20260825-service-first-2",
-  "/static/app.js?v=20260825-service-first-2",
+  "/static/app.js?v=20260827-metrika-sequence-1",
   "/static/manifest.webmanifest?v=20260825-service-first-2",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
   "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",

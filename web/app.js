@@ -236,6 +236,7 @@ const AUTH_DIALOG_DEFAULT_LEAD =
   "Войдите удобным способом. Если аккаунта ещё нет, он создастся автоматически.";
 let currentTouchAttribution = null;
 const sentMetrikaGoalKeys = new Set();
+const pendingMetrikaGoals = [];
 const visibleFunnelEventKeys = new Set();
 
 function createFlowId() {
@@ -449,14 +450,38 @@ function safeMetrikaParams(metadata = {}) {
 
 function trackMetrikaGoal(eventType, metadata = {}) {
   const goal = METRIKA_GOALS[eventType];
-  if (!goal || typeof window.ym !== "function") return false;
+  if (!goal) return false;
+  const params = safeMetrikaParams(metadata);
+  if (typeof window.ym !== "function") {
+    if (getCookieConsent()?.value === "necessary") return false;
+    pendingMetrikaGoals.push({ goal, params });
+    return true;
+  }
   try {
-    window.ym(METRIKA_ID, "reachGoal", goal, safeMetrikaParams(metadata));
+    window.ym(METRIKA_ID, "reachGoal", goal, params);
     return true;
   } catch {
     // Metrics must never break the product flow.
     return false;
   }
+}
+
+function flushPendingMetrikaGoals() {
+  if (typeof window.ym !== "function") return false;
+  while (pendingMetrikaGoals.length) {
+    const pending = pendingMetrikaGoals.shift();
+    try {
+      window.ym(METRIKA_ID, "reachGoal", pending.goal, pending.params);
+    } catch {
+      pendingMetrikaGoals.unshift(pending);
+      return false;
+    }
+  }
+  return true;
+}
+
+function clearPendingMetrikaGoals() {
+  pendingMetrikaGoals.length = 0;
 }
 
 function trackMetrikaGoalOnce(eventType, dedupeKey, metadata = {}) {
@@ -2333,6 +2358,7 @@ function setCookieConsent(value) {
   }));
   cookieBanner.hidden = true;
   if (value === "all") loadMetrika();
+  else clearPendingMetrikaGoals();
 }
 
 function getCookieConsent() {
@@ -2379,6 +2405,7 @@ function loadMetrika() {
     accurateTrackBounce: true,
     trackLinks: true
   });
+  flushPendingMetrikaGoals();
 }
 
 function formatDateTime(value) {
