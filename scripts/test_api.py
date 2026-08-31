@@ -1892,6 +1892,52 @@ class ApiTests(unittest.TestCase):
         )["items"]
         self.assertTrue(any(int(item.get("triage_id") or 0) == int(result["triage_id"]) for item in history))
 
+    def test_public_check_preview_save_retry_is_idempotent(self) -> None:
+        user, _ = login("preview-save-idempotent@example.ru")
+        payload = self._public_check_save_payload(
+            session_id="preview-save-idempotent-session",
+            client_request_id="preview-save-idempotent-request",
+        )
+
+        first = api.save_public_check_preview(
+            payload,
+            request("/api/check/preview/save"),
+            user,
+        )
+        repeated = api.save_public_check_preview(
+            payload,
+            request("/api/check/preview/save"),
+            user,
+        )
+
+        self.assertFalse(first["idempotent"])
+        self.assertTrue(repeated["idempotent"])
+        self.assertEqual(first["triage_id"], repeated["triage_id"])
+        self.assertEqual(first["pet"]["id"], repeated["pet"]["id"])
+        with db.connect(api.settings.database_path) as conn:
+            saved_logs = conn.execute(
+                """
+                SELECT COUNT(*) FROM triage_logs
+                WHERE user_id = ? AND client_request_id = ?
+                """,
+                (int(user["id"]), "preview-save-idempotent-request"),
+            ).fetchone()[0]
+            saved_history = conn.execute(
+                "SELECT COUNT(*) FROM pet_history WHERE triage_id = ?",
+                (int(first["triage_id"]),),
+            ).fetchone()[0]
+            saved_funnel_events = conn.execute(
+                """
+                SELECT COUNT(*) FROM funnel_events
+                WHERE user_id = ? AND event_type = 'check.saved_after_login'
+                """,
+                (int(user["id"]),),
+            ).fetchone()[0]
+
+        self.assertEqual(saved_logs, 1)
+        self.assertEqual(saved_history, 1)
+        self.assertEqual(saved_funnel_events, 1)
+
     def test_public_check_preview_save_requires_choice_for_single_different_pet(self) -> None:
         user, _ = login("preview-save-one-other@example.ru")
         self._activate_plus(user)

@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | `subscriptions` | текущий тариф и лимиты | `user_id`, `plan`, `quota_total`, `quota_used`, `period_start`, `period_end`, `source` |
 | `payments` | локальные записи платежей | `user_id`, `provider`, `provider_payment_id`, `plan_code`, `amount_rub`, `status`, `confirmation_url`, `paid_at`, `raw_payload` |
-| `triage_logs` | разборы состояния питомца | `user_id`, `pet_id`, `complaint_text`, `response_text`, `urgency_level`, `quota_before`, `quota_after`, `total_tokens`, `model`, `subscription_source`, `external_source`, `external_id` |
+| `triage_logs` | разборы состояния питомца | `user_id`, `pet_id`, `complaint_text`, `response_text`, `urgency_level`, `quota_before`, `quota_after`, `total_tokens`, `model`, `subscription_source`, `external_source`, `external_id`, `client_request_id` |
 | `triage_followups` | follow-up после разбора | `triage_id`, `user_id`, `pet_id`, `urgency_level`, `scheduled_at`, `answered_at`, `status`, `answer`, `payload`, `push_notified_at`, `push_last_error` |
 | `push_subscriptions` | PWA push-устройства | `user_id`, `endpoint`, `p256dh`, `auth`, `user_agent`, `revoked_at` |
 | `feedback` | обратная связь команде сервиса | `user_id`, `text`, `category`, `created_at` |

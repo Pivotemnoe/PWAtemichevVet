@@ -885,6 +885,10 @@ function pendingPublicCheckSave() {
     const payload = JSON.parse(raw);
     if (!payload || typeof payload !== "object") return null;
     if (!payload.text || !payload.answer) return null;
+    if (!payload.client_request_id) {
+      payload.client_request_id = createFlowId();
+      localStorage.setItem(PENDING_CHECK_SAVE_KEY, JSON.stringify(payload));
+    }
     return payload;
   } catch {
     localStorage.removeItem(PENDING_CHECK_SAVE_KEY);
@@ -1002,10 +1006,19 @@ function pendingPublicCheckPetMatches(pet, pending) {
   return String(pet?.pet_type || "").trim().toLowerCase() === expectedType;
 }
 
+function pendingPublicCheckAutoPet(pending) {
+  if (pending?.pet_id || pending?.create_pet) return null;
+  const compatiblePets = state.pets.filter((pet) => pendingPublicCheckPetMatches(pet, pending));
+  if (compatiblePets.length === 1) return compatiblePets[0];
+  const mainCompatiblePets = compatiblePets.filter((pet) => pet?.is_main === true || Number(pet?.is_main) === 1);
+  if (mainCompatiblePets.length === 1) return mainCompatiblePets[0];
+  return null;
+}
+
 function pendingPublicCheckNeedsPetSelection(pending) {
   if (pending?.pet_id || pending?.create_pet) return false;
   if (!state.pets.length) return false;
-  return state.pets.length !== 1 || !pendingPublicCheckPetMatches(state.pets[0], pending);
+  return !pendingPublicCheckAutoPet(pending);
 }
 
 function pendingSaveCopy(pending) {
@@ -1104,6 +1117,7 @@ function publicCheckSavePayload(data, variant, formValues) {
     total_tokens: data.total_tokens || 0,
     landing_slug: variant.slug,
     session_id: getFunnelSessionId(),
+    client_request_id: createFlowId(),
     ...attributionEventMetadata(),
     created_at: new Date().toISOString()
   };
@@ -1246,8 +1260,9 @@ async function completePendingPublicCheckAfterLogin() {
     const savePayload = { ...pending };
     if (!savePayload.pet_id && !savePayload.create_pet) {
       if (!state.pets.length) savePayload.create_pet = true;
-      else if (state.pets.length === 1 && pendingPublicCheckPetMatches(state.pets[0], savePayload)) {
-        savePayload.pet_id = Number(state.pets[0].id);
+      else {
+        const autoPet = pendingPublicCheckAutoPet(savePayload);
+        if (autoPet) savePayload.pet_id = Number(autoPet.id);
       }
     }
     storePendingPublicCheckSave(savePayload);
@@ -1313,7 +1328,7 @@ async function completePendingPublicCheckAfterLogin() {
         <strong>Не удалось автоматически сохранить пробный разбор.</strong>
         <p>${escapeHtml(readableError(error.message))}</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Рассказать ещё раз</button>
+          <button class="primary-button" data-pending-save-retry type="button">Повторить сохранение</button>
           <button class="secondary-button" data-action="home" type="button">На главную</button>
         </div>
       </div>
@@ -5608,6 +5623,7 @@ document.addEventListener("click", async (event) => {
   const summaryPeriodButton = event.target.closest("button[data-summary-period]:not([data-print-summary])");
   const printSummaryButton = event.target.closest("[data-print-summary]");
   const saveFoodButton = event.target.closest("[data-auth-food-save]");
+  const retryPendingSaveButton = event.target.closest("[data-pending-save-retry]");
   const setMainButton = event.target.closest("[data-set-main]");
   const deletePetButton = event.target.closest("[data-delete-pet]");
   const deleteReminderButton = event.target.closest("[data-delete-reminder]");
@@ -5634,6 +5650,12 @@ document.addEventListener("click", async (event) => {
     if (saveFoodButton) {
       saveFoodButton.disabled = true;
       await completePendingPublicFoodAfterLogin();
+      return;
+    }
+    if (retryPendingSaveButton) {
+      retryPendingSaveButton.disabled = true;
+      retryPendingSaveButton.textContent = "Сохраняю…";
+      await completePendingSaveAfterLogin();
       return;
     }
     if (copyTriageButton) {

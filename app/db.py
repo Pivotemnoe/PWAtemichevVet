@@ -376,12 +376,20 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "triage_logs", "subscription_source", "TEXT")
         _ensure_column(cur, "triage_logs", "external_source", "TEXT")
         _ensure_column(cur, "triage_logs", "external_id", "TEXT")
+        _ensure_column(cur, "triage_logs", "client_request_id", "TEXT")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_triage_logs_user ON triage_logs(user_id, created_at)")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_triage_logs_external
             ON triage_logs(external_source, external_id)
             WHERE external_source IS NOT NULL AND external_id IS NOT NULL
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_triage_logs_user_client_request
+            ON triage_logs(user_id, client_request_id)
+            WHERE client_request_id IS NOT NULL
             """
         )
 
@@ -2583,20 +2591,38 @@ def create_triage_log(
     total_tokens: int = 0,
     model: str | None = None,
     subscription_source: str | None = None,
+    client_request_id: str | None = None,
 ) -> dict[str, Any] | None:
     if pet_id is not None and not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
         return None
     now = utc_now_iso()
+    clean_request_id = str(client_request_id or "").strip()[:128] or None
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        if clean_request_id:
+            cur.execute(
+                """
+                SELECT * FROM triage_logs
+                WHERE user_id = ? AND client_request_id = ?
+                LIMIT 1
+                """,
+                (int(owner_id), clean_request_id),
+            )
+            existing = cur.fetchone()
+            if existing:
+                conn.commit()
+                result = dict(existing)
+                result["_created"] = False
+                return result
         cur.execute(
             """
             INSERT INTO triage_logs (
                 user_id, pet_id, complaint_text, response_text, urgency_level, created_at,
                 quota_before, quota_after, prompt_tokens, completion_tokens, total_tokens,
-                model, subscription_source
+                model, subscription_source, client_request_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(owner_id),
@@ -2612,6 +2638,7 @@ def create_triage_log(
                 int(total_tokens or 0),
                 model,
                 subscription_source,
+                clean_request_id,
             ),
         )
         triage_id = int(cur.lastrowid)
@@ -2631,7 +2658,30 @@ def create_triage_log(
             )
         conn.commit()
         cur.execute("SELECT * FROM triage_logs WHERE id = ?", (triage_id,))
-        return dict(cur.fetchone())
+        result = dict(cur.fetchone())
+        result["_created"] = True
+        return result
+
+
+def get_triage_log_by_client_request_id(
+    db_path: Path,
+    *,
+    owner_id: int,
+    client_request_id: str | None,
+) -> dict[str, Any] | None:
+    clean_request_id = str(client_request_id or "").strip()[:128]
+    if not clean_request_id:
+        return None
+    with closing(connect(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM triage_logs
+            WHERE user_id = ? AND client_request_id = ?
+            LIMIT 1
+            """,
+            (int(owner_id), clean_request_id),
+        ).fetchone()
+    return row_to_dict(row)
 
 
 def add_triage_followup(

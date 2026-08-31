@@ -977,6 +977,7 @@ class PublicCheckPreviewSaveRequest(BaseModel):
     total_tokens: int | None = Field(default=None, ge=0, le=300000)
     landing_slug: str | None = Field(default=None, max_length=80)
     session_id: str | None = Field(default=None, max_length=128)
+    client_request_id: str | None = Field(default=None, max_length=128)
     traffic_source: str | None = Field(default=None, max_length=80)
     utm_source: str | None = Field(default=None, max_length=80)
     utm_medium: str | None = Field(default=None, max_length=80)
@@ -3828,6 +3829,7 @@ def _public_check_preview_save_pet(
     *,
     pet_id: int | None = None,
     create_pet: bool = False,
+    client_request_id: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     owner_id = int(user["id"])
     pets = db.list_pets(settings.database_path, owner_id=int(user["id"]))
@@ -3854,6 +3856,18 @@ def _public_check_preview_save_pet(
     if pets:
         raise HTTPException(status_code=409, detail="check_preview_pet_required")
 
+    pet_request_id = f"public-check:{client_request_id}" if client_request_id else None
+    existing_created_pet = db.get_pet_by_client_request_id(
+        settings.database_path,
+        owner_id=owner_id,
+        client_request_id=pet_request_id,
+    )
+    if existing_created_pet:
+        existing_type = _public_check_pet_type(existing_created_pet.get("pet_type"))
+        if pet_type != "питомец" and existing_type != pet_type:
+            raise HTTPException(status_code=409, detail="check_preview_pet_type_mismatch")
+        return existing_created_pet, True
+
     _enforce_pet_creation_limit(user)
     pet_name = {"собака": "Собака", "кошка": "Кошка"}.get(pet_type, "Питомец")
     pet = db.create_pet(
@@ -3862,6 +3876,7 @@ def _public_check_preview_save_pet(
         pet_type=pet_type,
         pet_name=pet_name,
         is_main=True,
+        client_request_id=pet_request_id,
     )
     return pet, True
 
@@ -3978,11 +3993,38 @@ def save_public_check_preview(
 
     pet_type = _public_check_pet_type(payload.pet_type)
     landing_slug = _public_check_landing_slug(payload.landing_slug)
+    owner_id = int(user["id"])
+    client_request_id = _clean_text(payload.client_request_id) or None
+    existing_log = db.get_triage_log_by_client_request_id(
+        settings.database_path,
+        owner_id=owner_id,
+        client_request_id=client_request_id,
+    )
+    if existing_log:
+        existing_pet = db.get_pet(
+            settings.database_path,
+            owner_id=owner_id,
+            pet_id=int(existing_log["pet_id"]),
+        )
+        if not existing_pet:
+            raise HTTPException(status_code=409, detail="check_preview_pet_not_found")
+        sub = get_effective_subscription(settings, user)
+        return {
+            "status": "saved",
+            "triage_id": int(existing_log["id"]),
+            "pet": _pet_public(existing_pet),
+            "created_pet": False,
+            "idempotent": True,
+            "subscription": sub.to_public(),
+            "followup": None,
+            "service": {"first_record_saved": False, "activated": False},
+        }
     pet, created_pet = _public_check_preview_save_pet(
         user,
         pet_type,
         pet_id=payload.pet_id,
         create_pet=payload.create_pet,
+        client_request_id=client_request_id,
     )
     pet_id = int(pet["id"])
     urgency = _public_check_saved_urgency(payload, answer)
@@ -4004,9 +4046,29 @@ def save_public_check_preview(
         total_tokens=payload.total_tokens or 0,
         model=_clean_text(payload.model) or None,
         subscription_source="public_preview",
+        client_request_id=client_request_id,
     )
     if not log:
         raise HTTPException(status_code=400, detail="invalid_check_preview_save")
+    created_log = bool(log.pop("_created", True))
+    if not created_log:
+        existing_pet = db.get_pet(
+            settings.database_path,
+            owner_id=owner_id,
+            pet_id=int(log["pet_id"]),
+        )
+        if not existing_pet:
+            raise HTTPException(status_code=409, detail="check_preview_pet_not_found")
+        return {
+            "status": "saved",
+            "triage_id": int(log["id"]),
+            "pet": _pet_public(existing_pet),
+            "created_pet": False,
+            "idempotent": True,
+            "subscription": sub.to_public(),
+            "followup": None,
+            "service": {"first_record_saved": False, "activated": False},
+        }
 
     followup = _schedule_pwa_followup(
         user_id=int(user["id"]),
@@ -4066,6 +4128,7 @@ def save_public_check_preview(
         "triage_id": int(log["id"]),
         "pet": _pet_public(pet) if pet else None,
         "created_pet": created_pet,
+        "idempotent": False,
         "subscription": sub.to_public(),
         "followup": followup,
         "service": service,
