@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 import sqlite3
 import html
+import threading
 from collections import defaultdict, deque
-from contextlib import closing
+from contextlib import asynccontextmanager, closing, suppress
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
@@ -95,10 +97,26 @@ def _validate_production_settings() -> None:
 
 _validate_production_settings()
 
-app = FastAPI(title="TemichevVet PWA API", version="0.1.0")
+
+@asynccontextmanager
+async def _app_lifespan(_: FastAPI):
+    reconcile_task: asyncio.Task | None = None
+    if settings.yookassa_shop_id and settings.yookassa_secret_key:
+        reconcile_task = asyncio.create_task(_payment_reconcile_loop(), name="yookassa-payment-reconcile")
+    try:
+        yield
+    finally:
+        if reconcile_task is not None:
+            reconcile_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await reconcile_task
+
+
+app = FastAPI(title="TemichevVet PWA API", version="0.1.0", lifespan=_app_lifespan)
 db.init_db(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 logger = logging.getLogger(__name__)
+_payment_create_lock = threading.Lock()
 
 EMAIL_CODE_COOLDOWN_SECONDS = 60
 EMAIL_CODE_MAX_PER_HOUR = 5
@@ -2058,6 +2076,174 @@ def _admin_rows(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = 
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
+def _admin_telegram_bot_stats(now: datetime, *, linked_telegram_ids: set[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "available": False,
+        "users_total": 0,
+        "users_24h": 0,
+        "users_30d": 0,
+        "linked_pwa_users": 0,
+        "app_starts_24h": 0,
+        "app_starts_30d": 0,
+        "registrations_24h": 0,
+        "registrations_30d": 0,
+        "pets_created_30d": 0,
+        "triage_completed_24h": 0,
+        "triage_completed_30d": 0,
+        "payments_succeeded_30d": 0,
+        "revenue_30d_rub": 0,
+        "recent_users": [],
+        "sources_30d": [],
+    }
+    raw_path = str(settings.bot_database_path or "").strip()
+    if not raw_path:
+        result["reason"] = "not_configured"
+        return result
+    mirror_path = Path(raw_path).expanduser()
+    if not mirror_path.exists():
+        result["reason"] = "not_found"
+        return result
+
+    since_24h = (now - timedelta(days=1)).isoformat()
+    since_30d = (now - timedelta(days=30)).isoformat()
+    try:
+        uri = f"{mirror_path.resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only = ON")
+            tables = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            required = {"users", "pets", "triage_logs", "user_events", "payments"}
+            missing = sorted(required - tables)
+            if missing:
+                result["reason"] = "missing_tables"
+                result["missing_tables"] = missing
+                return result
+
+            result.update(
+                {
+                    "available": True,
+                    "users_total": _admin_scalar(conn, "SELECT COUNT(*) FROM users"),
+                    "users_24h": _admin_scalar(conn, "SELECT COUNT(*) FROM users WHERE registered_at >= ?", (since_24h,)),
+                    "users_30d": _admin_scalar(conn, "SELECT COUNT(*) FROM users WHERE registered_at >= ?", (since_30d,)),
+                    "app_starts_24h": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'app_start' AND created_at >= ?",
+                        (since_24h,),
+                    ),
+                    "app_starts_30d": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'app_start' AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                    "registrations_24h": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'user_registered' AND created_at >= ?",
+                        (since_24h,),
+                    ),
+                    "registrations_30d": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'user_registered' AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                    "pets_created_30d": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'pet_created' AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                    "triage_completed_24h": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'triage_completed' AND created_at >= ?",
+                        (since_24h,),
+                    ),
+                    "triage_completed_30d": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM user_events WHERE event_type = 'triage_completed' AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                    "payments_succeeded_30d": _admin_scalar(
+                        conn,
+                        "SELECT COUNT(*) FROM payments WHERE LOWER(status) IN ('succeeded', 'paid') AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                    "revenue_30d_rub": _admin_scalar(
+                        conn,
+                        "SELECT COALESCE(SUM(amount_rub), 0) FROM payments WHERE LOWER(status) IN ('succeeded', 'paid') AND created_at >= ?",
+                        (since_30d,),
+                    ),
+                }
+            )
+            recent_users = _admin_rows(
+                conn,
+                """
+                SELECT u.id, u.telegram_id, u.name, u.registered_at,
+                       COUNT(DISTINCT p.id) AS pets_count,
+                       COUNT(DISTINCT t.id) AS triage_count,
+                       COALESCE(json_extract(start.payload, '$.source_type'), 'direct') AS source_type,
+                       json_extract(start.payload, '$.utm_source') AS utm_source,
+                       json_extract(start.payload, '$.utm_campaign') AS utm_campaign,
+                       json_extract(start.payload, '$.utm_content') AS utm_content
+                FROM users u
+                LEFT JOIN pets p ON p.owner_id = u.id
+                LEFT JOIN triage_logs t ON t.user_id = u.id
+                LEFT JOIN user_events start ON start.id = (
+                    SELECT first_start.id
+                    FROM user_events first_start
+                    WHERE first_start.user_id = u.id AND first_start.event_type = 'app_start'
+                    ORDER BY first_start.created_at ASC, first_start.id ASC
+                    LIMIT 1
+                )
+                GROUP BY u.id
+                ORDER BY u.registered_at DESC, u.id DESC
+                LIMIT 20
+                """,
+            )
+            for item in recent_users:
+                telegram_id = str(item.pop("telegram_id", "") or "")
+                item["linked_to_pwa"] = telegram_id in linked_telegram_ids
+            result["recent_users"] = recent_users
+            result["linked_pwa_users"] = sum(
+                1
+                for row in conn.execute("SELECT telegram_id FROM users").fetchall()
+                if str(row[0] or "") in linked_telegram_ids
+            )
+            result["sources_30d"] = _admin_rows(
+                conn,
+                """
+                WITH first_start AS (
+                    SELECT user_id, MIN(id) AS event_id
+                    FROM user_events
+                    WHERE event_type = 'app_start' AND created_at >= ?
+                    GROUP BY user_id
+                )
+                SELECT
+                    COALESCE(
+                        NULLIF(json_extract(e.payload, '$.utm_source'), ''),
+                        CASE
+                            WHEN json_extract(e.payload, '$.source_type') = 'site_link' THEN 'temichevvet_site'
+                            WHEN json_extract(e.payload, '$.source_type') = 'direct' THEN 'direct'
+                            ELSE 'unknown'
+                        END
+                    ) AS source,
+                    COALESCE(NULLIF(json_extract(e.payload, '$.utm_campaign'), ''), 'без кампании') AS campaign,
+                    COUNT(*) AS users
+                FROM first_start f
+                JOIN user_events e ON e.id = f.event_id
+                GROUP BY source, campaign
+                ORDER BY users DESC, source ASC
+                LIMIT 20
+                """,
+                (since_30d,),
+            )
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Telegram bot admin statistics unavailable: %s", exc)
+        result["available"] = False
+        result["reason"] = "read_error"
+    return result
+
+
 def _admin_funnel_session_id(row: dict[str, Any]) -> str:
     session_hash = row.get("session_hash")
     if session_hash:
@@ -2646,10 +2832,37 @@ def _admin_dashboard_payload() -> dict[str, Any]:
             "SELECT COUNT(*) FROM users WHERE LOWER(email) = ?",
             (REVIEW_ACCOUNT_EMAIL,),
         )
+        linked_telegram_ids = {
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT ea.provider_user_id
+                FROM external_accounts ea
+                JOIN users u ON u.id = ea.user_id
+                WHERE ea.provider = 'telegram' AND LOWER(COALESCE(u.email, '')) != ?
+                """,
+                (REVIEW_ACCOUNT_EMAIL,),
+            ).fetchall()
+            if row[0] is not None
+        }
+        telegram_bot = _admin_telegram_bot_stats(now, linked_telegram_ids=linked_telegram_ids)
+        core_sync_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'core_sync_events'"
+        ).fetchone()
+        if core_sync_table:
+            sync_row = conn.execute("SELECT MAX(received_at) FROM core_sync_events").fetchone()
+            telegram_bot["last_sync_at"] = str((sync_row or (None,))[0] or "") or None
+        pwa_users_total = max(users_total_raw - users_service, 0)
         overview = {
-            "users_total": max(users_total_raw - users_service, 0),
+            "users_total": pwa_users_total,
             "users_total_raw": users_total_raw,
             "users_service": users_service,
+            "known_users_total": (
+                pwa_users_total
+                + int(telegram_bot.get("users_total") or 0)
+                - int(telegram_bot.get("linked_pwa_users") or 0)
+            ),
+            "known_users_linked": int(telegram_bot.get("linked_pwa_users") or 0),
             "users_today": _admin_scalar(
                 conn,
                 "SELECT COUNT(*) FROM users WHERE created_at >= ? AND LOWER(email) != ?",
@@ -2925,6 +3138,7 @@ def _admin_dashboard_payload() -> dict[str, Any]:
     return {
         "generated_at": now_iso,
         "overview": overview,
+        "telegram_bot": telegram_bot,
         "conversion_funnel_72h": conversion_funnel_72h,
         "conversion_funnel_72h_public": {
             "since": conversion_funnel_72h["since"],
@@ -3070,6 +3284,12 @@ def _activate_plus_from_valid_payment(*, user: dict, payment: dict[str, Any], re
             entity_id="plus",
             metadata={"days": PLUS_DAYS, "source": "pwa_payment"},
         )
+        _track_funnel(
+            None,
+            "payment.succeeded",
+            user_id=int(user["id"]),
+            metadata={"provider": "yookassa", "amount_rub": int(record["amount_rub"])},
+        )
     return PaymentStatusResponse(
         ok=True,
         status="succeeded",
@@ -3152,6 +3372,75 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
         message=_payment_message(status),
         subscription=get_effective_subscription(settings, user).to_public(),
     )
+
+
+def _payment_record_reconcile_due(record: dict[str, Any], *, now: datetime, force: bool = False) -> bool:
+    if force:
+        return True
+    created_at = _parse_iso_dt(str(record.get("created_at") or "")) or now
+    updated_at = _parse_iso_dt(str(record.get("updated_at") or "")) or created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=now.tzinfo)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=now.tzinfo)
+    age_seconds = max(0.0, (now - created_at).total_seconds())
+    if age_seconds < 10 * 60:
+        delay_seconds = 30
+    elif age_seconds < 60 * 60:
+        delay_seconds = 2 * 60
+    else:
+        delay_seconds = 15 * 60
+    return (now - updated_at).total_seconds() >= delay_seconds
+
+
+def _reconcile_pending_yookassa_payments_once(*, force: bool = False, limit: int = 50) -> dict[str, int]:
+    summary = {"found": 0, "checked": 0, "changed": 0, "failed": 0}
+    if not settings.yookassa_shop_id or not settings.yookassa_secret_key:
+        return summary
+    records = db.list_payment_records_by_status(
+        settings.database_path,
+        provider=YOOKASSA_PROVIDER,
+        statuses=("pending", "waiting_for_capture"),
+        limit=limit,
+    )
+    summary["found"] = len(records)
+    now = utc_now()
+    for record in records:
+        if not _payment_record_reconcile_due(record, now=now, force=force):
+            continue
+        user = db.get_user_by_id(settings.database_path, user_id=int(record["user_id"]))
+        if not user:
+            summary["failed"] += 1
+            continue
+        old_status = str(record.get("status") or "unknown").lower()
+        try:
+            result = _refresh_yookassa_payment_for_user(record=record, user=user)
+        except HTTPException as exc:
+            summary["failed"] += 1
+            logger.warning("Automatic YooKassa reconcile failed for payment %s: %s", record.get("id"), exc.detail)
+            continue
+        summary["checked"] += 1
+        if str(result.status or "unknown").lower() != old_status:
+            summary["changed"] += 1
+    return summary
+
+
+async def _payment_reconcile_loop() -> None:
+    first_run = True
+    while True:
+        try:
+            summary = await asyncio.to_thread(
+                _reconcile_pending_yookassa_payments_once,
+                force=first_run,
+            )
+            first_run = False
+            if summary["checked"] or summary["changed"] or summary["failed"]:
+                logger.info("Automatic YooKassa reconcile: %s", summary)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Automatic YooKassa reconcile crashed")
+        await asyncio.sleep(30)
 
 
 @app.get("/review-login", include_in_schema=False, response_model=None)
@@ -4631,6 +4920,11 @@ def account_deletion_request(payload: DataDeletionRequest, request: Request, use
 
 @app.post("/api/payments/plus/create", response_model=PaymentCreateResponse)
 def payment_plus_create(request: Request, user: dict = Depends(current_user)) -> PaymentCreateResponse:
+    with _payment_create_lock:
+        return _payment_plus_create_locked(request, user)
+
+
+def _payment_plus_create_locked(request: Request, user: dict) -> PaymentCreateResponse:
     sub = get_effective_subscription(settings, user)
     if _is_review_user(user):
         _audit(request, "payment.create_blocked", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="warning", actor="user", metadata={"reason": "review_account"})
@@ -4648,6 +4942,42 @@ def payment_plus_create(request: Request, user: dict = Depends(current_user)) ->
             message="Plus уже активен. Повторная оплата сейчас не нужна.",
             subscription=sub.to_public(),
         )
+
+    previous = db.get_last_payment(
+        settings.database_path,
+        user_id=int(user["id"]),
+        provider=YOOKASSA_PROVIDER,
+    )
+    if previous and str(previous.get("status") or "").lower() in {"pending", "waiting_for_capture"}:
+        refreshed = _refresh_yookassa_payment_for_user(record=previous, user=user)
+        if refreshed.status == "succeeded":
+            return PaymentCreateResponse(
+                ok=True,
+                status="already_active",
+                payment_id=refreshed.payment_id,
+                message="Plus уже активирован. Повторная оплата не создана.",
+                subscription=refreshed.subscription,
+            )
+        if refreshed.status in {"pending", "waiting_for_capture"}:
+            confirmation_url = str(previous.get("confirmation_url") or "").strip() or None
+            _audit(
+                request,
+                "payment.pending_reused",
+                user_id=int(user["id"]),
+                provider=YOOKASSA_PROVIDER,
+                status="ok",
+                actor="user",
+                entity_type="payment",
+                entity_id=str(previous.get("provider_payment_id") or ""),
+            )
+            return PaymentCreateResponse(
+                ok=True,
+                status=refreshed.status,
+                payment_id=refreshed.payment_id,
+                confirmation_url=confirmation_url,
+                message="У вас уже есть незавершённая оплата. Открываем тот же счёт, новый не создаём.",
+                subscription=refreshed.subscription,
+            )
 
     try:
         payment = create_yookassa_plus_payment(
@@ -4739,7 +5069,11 @@ def payment_status(payment_id: str, user: dict = Depends(current_user)) -> Payme
 
 @app.post("/api/webhooks/yookassa")
 async def yookassa_webhook(request: Request, secret: str | None = Query(default=None)) -> dict:
-    if settings.yookassa_webhook_secret and not constant_time_equal(secret or "", settings.yookassa_webhook_secret):
+    # YooKassa shops authenticated with HTTP Basic Auth configure this URL in the
+    # merchant dashboard and do not add custom headers. A supplied secret is still
+    # validated, while authenticity is always confirmed by a server-to-server GET
+    # to YooKassa inside _refresh_yookassa_payment_for_user.
+    if secret is not None and settings.yookassa_webhook_secret and not constant_time_equal(secret, settings.yookassa_webhook_secret):
         _audit(request, "payment.webhook_forbidden", provider=YOOKASSA_PROVIDER, status="warning", actor="provider")
         raise HTTPException(status_code=403, detail="invalid_webhook_secret")
 
@@ -4775,8 +5109,6 @@ async def yookassa_webhook(request: Request, secret: str | None = Query(default=
         _audit(request, "payment.webhook_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"detail": exc.detail})
         return {"ok": True, "status": "failed", "detail": exc.detail}
     _audit(request, "payment.webhook_processed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="ok", actor="provider", entity_type="payment", entity_id=payment_id, metadata={"status": result.status})
-    if result.status == "succeeded":
-        _track_funnel(request, "payment.succeeded", user_id=int(user["id"]), metadata={"provider": "yookassa"})
     return {"ok": True, "status": result.status, "payment_id": result.payment_id}
 
 

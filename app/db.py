@@ -1392,6 +1392,31 @@ def get_last_payment(db_path: Path, *, user_id: int, provider: str = "yookassa")
         return _payment_public(row)
 
 
+def list_payment_records_by_status(
+    db_path: Path,
+    *,
+    provider: str,
+    statuses: tuple[str, ...],
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    normalized = tuple(str(status or "").strip().lower() for status in statuses if str(status or "").strip())
+    if not normalized:
+        return []
+    placeholders = ", ".join("?" for _ in normalized)
+    with closing(connect(db_path)) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM payments
+            WHERE provider = ? AND LOWER(status) IN ({placeholders})
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (provider, *normalized, max(1, min(int(limit), 500))),
+        ).fetchall()
+    return [item for row in rows if (item := _payment_public(row)) is not None]
+
+
 def create_auth_challenge(
     db_path: Path,
     *,

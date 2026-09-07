@@ -69,7 +69,9 @@ function loadPage({ href, localStorage, sessionStorage, referrer = "", metrikaRe
        trackMetrikaGoalOnce,
        trackMetrikaGoal,
        flushPendingMetrikaGoals,
-       clearPendingMetrikaGoals
+       clearPendingMetrikaGoals,
+       telegramEntryStartPayload,
+       telegramBotEntryUrl
      };`,
     context
   );
@@ -168,6 +170,28 @@ function decodedHeader(headers, name) {
   assert.equal(page.metrikaCalls[0][2], "pet_created");
   assert.equal(page.metrikaCalls[0][3].current_landing_path, "/pet");
   assert.equal(page.metrikaCalls[0][3].secret, undefined);
+}
+
+{
+  const page = loadPage({
+    href: "https://temichevvet.ru/check/poisoning?utm_source=yandex&utm_medium=cpc&utm_campaign=tvv_search_check_ab_202608&utm_content=search_ab_20260815.1918528090809799176.5787247862.mobile.search.197&yclid=tracked-click",
+    localStorage: new MemoryStorage(),
+    sessionStorage: new MemoryStorage()
+  });
+  assert.equal(page.analytics.telegramEntryStartPayload("result"), "yd_1918528090809799176_5787247862");
+  assert.equal(
+    page.analytics.telegramBotEntryUrl("result"),
+    "https://t.me/TemichevVet23_bot?start=yd_1918528090809799176_5787247862"
+  );
+}
+
+{
+  const page = loadPage({
+    href: "https://temichevvet.ru/",
+    localStorage: new MemoryStorage(),
+    sessionStorage: new MemoryStorage()
+  });
+  assert.equal(page.analytics.telegramEntryStartPayload("home"), "site_home");
 }
 
 console.log("frontend attribution tests ok");

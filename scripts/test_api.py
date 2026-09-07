@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
+from contextlib import closing
 from http.cookies import SimpleCookie
 import sys
 import tempfile
@@ -608,6 +610,74 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(any(item.get("user_email") is None and item.get("path") == "/app" for item in recent_visits))
         self.assertTrue(any(item.get("source") == "yandex.ru" for item in dashboard["site_sources_24h"]))
         self.assertFalse(any("raw_ip" in item for item in recent_visits))
+
+    def test_admin_dashboard_includes_deduplicated_telegram_bot_statistics(self) -> None:
+        mirror_dir = tempfile.TemporaryDirectory()
+        mirror_path = Path(mirror_dir.name) / "bot-mirror.db"
+        now = api.utc_now().isoformat()
+        with closing(sqlite3.connect(mirror_path)) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE users (id INTEGER PRIMARY KEY, telegram_id INTEGER, name TEXT, registered_at TEXT);
+                CREATE TABLE pets (id INTEGER PRIMARY KEY, owner_id INTEGER);
+                CREATE TABLE triage_logs (id INTEGER PRIMARY KEY, user_id INTEGER);
+                CREATE TABLE user_events (id INTEGER PRIMARY KEY, user_id INTEGER, event_type TEXT, payload TEXT, created_at TEXT);
+                CREATE TABLE payments (id INTEGER PRIMARY KEY, user_id INTEGER, amount_rub INTEGER, status TEXT, created_at TEXT);
+                """
+            )
+            conn.executemany(
+                "INSERT INTO users (id, telegram_id, name, registered_at) VALUES (?, ?, ?, ?)",
+                [(501, 900001, "Мария", now), (502, 900002, "Настя", now)],
+            )
+            conn.executemany("INSERT INTO pets (id, owner_id) VALUES (?, ?)", [(1, 501), (2, 502)])
+            conn.executemany("INSERT INTO triage_logs (id, user_id) VALUES (?, ?)", [(1, 501), (2, 502)])
+            events = []
+            event_id = 1
+            for user_id, payload in [
+                (501, {"source_type": "site_link", "utm_source": "temichevvet_site", "utm_campaign": "home"}),
+                (502, {"source_type": "utm", "utm_source": "yandex", "utm_campaign": "direct"}),
+            ]:
+                for event_type in ("app_start", "user_registered", "pet_created", "triage_completed"):
+                    events.append((event_id, user_id, event_type, json.dumps(payload), now))
+                    event_id += 1
+            conn.executemany(
+                "INSERT INTO user_events (id, user_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+                events,
+            )
+            conn.execute(
+                "INSERT INTO payments (id, user_id, amount_rub, status, created_at) VALUES (1, 501, 200, 'succeeded', ?)",
+                (now,),
+            )
+            conn.commit()
+
+        pwa_user, _ = login("telegram-stats-linked@example.ru")
+        db.link_external_account(
+            api.settings.database_path,
+            user_id=int(pwa_user["id"]),
+            provider="telegram",
+            provider_user_id="900001",
+            display_name="Мария",
+        )
+        old_settings = api.settings
+        api.settings = replace(api.settings, bot_database_path=str(mirror_path))
+        try:
+            dashboard = api._admin_dashboard_payload()
+            telegram = dashboard["telegram_bot"]
+            self.assertTrue(telegram["available"])
+            self.assertEqual(telegram["users_total"], 2)
+            self.assertEqual(telegram["linked_pwa_users"], 1)
+            self.assertEqual(telegram["app_starts_24h"], 2)
+            self.assertEqual(telegram["registrations_30d"], 2)
+            self.assertEqual(telegram["triage_completed_30d"], 2)
+            self.assertEqual(telegram["payments_succeeded_30d"], 1)
+            self.assertEqual(telegram["revenue_30d_rub"], 200)
+            self.assertEqual(
+                dashboard["overview"]["known_users_total"],
+                dashboard["overview"]["users_total"] + 1,
+            )
+        finally:
+            api.settings = old_settings
+            mirror_dir.cleanup()
 
     def test_admin_dashboard_reports_token_usage_without_double_counting_saved_preview(self) -> None:
         before = api._admin_dashboard_payload()["overview"]
@@ -2661,6 +2731,102 @@ class ApiTests(unittest.TestCase):
 
         events = db.list_security_audit_events(api.settings.database_path, event_type="payment.succeeded")
         self.assertGreaterEqual(len(events), 1)
+
+    def test_pending_payment_is_reused_and_then_activates_without_duplicate(self) -> None:
+        user, _ = login("pending-reuse@example.ru")
+        calls = {"create": 0, "get": 0}
+        provider_status = {"value": "pending"}
+
+        def fake_create_payment(settings, *, user_id: int, user_email: str | None = None) -> dict:
+            calls["create"] += 1
+            return {
+                "id": "pay_pending_reuse_1",
+                "status": "pending",
+                "paid": False,
+                "amount": {"value": "200.00", "currency": "RUB"},
+                "metadata": {"source": "pwa", "pwa_user_id": str(user_id), "plan_code": "plus"},
+                "confirmation": {"confirmation_url": "https://yookassa.test/pay/pay_pending_reuse_1"},
+                "idempotence_key": "idem-pending-reuse",
+            }
+
+        def fake_get_payment(settings, payment_id: str) -> dict:
+            calls["get"] += 1
+            status = provider_status["value"]
+            return {
+                "id": payment_id,
+                "status": status,
+                "paid": status == "succeeded",
+                "captured_at": "2026-09-07T08:00:00+00:00" if status == "succeeded" else None,
+                "amount": {"value": "200.00", "currency": "RUB"},
+                "metadata": {"source": "pwa", "pwa_user_id": str(user["id"]), "plan_code": "plus"},
+            }
+
+        old_create = api.create_yookassa_plus_payment
+        old_get = api.get_yookassa_payment
+        api.create_yookassa_plus_payment = fake_create_payment
+        api.get_yookassa_payment = fake_get_payment
+        try:
+            first = api.payment_plus_create(request("/api/payments/plus/create"), user=user)
+            second = api.payment_plus_create(request("/api/payments/plus/create"), user=user)
+            self.assertEqual(first.payment_id, "pay_pending_reuse_1")
+            self.assertEqual(second.payment_id, first.payment_id)
+            self.assertEqual(second.confirmation_url, first.confirmation_url)
+            self.assertEqual(calls["create"], 1)
+
+            provider_status["value"] = "succeeded"
+            activated = api.payment_plus_create(request("/api/payments/plus/create"), user=user)
+            self.assertEqual(activated.status, "already_active")
+            self.assertEqual(activated.subscription["plan"], "plus")
+            self.assertEqual(calls["create"], 1)
+        finally:
+            api.create_yookassa_plus_payment = old_create
+            api.get_yookassa_payment = old_get
+
+    def test_automatic_payment_reconcile_activates_pending_plus(self) -> None:
+        user, _ = login("automatic-reconcile@example.ru")
+
+        def fake_create_payment(settings, *, user_id: int, user_email: str | None = None) -> dict:
+            return {
+                "id": "pay_automatic_reconcile_1",
+                "status": "pending",
+                "paid": False,
+                "amount": {"value": "200.00", "currency": "RUB"},
+                "metadata": {"source": "pwa", "pwa_user_id": str(user_id), "plan_code": "plus"},
+                "confirmation": {"confirmation_url": "https://yookassa.test/pay/pay_automatic_reconcile_1"},
+                "idempotence_key": "idem-automatic-reconcile",
+            }
+
+        def fake_get_payment(settings, payment_id: str) -> dict:
+            record = db.get_payment_record(
+                api.settings.database_path,
+                provider="yookassa",
+                provider_payment_id=payment_id,
+            )
+            payment_user_id = int(record["user_id"]) if record else int(user["id"])
+            succeeded = payment_id == "pay_automatic_reconcile_1"
+            return {
+                "id": payment_id,
+                "status": "succeeded" if succeeded else "pending",
+                "paid": succeeded,
+                "captured_at": "2026-09-07T08:05:00+00:00" if succeeded else None,
+                "amount": {"value": "200.00", "currency": "RUB"},
+                "metadata": {"source": "pwa", "pwa_user_id": str(payment_user_id), "plan_code": "plus"},
+            }
+
+        old_create = api.create_yookassa_plus_payment
+        old_get = api.get_yookassa_payment
+        api.create_yookassa_plus_payment = fake_create_payment
+        api.get_yookassa_payment = fake_get_payment
+        try:
+            created = api.payment_plus_create(request("/api/payments/plus/create"), user=user)
+            self.assertEqual(created.status, "pending")
+            summary = api._reconcile_pending_yookassa_payments_once(force=True)
+            self.assertGreaterEqual(summary["changed"], 1)
+            refreshed_user = db.get_user_by_id(api.settings.database_path, user_id=int(user["id"]))
+            self.assertEqual(api.get_effective_subscription(api.settings, refreshed_user).plan, "plus")
+        finally:
+            api.create_yookassa_plus_payment = old_create
+            api.get_yookassa_payment = old_get
 
     def test_core_api_secret_required(self) -> None:
         with self.assertRaises(HTTPException) as missing_exc:

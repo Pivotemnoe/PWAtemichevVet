@@ -49,6 +49,53 @@ const METRIKA_GOALS = {
   "payment.succeeded": "plus_payment_success"
 };
 
+const TELEGRAM_PUBLIC_BOT_URL = "https://t.me/TemichevVet23_bot";
+
+function telegramStartSlug(value, maxLength = 48) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "")
+    .slice(0, maxLength);
+}
+
+function telegramEntryStartPayload(placement = "site") {
+  const safePlacement = telegramStartSlug(placement, 24) || "site";
+  const attribution = captureCurrentTouchAttribution();
+  const source = telegramStartSlug(attribution.utm_source || attribution.traffic_source, 24);
+  const campaign = telegramStartSlug(attribution.utm_campaign, 54);
+  const content = String(attribution.utm_content || "");
+  if (source.includes("yandex") || attribution.has_yclid) {
+    const ids = content.match(/(?:^|[._-])(\d{12,})(?:[._-])(\d{6,})(?:[._-]|$)/);
+    if (ids) return `yd_${ids[1]}_${ids[2]}`.slice(0, 64);
+    if (campaign) return `y_${campaign}`.slice(0, 64);
+    return `y_${safePlacement}`.slice(0, 64);
+  }
+  if (source && source !== "direct") {
+    return `ref_${source}_${safePlacement}`.slice(0, 64);
+  }
+  return `site_${safePlacement}`.slice(0, 64);
+}
+
+function telegramBotEntryUrl(placement = "site") {
+  const url = new URL(TELEGRAM_PUBLIC_BOT_URL);
+  url.searchParams.set("start", telegramEntryStartPayload(placement));
+  return url.toString();
+}
+
+function refreshTelegramEntryLinks(root = document) {
+  root.querySelectorAll?.("[data-telegram-entry]").forEach((link) => {
+    const placement = link.dataset.telegramEntry || "site";
+    link.href = telegramBotEntryUrl(placement);
+    if (link.dataset.telegramTrackingBound === "1") return;
+    link.dataset.telegramTrackingBound = "1";
+    link.addEventListener("click", () => {
+      trackFunnel("telegram.entry_click", { provider: "telegram", target: placement });
+    });
+  });
+}
+
 const CHECK_LANDING_VARIANTS = {
   general: {
     slug: "general",
@@ -1512,11 +1559,12 @@ function renderPublicCheckAuthPrompt(message) {
       <div class="next-actions check-result-actions">
         <button class="primary-button" data-check-save type="button">Войти и продолжить в кабинете</button>
         <a class="secondary-link compact" href="/">На главную TemichevVet</a>
-        <a class="secondary-link compact" href="https://t.me/TemichevVet23_bot" target="_blank" rel="noopener">Telegram</a>
+        <a class="secondary-link compact" href="${telegramBotEntryUrl("result")}" data-telegram-entry="result" target="_blank" rel="noopener">Telegram</a>
         <a class="secondary-link compact" href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
       </div>
     </div>
   `;
+  refreshTelegramEntryLinks(resultEl);
   revealPublicCheckState(resultEl.querySelector(".check-auth-notice"));
 }
 
@@ -2996,17 +3044,49 @@ function renderAdminPageHead(title, text) {
   `;
 }
 
+function telegramAdminSource(row) {
+  if (row.utm_source) {
+    return row.utm_campaign && row.utm_campaign !== "без кампании"
+      ? `${row.utm_source} · ${row.utm_campaign}`
+      : row.utm_source;
+  }
+  if (row.source_type === "site_link") return "Сайт TemichevVet";
+  if (row.source_type === "clinic_link") return "Ссылка клиники";
+  return "Прямой /start";
+}
+
 function renderAdminOverviewPage(data) {
   const overview = data.overview || {};
+  const telegram = data.telegram_bot || {};
   const rawUsers = overview.users_total_raw ?? overview.users_total ?? 0;
   const serviceUsers = overview.users_service || 0;
   const productVisits = overview.site_visits_24h_product ?? overview.site_visits_24h_human ?? 0;
   const technicalVisits = overview.site_visits_24h_technical || 0;
+  const telegramRecentColumns = [
+    { key: "name", label: "Пользователь" },
+    { key: "registered_at", label: "Регистрация", render: (row) => formatDateTime(row.registered_at) },
+    { key: "source_type", label: "Источник", render: (row) => adminCell(telegramAdminSource(row)) },
+    { key: "pets_count", label: "Питомцев" },
+    { key: "triage_count", label: "Разборов" },
+    { key: "linked_to_pwa", label: "Связан с сайтом", render: (row) => row.linked_to_pwa ? "Да" : "Нет" }
+  ];
+  const telegramSourceColumns = [
+    { key: "source", label: "Источник" },
+    { key: "campaign", label: "Кампания" },
+    { key: "users", label: "Пользователей" }
+  ];
   return `
     ${renderAdminPageHead("Обзор", "Только продуктовые показатели. Боты, сканеры и служебные проверки вынесены в технические разделы.")}
     <div class="summary-grid admin-summary">
       ${renderAdminMetric(
-        "Пользователей",
+        "Всего известных пользователей",
+        overview.known_users_total ?? overview.users_total,
+        telegram.available
+          ? `${overview.users_total || 0} сайт + ${telegram.users_total || 0} Telegram − ${overview.known_users_linked || 0} связанных`
+          : "Статистика Telegram временно недоступна"
+      )}
+      ${renderAdminMetric(
+        "Пользователей сайта",
         overview.users_total,
         serviceUsers
           ? `${rawUsers} всего · ${serviceUsers} служебный · +${overview.users_today || 0} сегодня`
@@ -3033,6 +3113,19 @@ function renderAdminOverviewPage(data) {
       )}
       ${renderAdminMetric("Активных напоминаний", overview.active_reminders)}
     </div>
+    ${telegram.available ? `
+      ${renderAdminPageHead("Telegram-бот", `Отдельная статистика бота. Последняя синхронизация: ${formatDateTime(telegram.last_sync_at)}.`)}
+      <div class="summary-grid admin-summary">
+        ${renderAdminMetric("Пользователей Telegram", telegram.users_total, `+${telegram.users_24h || 0} за 24 часа · +${telegram.users_30d || 0} за 30 дней`)}
+        ${renderAdminMetric("Запусков за 24 часа", telegram.app_starts_24h, `${telegram.app_starts_30d || 0} за 30 дней`)}
+        ${renderAdminMetric("Регистраций за 24 часа", telegram.registrations_24h, `${telegram.registrations_30d || 0} за 30 дней`)}
+        ${renderAdminMetric("Разборов за 24 часа", telegram.triage_completed_24h, `${telegram.triage_completed_30d || 0} за 30 дней`)}
+        ${renderAdminMetric("Питомцев добавлено за 30 дней", telegram.pets_created_30d)}
+        ${renderAdminMetric("Оплат в Telegram за 30 дней", telegram.payments_succeeded_30d, `${telegram.revenue_30d_rub || 0} ₽`)}
+      </div>
+      ${renderAdminTable("Последние пользователи Telegram", telegram.recent_users || [], telegramRecentColumns)}
+      ${renderAdminTable("Источники Telegram за 30 дней", telegram.sources_30d || [], telegramSourceColumns)}
+    ` : `<div class="notice warning">Статистика Telegram временно недоступна: ${escapeHtml(telegram.reason || "нет связи с зеркалом данных")}.</div>`}
   `;
 }
 
@@ -3483,6 +3576,9 @@ async function renderStartupView() {
   if (startupAction === "subscription") {
     await refreshAccountState();
     renderSubscription();
+    if (state.lastPlusPaymentId || state.subscription?.plan === "free") {
+      await checkPlusPaymentStatus({ silentNotFound: true });
+    }
     clearStartupAction();
     return;
   }
@@ -5099,6 +5195,10 @@ async function checkPlusPaymentStatus(options = {}) {
       : "/api/payments/plus/status";
     const data = await api(path);
     state.subscription = data.subscription || state.subscription;
+    if (options.silentNotFound && data.status === "not_found") {
+      renderSubscription();
+      return;
+    }
     if (data.status === "succeeded") {
       trackMetrikaGoalOnce("payment.succeeded", `payment:${paymentId || data.payment_id || "latest"}`, {
         ...attributionEventMetadata(),
@@ -5746,6 +5846,9 @@ document.addEventListener("click", async (event) => {
       trackFunnel("subscription.open_click");
       await refreshAccountState();
       renderSubscription();
+      if (state.lastPlusPaymentId && state.subscription?.plan === "free") {
+        await checkPlusPaymentStatus({ silentNotFound: true });
+      }
     }
     if (action === "pay-plus") await startPlusPayment();
     if (action === "check-plus-payment") await checkPlusPaymentStatus();
@@ -5791,6 +5894,7 @@ if ("serviceWorker" in navigator) {
 
 clearSensitiveMiniAppFragment();
 showCookieBannerIfNeeded();
+refreshTelegramEntryLinks();
 renderPublicCheckLanding();
 renderPublicCampaignLanding();
 if ((location.pathname.replace(/\/+$/, "") || "/") === "/") {
