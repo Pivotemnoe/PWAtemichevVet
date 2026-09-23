@@ -2060,10 +2060,12 @@ p {
 
 .auth-dialog.auth-save-intent .auth-grid {
   align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .auth-dialog.auth-save-intent .auth-email-primary {
-  order: -1;
+  order: 1;
   border-color: #8fc0ec;
   background: #f7fcff;
 }
@@ -2077,6 +2079,21 @@ p {
   padding: 20px;
   background: rgba(11, 23, 38, 0.42);
 }
+
+.auth-save-intent .auth-card { width: min(560px, 100%); padding: 18px; }
+.auth-save-intent .auth-card-head { margin-bottom: 12px; }
+.auth-save-intent .auth-card-head > div > .section-label,
+.auth-save-intent .auth-method-heading,
+.auth-save-intent .auth-options > .section-label,
+.auth-save-intent .auth-options > h2,
+.auth-save-intent .auth-alt-divider { display: none; }
+.auth-save-intent .auth-options { order: 0; display: flex; flex-wrap: wrap; gap: 10px; padding: 0; border: 0; box-shadow: none; background: transparent; }
+.auth-save-intent .auth-options > button { flex: 1; min-width: 130px; margin: 0; min-height: 44px; }
+.auth-save-intent .auth-options small { display: none; }
+.auth-save-intent .auth-options #messengerHint { order: 2; flex-basis: 100%; margin: 0; font-size: 13px; }
+.auth-save-intent .auth-email-primary { padding: 14px; }
+.auth-save-context { margin-top: 10px; padding: 10px; background: var(--surface-2); border-radius: 8px; font-size: 14px; }
+.check-save-callout small { display: block; margin-top: 8px; }
 
 .auth-card {
   width: min(980px, 100%);

@@ -79,6 +79,22 @@ function loadPage({ href, localStorage, sessionStorage, referrer = "", metrikaRe
 }
 
 {
+  const localStorage = new MemoryStorage();
+  const sessionStorage = new MemoryStorage();
+  const firstUrl = 'https://temichevvet.ru/pet-history?utm_source=yandex&utm_campaign=owner_service_intents_20260916';
+  const entry = loadPage({href:firstUrl, localStorage, sessionStorage});
+  const original = entry.analytics.attributionEventMetadata();
+  const food = loadPage({href:'https://temichevvet.ru/food/dog', referrer:firstUrl, localStorage, sessionStorage});
+  const continued = food.analytics.attributionEventMetadata();
+  assert.equal(continued.current_flow_id, original.current_flow_id);
+  assert.equal(continued.current_utm_campaign, 'owner_service_intents_20260916');
+  const newAd = loadPage({href:'https://temichevvet.ru/food/cat?utm_source=yandex&utm_campaign=new-ad', referrer:firstUrl, localStorage, sessionStorage});
+  const restarted = newAd.analytics.attributionEventMetadata();
+  assert.notEqual(restarted.current_flow_id, original.current_flow_id);
+  assert.equal(restarted.current_utm_campaign, 'new-ad');
+}
+
+{
   const page = loadPage({
     href: "https://temichevvet.ru/check/cat-not-eating?utm_source=yandex&utm_campaign=cat-test",
     localStorage: new MemoryStorage(),

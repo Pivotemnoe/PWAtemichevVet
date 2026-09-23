@@ -45,6 +45,10 @@ const METRIKA_GOALS = {
   "pet.created": "pet_created",
   "service.first_record_saved": "first_health_record_saved",
   "service.activated": "service_activated",
+  "reminder.created": "reminder_saved",
+  "weight.created": "weight_saved",
+  "food.saved_after_login": "food_saved_after_login",
+  "service.returned": "service_returned",
   "summary.viewed": "doctor_summary_open",
   "payment.succeeded": "plus_payment_success"
 };
@@ -190,6 +194,8 @@ const PUBLIC_CAMPAIGN_LANDINGS = {
     headline: "История питомца, которую не нужно вспоминать заново",
     description: "Сохраняйте наблюдения, изменения, ответы по питанию и важные события в одной хронологии.",
     label: "История здоровья",
+    nextAction: "history",
+    cta: "Создать карточку питомца",
     image: "/static/assets/campaign-home-pet.jpg",
     imageAlt: "Владелец ведёт историю здоровья питомца",
     benefits: ["Наблюдения по датам", "Сохранённые разборы", "Питание в общей истории", "Сводка перед посещением врача"]
@@ -202,6 +208,8 @@ const PUBLIC_CAMPAIGN_LANDINGS = {
     headline: "Прививки, обработки и осмотры — вовремя",
     description: "Добавляйте важные даты в карточку питомца и держите ближайшие события перед глазами.",
     label: "Важные даты",
+    nextAction: "reminders",
+    cta: "Добавить важную дату",
     image: "/static/assets/campaign-home-pet.jpg",
     imageAlt: "Владелец добавляет важную дату питомца",
     benefits: ["Прививки", "Обработки", "Осмотры", "Свои важные события"]
@@ -278,7 +286,7 @@ const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
 const PENDING_FOOD_SAVE_KEY = "tvv_pending_food_save";
 const PENDING_PET_CREATE_KEY = "tvv_pending_pet_create";
 const PUBLIC_CHECK_USED_KEY = "tvv_public_check_preview_used";
-const CHECK_SAVE_CTA = "Сохранить случай";
+const CHECK_SAVE_CTA = "Сохранить результат";
 const AUTH_DIALOG_DEFAULT_LEAD =
   "Войдите удобным способом. Если аккаунта ещё нет, он создастся автоматически.";
 let currentTouchAttribution = null;
@@ -375,7 +383,16 @@ function isAdvertisingEntryLocation() {
   const params = new URLSearchParams(window.location.search);
   const campaignQuery = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "yclid"]
     .some((key) => Boolean(cleanAttributionValue(params.get(key), 120)));
-  return campaignPath || campaignQuery;
+  // A navigation within this site continues the same acquisition flow.
+  // Explicit ad tags still start a new flow even with a same-site referrer.
+  let sameSiteNavigation = false;
+  try {
+    sameSiteNavigation = Boolean(document.referrer)
+      && new URL(document.referrer).origin === window.location.origin;
+  } catch {
+    // Missing or invalid referrer: retain the normal landing classification.
+  }
+  return campaignQuery || (campaignPath && !sameSiteNavigation);
 }
 
 function readCurrentTouchAttribution() {
@@ -834,8 +851,9 @@ function closeAuthDialog() {
   updateAuthDialogForPendingSave();
 }
 
-function openPetOnboarding() {
+function openPetOnboarding(nextAction = "") {
   if (!petOnboardingDialog) return;
+  petOnboardingDialog.dataset.nextAction = ["history", "reminders"].includes(nextAction) ? nextAction : "";
   const pending = pendingPetCreate();
   if (pending && publicPetOnboardingForm) {
     const typeInput = publicPetOnboardingForm.querySelector(`input[name="pet_type"][value="${pending.pet_type}"]`);
@@ -898,6 +916,7 @@ function readableError(message) {
     check_preview_text_too_short: "Опишите состояние чуть подробнее: что произошло, когда началось и как питомец ведёт себя сейчас.",
     invalid_check_preview: "Не удалось принять форму. Обновите страницу и попробуйте ещё раз.",
     invalid_check_preview_save: "Не удалось сохранить пробный разбор. Откройте кабинет и сделайте новый разбор там.",
+    invalid_save_response: "Сервер не подтвердил сохранение. Повторите попытку: повтор не создаст дубликат.",
     invalid_check_preview_pet_selection: "Выберите одну карточку питомца или создание новой.",
     check_preview_pet_required: "Выберите питомца, в историю которого нужно сохранить результат.",
     check_preview_pet_not_found: "Выбранная карточка питомца больше недоступна. Выберите другую.",
@@ -987,6 +1006,11 @@ function clearPendingPetCreate() {
 
 function trackServiceGoals(data, keyPrefix = "record") {
   const service = data?.service || {};
+  const recordGoal = { reminder: "reminder.created", weight: "weight.created", food: "food.saved_after_login" }[service.record_kind];
+  if (recordGoal) trackMetrikaGoalOnce(recordGoal, `${keyPrefix}:saved`, attributionEventMetadata());
+  if (service.returned) {
+    trackMetrikaGoalOnce("service.returned", `return:${state.user?.id || "user"}:${getFunnelSessionId()}`, attributionEventMetadata());
+  }
   if (service.first_record_saved) {
     trackMetrikaGoalOnce("service.first_record_saved", `${keyPrefix}:first-record`, attributionEventMetadata());
   }
@@ -1156,7 +1180,6 @@ function publicCheckSavePayload(data, variant, formValues) {
     text: formValues.text || "",
     answer: data.answer || "",
     urgency: data.urgency || "",
-    urgency_label: data.urgency_label || "",
     summary: data.summary || "",
     model: data.model || "",
     prompt_tokens: data.prompt_tokens || 0,
@@ -1170,12 +1193,52 @@ function publicCheckSavePayload(data, variant, formValues) {
   };
 }
 
+function publicCheckSaveRequestPayload(pending) {
+  // Keep the persisted result intact, but send only fields consumed by the
+  // save API. Older cached results may contain a long display-only
+  // urgency_label; validating that unused text caused the save to return 422.
+  const payload = {};
+  const stringLimits = {
+    pet_type: 30,
+    age: 80,
+    text: 1200,
+    answer: 12000,
+    urgency: 30,
+    summary: 240,
+    model: 80,
+    landing_slug: 80,
+    session_id: 128,
+    client_request_id: 128,
+    traffic_source: 80,
+    utm_source: 80,
+    utm_medium: 80,
+    utm_campaign: 120,
+    utm_content: 120,
+    utm_term: 120,
+    landing_path: 160,
+  };
+  for (const [field, limit] of Object.entries(stringLimits)) {
+    if (typeof pending?.[field] !== "string") continue;
+    payload[field] = pending[field].slice(0, limit);
+  }
+  for (const [field, limit] of [["prompt_tokens", 200000], ["completion_tokens", 200000], ["total_tokens", 300000]]) {
+    const value = Number(pending?.[field]);
+    if (Number.isInteger(value) && value >= 0 && value <= limit) payload[field] = value;
+  }
+  const petId = Number(pending?.pet_id);
+  if (Number.isInteger(petId) && petId > 0) payload.pet_id = petId;
+  payload.create_pet = Boolean(pending?.create_pet);
+  payload.has_yclid = Boolean(pending?.has_yclid);
+  return payload;
+}
+
 function renderCheckSaveCallout() {
   return `
     <div class="check-save-callout">
       <div>
-        <strong>Сохранить случай</strong>
-        <p>Вернитесь к результату и проверьте, стало ли питомцу лучше или хуже.</p>
+        <strong>Чтобы не вспоминать всё заново</strong>
+        <p>Сохраните ваше описание и этот разбор вместе. Позже сможете добавить, что изменилось, и показать историю ветеринару.</p>
+        <small>Бесплатно. Для сохранения нужен вход.</small>
       </div>
       <button class="primary-button" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
@@ -1184,10 +1247,10 @@ function renderCheckSaveCallout() {
 
 function renderCheckStickySave() {
   return `
-    <div class="check-sticky-save" data-check-save-sticky role="region" aria-live="polite" aria-label="Сохранить случай" hidden>
+    <div class="check-sticky-save" data-check-save-sticky role="region" aria-live="polite" aria-label="Сохранить этот разбор" hidden>
       <div>
-        <strong>Сохранить случай</strong>
-        <span>Проверить позже, стало ли лучше или хуже</span>
+        <strong>Сохранить этот разбор</strong>
+        <span>Разбор и дальнейшие изменения — в одной истории</span>
       </div>
       <button class="primary-button compact" data-check-save type="button">${CHECK_SAVE_CTA}</button>
     </div>
@@ -1198,22 +1261,36 @@ function scheduleCheckStickySave(resultEl, level) {
   const sticky = resultEl?.querySelector("[data-check-save-sticky]");
   const callout = resultEl?.querySelector(".check-save-callout");
   if (!sticky || !callout) return;
-  let revealed = false;
-  let observer = null;
+  let calloutVisible = false;
+  let calloutSeen = false;
+  let timerElapsed = false;
   const reveal = () => {
-    if (revealed || !sticky.isConnected) return;
-    revealed = true;
+    if (!sticky.isConnected || calloutVisible) return;
     sticky.hidden = false;
     sticky.classList.add("is-visible");
-    observer?.disconnect();
+  };
+  const hide = () => {
+    sticky.hidden = true;
+    sticky.classList.remove("is-visible");
   };
   if ("IntersectionObserver" in window) {
-    observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.35)) reveal();
+    const observer = new IntersectionObserver((entries) => {
+      calloutVisible = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.35);
+      if (calloutVisible) {
+        calloutSeen = true;
+        hide();
+      } else if (calloutSeen || timerElapsed) {
+        reveal();
+      }
     }, { threshold: [0.35] });
     observer.observe(callout);
   }
-  if (level !== "red") window.setTimeout(reveal, 8000);
+  if (level !== "red") {
+    window.setTimeout(() => {
+      timerElapsed = true;
+      reveal();
+    }, 8000);
+  }
 }
 
 function updateAuthDialogForPendingSave() {
@@ -1228,7 +1305,7 @@ function updateAuthDialogForPendingSave() {
     authDialogTitle.textContent = pendingPet
       ? `Сохранить карточку «${pendingPet.pet_name}»`
       : pendingCheck
-        ? `Сохранить случай для ${petLabel}`
+        ? "Сохранить этот разбор"
         : pendingFood
           ? `Сохранить ответ для ${petLabel}`
           : "Войдите или создайте личный кабинет";
@@ -1239,6 +1316,13 @@ function updateAuthDialogForPendingSave() {
     : pending
     ? "После входа автоматически вернём вас к результату и сохраним его."
     : authDialogContextLead || AUTH_DIALOG_DEFAULT_LEAD;
+  const context = document.querySelector("#authSaveContext");
+  if (context) {
+    context.hidden = !pendingCheck;
+    context.textContent = pendingCheck
+      ? `${pendingPublicCheckPetType(pendingCheck)} · ${compactText(pendingCheck.text, 140)}`
+      : "";
+  }
 }
 
 async function completePendingSaveAfterLogin() {
@@ -1273,6 +1357,10 @@ async function completePendingPetAfterLogin() {
         has_pet: true
       });
     }
+    if (pending.next_action === "reminders") {
+      await renderReminders(data.item.id);
+      return true;
+    }
     setWorkspace(`
       <div class="workspace-head">
         <div><p class="section-label">Карточка создана</p><h2>Что сохраним первым для «${escapeHtml(data.item.pet_name)}»?</h2></div>
@@ -1293,12 +1381,47 @@ async function completePendingPetAfterLogin() {
   }
 }
 
+function checkSaveFailureMetadata(error, stage, pending) {
+  const allowed = new Set([
+    "validation_error", "authorization_required", "invalid_authorization_header", "invalid_session",
+    "invalid_check_preview_save", "invalid_check_preview_pet_selection", "check_preview_pet_required",
+    "check_preview_pet_not_found", "check_preview_pet_type_mismatch", "pet_limit_reached",
+    "rate_limited", "network_error", "http_error", "server_error", "invalid_save_response", "client_error"
+  ]);
+  const code = error.code || error.message;
+  return {
+    slug: pending.landing_slug || "general", attempt_id: pending.client_request_id,
+    stage, error_code: allowed.has(code) ? code : (error.httpStatus >= 500 ? "server_error" : error.httpStatus ? "http_error" : "client_error"),
+    ...(Number.isInteger(error.httpStatus) ? { http_status: error.httpStatus } : {})
+  };
+}
+
+function isTransientCheckSaveError(error) {
+  const status = Number(error?.httpStatus || 0);
+  return error?.code === "network_error"
+    || error?.code === "invalid_save_response"
+    || [408, 425, 502, 503, 504].includes(status);
+}
+
+async function withTransientCheckSaveRetry(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientCheckSaveError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    return operation();
+  }
+}
+
 async function completePendingPublicCheckAfterLogin() {
   const pending = pendingPublicCheckSave();
   if (!pending) return false;
   ensureDashboardView();
+  let saveStage = "load_pets";
+  let confirmedSaved = false;
   try {
-    await refreshPets();
+    await withTransientCheckSaveRetry(() => refreshPets());
+    saveStage = "prepare_save";
     if (pendingPublicCheckNeedsPetSelection(pending)) {
       renderPendingPublicCheckPetSelection(pending);
       return true;
@@ -1314,15 +1437,29 @@ async function completePendingPublicCheckAfterLogin() {
     }
     storePendingPublicCheckSave(savePayload);
     setWorkspace(`<div class="notice check-saved-state">Сохраняю пробный разбор в личный кабинет...</div>`);
-    const data = await api("/api/check/preview/save", {
-      method: "POST",
-      body: JSON.stringify(savePayload)
+    trackFunnel("check.save_started", { slug: savePayload.landing_slug || "general", attempt_id: savePayload.client_request_id });
+    const data = await withTransientCheckSaveRetry(async () => {
+      saveStage = "save_request";
+      const response = await api("/api/check/preview/save", {
+        method: "POST",
+        headers: { "X-Tvv-Save-Attempt": savePayload.client_request_id },
+        body: JSON.stringify(publicCheckSaveRequestPayload(savePayload))
+      });
+      saveStage = "validate_response";
+      if (!response.pet?.id || response.status !== "saved" || !response.triage_id) {
+        const error = new Error("invalid_save_response");
+        error.code = "invalid_save_response";
+        error.httpStatus = 200;
+        throw error;
+      }
+      return response;
     });
-    if (!data.pet?.id) throw new Error("check_preview_pet_required");
-    trackServiceGoals(data, `check:${data.item?.id || data.pet.id}`);
+    confirmedSaved = true;
     clearPendingPublicCheckSave();
-    await refreshAccountState();
-    await refreshPets();
+    trackServiceGoals(data, `check:${data.item?.id || data.pet.id}`);
+    // The server has saved the record. A later dashboard refresh must not turn
+    // that success into a false save error or discard the visible result.
+    await Promise.allSettled([refreshAccountState(), refreshPets()]);
     state.currentPetId = data.pet.id;
     const petName = `«${escapeHtml(data.pet.pet_name || "Питомец")}»`;
     trackMetrikaGoal("check.saved_after_login", {
@@ -1339,15 +1476,62 @@ async function completePendingPublicCheckAfterLogin() {
       </div>
       <div class="notice success check-saved-state">
         <strong>Готово: результат появился в истории ${petName}.</strong>
-        <p>Теперь к нему можно вернуться в любой момент.</p>
+        <p>Ваше описание и разбор сохранены вместе. Добавляйте изменения в этот случай.</p>
         <div class="next-actions">
-          <button class="primary-button" data-action="triage" type="button">Рассказать ещё раз</button>
+          <button class="primary-button" data-add-case-observation type="button">Добавить изменение</button>
           <button class="secondary-button" data-open-pet="${Number(data.pet.id)}" type="button">Открыть карточку питомца</button>
         </div>
       </div>
+      <section class="profile-card" aria-label="Сохранённый разбор">
+        <p><strong>Ваше описание</strong></p><p>${nl2br(savePayload.text)}</p>
+        ${formatTriageAnswer(savePayload.answer)}
+      </section>
+      <form class="form-grid one-column profile-card" id="caseObservationForm" hidden>
+        <h3>Что изменилось?</h3>
+        <label><span>Самочувствие</span><select name="condition" required>
+          <option value="">Выберите</option><option>Стало лучше</option><option>Без изменений</option><option>Стало хуже</option>
+        </select></label>
+        <label><span>Ваше наблюдение <small>необязательно</small></span><textarea name="note" maxlength="1500" placeholder="Например: поел, стал активнее"></textarea></label>
+        <p class="care-note">Если появились опасные признаки, обращайтесь в ветеринарную клинику.</p>
+        <button class="primary-button" type="submit">Сохранить изменение</button>
+        <p data-case-status role="status"></p>
+      </form>
     `);
+    const observationForm = document.querySelector("#caseObservationForm");
+    document.querySelector("[data-add-case-observation]")?.addEventListener("click", () => {
+      observationForm.hidden = false;
+      observationForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      observationForm.querySelector("select")?.focus();
+    });
+    observationForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = observationForm.querySelector("button[type='submit']");
+      if (button.disabled) return;
+      button.disabled = true;
+      const values = new FormData(observationForm);
+      const message = observationForm.querySelector("[data-case-status]");
+      try {
+        const text = [values.get("condition"), String(values.get("note") || "").trim()].filter(Boolean).join(". ");
+        const created = await api(`/api/pets/${Number(data.pet.id)}/observations`, {
+          method: "POST",
+          body: JSON.stringify({ obs_type: "note", text, triage_id: data.triage_id })
+        });
+        trackServiceGoals(created, `observation:${created.item?.id}`);
+        message.textContent = "Изменение сохранено в истории рядом с этим разбором.";
+        observationForm.reset();
+      } catch (error) {
+        message.textContent = `Не удалось сохранить изменение: ${readableError(error.message)}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
     return true;
   } catch (error) {
+    if (confirmedSaved) {
+      setWorkspace(`<div class="notice success check-saved-state"><strong>Результат сохранён</strong><p>Не удалось обновить экран. Откройте историю питомца после обновления страницы.</p></div>`);
+      return true;
+    }
+    trackFunnel("check.save_failed", checkSaveFailureMetadata(error, saveStage, pending));
     const selectionErrors = new Set([
       "check_preview_pet_required",
       "check_preview_pet_not_found",
@@ -1557,7 +1741,7 @@ function renderPublicCheckAuthPrompt(message) {
       <strong>${escapeHtml(message)}</strong>
       <p>Чтобы продолжить, войдите через Telegram, MAX или электронную почту. В кабинете сохраняется история питомца.</p>
       <div class="next-actions check-result-actions">
-        <button class="primary-button" data-check-save type="button">Войти и продолжить в кабинете</button>
+        <button class="primary-button" data-check-login type="button">Войти и продолжить в кабинете</button>
         <a class="secondary-link compact" href="/">На главную TemichevVet</a>
         <a class="secondary-link compact" href="${telegramBotEntryUrl("result")}" data-telegram-entry="result" target="_blank" rel="noopener">Telegram</a>
         <a class="secondary-link compact" href="https://max.ru/id230210303969_bot" target="_blank" rel="noopener">MAX</a>
@@ -1568,7 +1752,7 @@ function renderPublicCheckAuthPrompt(message) {
   revealPublicCheckState(resultEl.querySelector(".check-auth-notice"));
 }
 
-function renderPublicCheckResult(data, variant, petType, formValues) {
+function renderPublicCheckResult(data, variant, petType, formValues, { restored = false } = {}) {
   const resultEl = publicCheckView?.querySelector("#publicCheckResult");
   if (!resultEl) return;
   const level = data.urgency || "yellow";
@@ -1576,18 +1760,19 @@ function renderPublicCheckResult(data, variant, petType, formValues) {
   const label = publicCheckResultLabel(data);
   const answer = data.answer || "Не удалось сформировать разбор.";
   if (data.usage_consumed) markPublicCheckPreviewUsed();
-  storePendingPublicCheckSave(publicCheckSavePayload(data, variant, formValues));
+  if (!restored) storePendingPublicCheckSave(publicCheckSavePayload(data, variant, formValues));
   publicCheckView.classList.add("has-pending-save");
   resultEl.innerHTML = `
     <div class="result-box check-result ${className}" data-triage-answer="${escapeHtml(answer)}">
       <span class="check-result-badge">${escapeHtml(label)}</span>
-      <h2>Что важно сейчас</h2>
-      ${formatTriageAnswer(answer)}
+      <h2>${restored ? "Сохранённый на устройстве разбор" : "Что важно сейчас"}</h2>
+      ${restored ? `<p class="care-note">Ваш предыдущий разбор от ${escapeHtml(formatDateTime(data.created_at))}. Он описывает состояние на момент обращения.</p>` : ""}
+      ${restored ? `<p><strong>Ваше описание:</strong> ${escapeHtml(formValues.text || "")}</p>` : ""}
+      ${formatTriageAnswer(answer, renderCheckSaveCallout())}
     </div>
-    ${renderCheckSaveCallout()}
     ${renderCheckStickySave()}
   `;
-  trackFunnel("check.result_shown", { slug: variant.slug, pet_type: petType || "unknown", level });
+  trackFunnel(restored ? "check.result_restored" : "check.result_shown", { slug: variant.slug, pet_type: petType || "unknown", level });
   const saveCtaViewKey = `check-save-cta:${getFunnelSessionId()}:${variant.slug}`;
   const saveCtaMetadata = { slug: variant.slug, pet_type: petType || "unknown", level };
   trackFunnelWhenVisible(
@@ -1603,10 +1788,29 @@ function renderPublicCheckResult(data, variant, petType, formValues) {
     saveCtaViewKey,
   );
   scheduleCheckStickySave(resultEl, level);
-  if (level === "red") {
+  if (level === "red" && !restored) {
     trackFunnel("check.red_flag", { slug: variant.slug, pet_type: petType || "unknown", level });
   }
   revealPublicCheckState(resultEl.querySelector(".check-result"));
+}
+
+function restorePendingPublicCheckResult(variant) {
+  const pending = pendingPublicCheckSave();
+  if (!pending) return false;
+  const savedVariant = CHECK_LANDING_VARIANTS[pending.landing_slug] || variant;
+  const heading = publicCheckView?.querySelector(".check-hero h1");
+  const lead = publicCheckView?.querySelector(".check-hero .lead");
+  if (heading) heading.textContent = "Ваш предыдущий разбор";
+  if (lead) lead.textContent = "Описание и ответ остались на этом устройстве. Войдите, чтобы сохранить их в истории питомца.";
+  setPublicCheckGateState();
+  const formTitle = publicCheckView?.querySelector("#checkFormTitle");
+  if (formTitle) formTitle.hidden = true;
+  const title = publicCheckView?.querySelector(".check-promise strong");
+  const hint = publicCheckView?.querySelector(".check-promise span");
+  if (title) title.textContent = "Ваш разбор доступен";
+  if (hint) hint.textContent = "Перечитайте его или сохраните вместе с дальнейшими изменениями";
+  renderPublicCheckResult(pending, savedVariant, pending.pet_type, pending, { restored: true });
+  return true;
 }
 
 function renderPublicCheckLanding() {
@@ -1821,6 +2025,11 @@ function renderPublicCheckLanding() {
     }
   });
   publicCheckView.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-check-login]")) {
+      trackFunnel("check.limit_login_click", { slug: variant.slug });
+      openAuthDialog();
+      return;
+    }
     const retryButton = event.target.closest("[data-check-retry]");
     if (retryButton) {
       form?.requestSubmit();
@@ -1828,6 +2037,10 @@ function renderPublicCheckLanding() {
     }
     const saveButton = event.target.closest("[data-check-save]");
     if (saveButton) {
+      if (!pendingPublicCheckSave()) {
+        openAuthDialog();
+        return;
+      }
       trackFunnel("check.save_click", { slug: variant.slug });
       if (state.user) {
         saveButton.disabled = true;
@@ -1839,6 +2052,7 @@ function renderPublicCheckLanding() {
       return;
     }
   });
+  if (!state.user && restorePendingPublicCheckResult(variant)) return true;
   if (previewAlreadyUsed) {
     renderPublicCheckAuthPrompt(readableError("check_preview_already_used"));
   }
@@ -1847,6 +2061,17 @@ function renderPublicCheckLanding() {
 
 function getPublicCampaignLanding() {
   const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  if (path === "pet" && new URLSearchParams(window.location.search).get("entry") === "new-owner") {
+    return {
+      ...PUBLIC_CAMPAIGN_LANDINGS.pet,
+      slug: "new-owner", newOwner: true,
+      title: "Карточка и журнал питомца",
+      headline: "Питомец дома. Всё важное — в его карточке",
+      description: "Записывайте вес и наблюдения, храните даты прививок, обработок и осмотров. Возвращайтесь к истории, когда нужно вспомнить, что изменилось.",
+      label: "Сервис для владельцев собак и кошек",
+      benefits: ["Карточка питомца", "Записи веса и наблюдений", "Важные даты и напоминания", "История для визита к врачу"],
+    };
+  }
   return PUBLIC_CAMPAIGN_LANDINGS[path] || null;
 }
 
@@ -1877,7 +2102,12 @@ function setPublicCampaignMetadata(variant) {
 async function openPublicCampaignCabinet(variant, target) {
   const eventType = variant.kind === "food" ? "food.card_start_click" : "pet.card_start_click";
   trackFunnel(eventType, { slug: variant.slug, pet_type: variant.petType || "unknown", target });
-  openPetOnboarding();
+  if (state.user && variant.nextAction === "reminders") {
+    ensureDashboardView();
+    await renderReminders();
+    return;
+  }
+  openPetOnboarding(variant.nextAction);
 }
 
 function renderPetCampaignLanding(variant) {
@@ -1896,7 +2126,7 @@ function renderPetCampaignLanding(variant) {
             ${benefits}
           </ul>
           <div class="campaign-hero-actions">
-            <button class="primary-button" data-public-campaign-auth data-target="hero" type="button">Добавить питомца</button>
+            <button class="primary-button" data-public-campaign-auth data-target="hero" type="button">${escapeHtml(variant.cta || "Добавить питомца")}</button>
           </div>
           <p class="campaign-microcopy">Бесплатно. Для начала достаточно клички и вида питомца.</p>
         </div>
@@ -1904,10 +2134,43 @@ function renderPetCampaignLanding(variant) {
           <img src="${escapeHtml(variant.image)}" alt="${escapeHtml(variant.imageAlt)}" />
         </div>
       </section>
+      ${variant.nextAction === "reminders" ? `
+        <section class="content-section" aria-labelledby="campaignExampleTitle">
+          <h2 id="campaignExampleTitle">Какие даты можно хранить</h2>
+          <ul class="step-list"><li>Следующая прививка — дата, согласованная с ветеринаром.</li><li>Обработка от паразитов, плановый осмотр или груминг.</li><li>Своя задача с датой и, при необходимости, повтором.</li></ul>
+          <p>После создания карточки откроется форма напоминания: событие, дата, время и повтор. Сервис не назначает индивидуальную схему вакцинации.</p>
+        </section>` : variant.nextAction === "history" ? `
+        <section class="content-section" aria-labelledby="campaignExampleTitle">
+          <h2 id="campaignExampleTitle">Что будет в карточке</h2>
+          <ul class="step-list"><li>Кличка, вид и сведения о питомце.</li><li>Записи веса и наблюдений по датам.</li><li>Прививки, обработки и сохранённые ответы по питанию.</li></ul>
+          <p>Начните с одного питомца и первой записи. Это личная история владельца, а не оформление официального документа.</p>
+        </section>` : ""}
+      <section class="content-section" aria-labelledby="campaignWholeService">
+        <h2 id="campaignWholeService">Одна карточка — весь сервис</h2>
+        <p>История здоровья, вес, питание и важные даты остаются вместе. Можно начать с нужной сейчас задачи, а остальные возможности использовать позже.</p>
+        <p><a href="/pet-history">История питомца</a> · <a href="/pet-reminders">Важные даты</a> · <a href="/food/dog">Продукты для собаки</a> · <a href="/food/cat">Продукты для кошки</a></p>
+      </section>
       <aside class="passport-legal-note" aria-label="Важное уточнение">
         <strong>Личный журнал владельца.</strong>
         <span>Не заменяет официальный ветеринарный паспорт.</span>
       </aside>
+      ${variant.newOwner ? `
+        <section class="content-section" aria-labelledby="newOwnerSteps">
+          <h2 id="newOwnerSteps">Начните с первой записи</h2>
+          <ol class="step-list">
+            <li><strong>Добавьте питомца.</strong> Для начала достаточно клички и вида — собака или кошка.</li>
+            <li><strong>Запишите то, что уже знаете.</strong> Вес, привычный корм или наблюдение о первых днях дома.</li>
+            <li><strong>Добавьте важную дату.</strong> Например, осмотр или обработку, о которой договорились с ветеринаром.</li>
+          </ol>
+          <p>Записи собираются в историю одного питомца. Новое наблюдение дополняет её — вам не нужно каждый раз начинать сначала.</p>
+          <button class="primary-button" data-public-campaign-auth data-target="first_record" type="button">Создать карточку питомца</button>
+        </section>
+        <section class="content-section" aria-labelledby="newOwnerFree">
+          <h2 id="newOwnerFree">Что можно делать бесплатно</h2>
+          <p>Вести карточку одного питомца, записывать вес и наблюдения, добавлять важные даты и просматривать историю. Для сохранения записей нужен вход.</p>
+          <p>Расширенные возможности доступны в Plus. Подключать Plus, чтобы начать вести карточку, не нужно.</p>
+          <p>Это личный журнал владельца. Сервис не составляет индивидуальный план вакцинации и не заменяет ветеринарного врача.</p>
+        </section>` : ""}
     </div>
   `;
 }
@@ -2539,7 +2802,11 @@ function observationDisplayText(item) {
   if (typeof payload === "string") return payload.trim();
   for (const key of ["text", "summary", "complaint"]) {
     const value = payload?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "string" && value.trim()) {
+      return payload?.triage_id && payload?.case_created_at
+        ? `К разбору от ${formatDateTime(payload.case_created_at)}: ${value.trim()}`
+        : value.trim();
+    }
   }
   return "";
 }
@@ -2575,10 +2842,23 @@ async function api(path, options = {}) {
   if (state.token) {
     headers.Authorization = `Bearer ${state.token}`;
   }
-  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  let response;
+  try {
+    response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  } catch (error) {
+    // DOMException.code can be read-only; do not mutate the browser's error.
+    const failure = new Error(error?.message || "request_failed");
+    failure.code = "network_error";
+    failure.httpStatus = 0;
+    throw failure;
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || "request_failed");
+    const error = new Error(typeof data.detail === "string" ? data.detail : "request_failed");
+    error.httpStatus = response.status;
+    error.code = response.status === 422 ? "validation_error" :
+      (typeof data.detail === "string" ? data.detail : "http_error");
+    throw error;
   }
   return data;
 }
@@ -3131,6 +3411,7 @@ function renderAdminOverviewPage(data) {
 
 function renderAdminFunnelPage(data) {
   const serviceFunnel = data.conversion_funnel_72h_service || {};
+  const serviceRouteFunnel = data.conversion_funnel_72h_service_route || {};
   const publicFunnel = data.conversion_funnel_72h_public || {};
   const authFunnel = data.conversion_funnel_72h_auth || {};
   const petFunnel = data.conversion_funnel_72h_pet || {};
@@ -3139,6 +3420,7 @@ function renderAdminFunnelPage(data) {
   const publicCuts = cuts.public || {};
   const petCuts = petFunnel.cuts || {};
   const foodCuts = foodFunnel.cuts || {};
+  const serviceRouteCuts = serviceRouteFunnel.cuts || {};
   const lossReasons = data.funnel_loss_reasons_72h || {};
   const technical = data.funnel_technical_72h || {};
   const funnelColumns = [
@@ -3160,7 +3442,12 @@ function renderAdminFunnelPage(data) {
     { name: "Ошибка модели", sessions: lossReasons.model_error || 0 },
     { name: "Вход открыт", sessions: lossReasons.login_opened || 0 },
     { name: "Вход успешен", sessions: lossReasons.login_successful || 0 },
-    { name: "Сохранение не завершено", sessions: lossReasons.save_incomplete || 0 },
+    { name: "Нажали сохранить, но сохранение не подтверждено", sessions: lossReasons.save_incomplete || 0 },
+    { name: "Вход не подтверждён; ошибки не зафиксированы", sessions: lossReasons.save_before_login || 0 },
+    { name: "Ошибка сохранения после входа, без успешного повтора", sessions: lossReasons.save_failed_after_login || 0 },
+    { name: "После входа нет подтверждения сохранения и нет ошибки", sessions: lossReasons.save_after_login_pending || 0 },
+    { name: "Ошибка сохранения, вход не подтверждён", sessions: lossReasons.save_failed_auth_unconfirmed || 0 },
+    { name: "Сессии с ошибками, включая успешные повторы", sessions: lossReasons.save_request_failed || 0 },
   ];
   const petLoss = petFunnel.loss_reasons || {};
   const petLossRows = [
@@ -3208,6 +3495,7 @@ function renderAdminFunnelPage(data) {
       <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Прямой переход из рекламы на /check считается с шага «Открыли проверку», поэтому главная страница больше не искажает конверсию.</p>
     </section>
     ${renderAdminTable("Главная продуктовая воронка — последние 72 часа", serviceFunnel.steps || [], funnelColumns, "За последние 72 часа продуктовых событий пока нет.")}
+    ${renderAdminTable("Рекламный маршрут общего сервиса — последние 72 часа", serviceRouteFunnel.steps || [], funnelColumns, "За последние 72 часа событий общего маршрута с главной страницы пока нет.")}
     ${renderAdminTable("Электронный паспорт — последние 72 часа", petFunnel.steps || [], funnelColumns, "За последние 72 часа событий паспорта пока нет.")}
     ${renderAdminTable("База продуктов — последние 72 часа", foodFunnel.steps || [], funnelColumns, "За последние 72 часа событий питания пока нет.")}
     ${renderAdminTable("Публичная проверка симптомов — последние 72 часа", publicFunnel.steps || [], funnelColumns, "За последние 72 часа событий проверки пока нет.")}
@@ -3230,6 +3518,16 @@ function renderAdminFunnelPage(data) {
       { key: "sessions", label: "Сессии" }
     ], "Для расчёта причин потерь пока недостаточно данных.")}
     <p class="admin-data-note">«Результат не получен» означает, что форма отправлена, но показ результата не зафиксирован. «Повторный лимит» и «Ошибка модели» берутся из технического журнала. Директ считает клики, а Метрика — только визиты с разрешённой аналитикой, поэтому их числа могут отличаться.</p>
+    ${renderAdminTable("Диагностика сохранения — 72 часа", data.conversion_funnel_72h?.save_failures || [], [
+      { key: "created_at", label: "Дата", render: (row) => formatDateTime(row.created_at) },
+      { key: "origin", label: "Журнал" },
+      { key: "stage", label: "Этап" },
+      { key: "http_status", label: "HTTP" },
+      { key: "error_code", label: "Код ошибки" },
+      { key: "validation_fields", label: "Нарушение формата (без содержимого)" },
+      { key: "attempt_id", label: "Попытка" }
+    ], "Ошибки сохранения за 72 часа не зафиксированы.")}
+    <p class="admin-data-note">Потери считаются по сессиям, не по людям. Успешный повтор исключает сессию из незавершённых сохранений. Отсутствие события входа не доказывает уход пользователя. В диагностике — последние 80 записей; клиент и сервер могут описывать одну попытку. HTTP 0 — ответ не получен; unknown — данных недостаточно, в том числе у старых событий. Серверный журнал включает и технические запросы, но не добавляет их в счётчики воронки.</p>
     ${renderAdminTable("Срез по рекламной кампании — 72 часа", publicCuts.campaign || [], [
       { key: "name", label: "Кампания" },
       { key: "sessions", label: "Сессии" }
@@ -3246,6 +3544,26 @@ function renderAdminFunnelPage(data) {
       { key: "name", label: "Тип" },
       { key: "sessions", label: "Сессии" }
     ], "Для новых и повторных посетителей данных за 72ч пока нет.")}
+    ${renderAdminTechnicalDetails(
+      "Срезы рекламы: общий сервис — 72 часа",
+      `${renderAdminTable("Кампании", serviceRouteCuts.campaign || [], [
+        { key: "name", label: "Кампания" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Посадочные страницы", serviceRouteCuts.landing || [], [
+        { key: "name", label: "Посадка" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Устройства", serviceRouteCuts.device || [], [
+        { key: "name", label: "Устройство" },
+        { key: "sessions", label: "Сессии" }
+      ])}
+      ${renderAdminTable("Новые и повторные", serviceRouteFunnel.returning || [], [
+        { key: "name", label: "Тип" },
+        { key: "sessions", label: "Сессии" }
+      ])}`,
+      "Включает только цепочки, начавшиеся на главной странице; /check, паспорт и питание сюда не попадают."
+    )}
     ${renderAdminTechnicalDetails(
       "Срезы рекламы: электронный паспорт — 72 часа",
       `${renderAdminTable("Кампании", petCuts.campaign || [], [
@@ -3856,15 +4174,17 @@ function parseTriageSections(answer) {
   });
 }
 
-function formatTriageAnswer(answer) {
+function formatTriageAnswer(answer, afterUrgencyHtml = "") {
   const sections = parseTriageSections(answer);
+  const insertionIndex = Math.min(1, Math.max(sections.length - 1, 0));
   return `
     <div class="triage-answer">
-      ${sections.map((section) => `
+      ${sections.map((section, index) => `
         <article class="triage-answer-card">
           <h3>${escapeHtml(section.title)}</h3>
           <p>${nl2br(section.body)}</p>
         </article>
+        ${afterUrgencyHtml && index === insertionIndex ? afterUrgencyHtml : ""}
       `).join("")}
     </div>
   `;
@@ -5652,7 +5972,8 @@ publicPetOnboardingForm?.addEventListener("submit", async (event) => {
     pet_type: petType,
     pet_name: petName,
     client_request_id: existing?.client_request_id || createFlowId(),
-    created_at: existing?.created_at || new Date().toISOString()
+    created_at: existing?.created_at || new Date().toISOString(),
+    next_action: petOnboardingDialog?.dataset.nextAction || ""
   });
   closePetOnboarding();
   if (state.user) {

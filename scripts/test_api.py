@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import hmac
 import json
 import os
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 import urllib.parse
 import urllib.request
 from dataclasses import replace
@@ -143,6 +145,140 @@ class ApiTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         disable_external_sync()
 
+    def _asgi_json(self, path: str, payload: dict, headers: dict[str, str] | None = None) -> tuple[int, dict]:
+        # Exercise the real ASGI middleware, dependencies and exception handlers,
+        # without adding an HTTP client dependency or contacting a running server.
+        async def run():
+            messages = []
+            sent = False
+            async def receive():
+                nonlocal sent
+                if not sent:
+                    sent = True
+                    return {"type": "http.request", "body": json.dumps(payload).encode(), "more_body": False}
+                await asyncio.Event().wait()
+            async def send(message):
+                messages.append(message)
+            scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                     "http_version": "1.1", "method": "POST", "scheme": "http", "path": path,
+                     "raw_path": path.encode(), "query_string": b"", "root_path": "",
+                     "server": ("127.0.0.1", 8080), "client": ("127.0.0.1", 12345),
+                     "headers": [(k.lower().encode(), v.encode()) for k, v in {
+                         "content-type": "application/json", "user-agent": "Mozilla/5.0", **(headers or {})}.items()]}
+            await asyncio.wait_for(api.app(scope, receive, send), timeout=5)
+            status = next(m["status"] for m in messages if m["type"] == "http.response.start")
+            body = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
+            return status, json.loads(body)
+        return asyncio.run(run())
+
+    def test_check_save_rejection_diagnostics_through_http(self) -> None:
+        user, token = login("save-diagnostics@example.ru")
+        attempt = "12345678-1234-1234-1234-123456789abc"
+        headers = {"cookie": f"{api.USER_SESSION_COOKIE}={token}", "x-tvv-save-attempt": attempt}
+        path = "/api/check/preview/save"
+        payload = self._public_check_save_payload(client_request_id=attempt, create_pet=True).model_dump()
+        secret = "PRIVATE_MEDICAL_CONTENT"
+        invalid = {**payload, "answer": secret * 600}
+        status, _ = self._asgi_json(path, invalid, headers)
+        self.assertEqual(status, 422)
+        status, body = self._asgi_json(path, payload, {"x-tvv-save-attempt": attempt})
+        self.assertEqual((status, body["detail"]), (401, "authorization_required"))
+        status, body = self._asgi_json(path, {**payload, "pet_id": 999999, "create_pet": False}, headers)
+        self.assertEqual((status, body["detail"]), (404, "check_preview_pet_not_found"))
+        with patch.object(api, "_request_rate_limit_retry_after", return_value=5):
+            status, body = self._asgi_json(path, payload, headers)
+        self.assertEqual((status, body["detail"]), (429, "rate_limited"))
+        with closing(db.connect(api.settings.database_path)) as conn:
+            audit_before_crash = conn.execute("SELECT COALESCE(MAX(id), 0) FROM security_audit_events").fetchone()[0]
+        with patch.object(api, "_public_check_preview_save_pet", side_effect=RuntimeError(secret)):
+            with self.assertRaises(RuntimeError):
+                self._asgi_json(path, payload, headers)
+        # This suite shares a temporary DB; remove only this injected generic
+        # crash marker so subsequent monitoring tests still see a healthy API.
+        with closing(db.connect(api.settings.database_path)) as conn:
+            conn.execute("DELETE FROM security_audit_events WHERE id > ? AND event_type = 'http.server_error'", (audit_before_crash,))
+            conn.commit()
+        events = db.list_security_audit_events(api.settings.database_path, event_type="check.preview_save_rejected")
+        metadata = [json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"] for row in events]
+        own = [row for row in metadata if row.get("attempt_id") == attempt]
+        self.assertEqual({row["http_status"] for row in own}, {401, 404, 422, 429, 500})
+        self.assertEqual(next(row for row in own if row["http_status"] == 422)["validation_fields"], "answer:string_too_long")
+        self.assertNotIn(secret, json.dumps(events))
+        self.assertTrue(all(set(row) <= {"attempt_id", "stage", "error_code", "http_status", "validation_fields"} for row in own))
+        self.assertEqual(len(db.list_pets(api.settings.database_path, owner_id=int(user["id"]))), 0)
+        # Successful retry preserves existing idempotency and emits no rejection.
+        status, saved = self._asgi_json(path, payload, headers)
+        status2, repeated = self._asgi_json(path, payload, headers)
+        self.assertEqual((status, status2), (200, 200))
+        self.assertEqual(saved["triage_id"], repeated["triage_id"])
+        after = db.list_security_audit_events(api.settings.database_path, event_type="check.preview_save_rejected")
+        self.assertEqual(len(after), len(events))
+        # Other API routes keep normal validation responses and do not pollute this journal.
+        status, _ = self._asgi_json("/api/funnel/event", {}, headers)
+        self.assertEqual(status, 422)
+        self.assertEqual(len(db.list_security_audit_events(api.settings.database_path, event_type="check.preview_save_rejected")), len(events))
+        with closing(db.connect(api.settings.database_path)) as conn:
+            diagnostic_rows = api._admin_check_save_diagnostics(conn, [{"id": 999, "created_at": "9999", "step": "check_save_failed"}], "0000")
+        self.assertEqual(diagnostic_rows[0]["error_code"], "unknown")
+        server_rows = [row for row in diagnostic_rows if row.get("attempt_id") == attempt]
+        self.assertEqual({row["http_status"] for row in server_rows}, {401, 404, 422, 429, 500})
+        self._asgi_json("/api/funnel/event", {"event_type": "check.save_failed", "session_id": attempt,
+                        "metadata": {"stage": "save_request", "http_status": 422, "error_code": "validation_error", "attempt_id": attempt}}, headers)
+        with closing(db.connect(api.settings.database_path)) as conn:
+            row = conn.execute("SELECT status, metadata FROM funnel_events WHERE event_type = 'check.save_failed' ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["status"], "error")
+        self.assertEqual(json.loads(row["metadata"])["http_status"], 422)
+
+    def test_check_save_diagnostics_are_whitelisted(self) -> None:
+        raw = {"stage": "PRIVATE_MEDICAL_CONTENT", "error_code": "PRIVATE_MEDICAL_CONTENT",
+               "attempt_id": "PRIVATE_MEDICAL_CONTENT", "http_status": 422, "answer": "PRIVATE_MEDICAL_CONTENT"}
+        safe = api._safe_funnel_metadata(raw)
+        self.assertEqual(safe, {"stage": "unknown", "error_code": "unknown", "http_status": 422})
+        self.assertEqual(api._safe_check_save_diagnostics({"error_code": [], "stage": {}, "http_status": True}),
+                         {"stage": "unknown", "error_code": "unknown"})
+
+    def test_public_check_save_ignores_display_only_urgency_label(self) -> None:
+        _, token = login("save-long-urgency-label@example.ru")
+        attempt = "long-urgency-label-save"
+        payload = self._public_check_save_payload(
+            client_request_id=attempt,
+            create_pet=True,
+        ).model_dump()
+        payload["urgency_label"] = "Нужна консультация — " + ("длинное пояснение " * 20)
+        status, body = self._asgi_json(
+            "/api/check/preview/save",
+            payload,
+            {"cookie": f"{api.USER_SESSION_COOKIE}={token}", "x-tvv-save-attempt": attempt},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "saved")
+        self.assertEqual(body["pet"]["pet_type"], "кошка")
+
+    def test_check_save_losses_are_session_scoped_and_exclude_successful_retry(self) -> None:
+        rows = []
+        def event(session, step, user=None):
+            rows.append({"id": len(rows) + 1, "session_hash": session, "step": step, "user_id": user,
+                         "path": "/app", "metadata": {}})
+        for session in ("before", "failed", "pending", "unknown", "recovered", "existing"):
+            event(session, "check_save")
+        event("unrelated", "login_success", 42)
+        event("failed", "login_success", 42)
+        event("failed", "check_save_failed", 42)
+        event("pending", "login_success", 43)
+        event("unknown", "check_save_failed")
+        event("recovered", "check_save_failed", 44)
+        event("recovered", "check_saved", 44)
+        event("existing", "check_save_started", 45)
+        event("existing", "check_save_failed", 45)
+        with closing(db.connect(api.settings.database_path)) as conn:
+            loss = api._admin_funnel_loss_reasons(conn, rows, since="9999")
+        self.assertEqual(loss["save_incomplete"], 5)
+        self.assertEqual(loss["save_before_login"], 1)
+        self.assertEqual(loss["save_failed_after_login"], 2)
+        self.assertEqual(loss["save_after_login_pending"], 1)
+        self.assertEqual(loss["save_failed_auth_unconfirmed"], 1)
+        self.assertEqual(loss["save_request_failed"], 4)
+
     def _clear_broadcast_push_test_data(self) -> None:
         with db.connect(api.settings.database_path) as conn:
             conn.execute("DELETE FROM push_subscriptions WHERE endpoint LIKE ?", ("https://broadcast.example.test/%",))
@@ -263,6 +399,8 @@ class ApiTests(unittest.TestCase):
         )
         self.assertTrue(first_record["service"]["first_record_saved"])
         self.assertTrue(first_record["service"]["activated"])
+        self.assertEqual(first_record["service"]["record_kind"], "weight")
+        self.assertFalse(first_record["service"]["returned"])
         second_record = api.add_pet_observation(
             int(pet["id"]),
             api.ObservationPayload(obs_type="note", text="Аппетит обычный"),
@@ -271,6 +409,16 @@ class ApiTests(unittest.TestCase):
         )
         self.assertFalse(second_record["service"]["first_record_saved"])
         self.assertFalse(second_record["service"]["activated"])
+        self.assertFalse(second_record["service"]["returned"])
+        with db.connect(api.settings.database_path) as conn:
+            conn.execute("UPDATE funnel_events SET created_at = ? WHERE user_id = ? AND event_type = 'service.activated'", ((api.utc_now() - timedelta(hours=25)).isoformat(), int(user["id"])))
+            conn.commit()
+        returning_record = api.add_pet_weight(
+            int(pet["id"]), api.MeasurementPayload(weight_kg=4.3),
+            request(f"/api/pets/{pet['id']}/weights"), user=user,
+        )
+        self.assertTrue(returning_record["service"]["returned"])
+        self.assertFalse(returning_record["service"]["activated"])
         with db.connect(api.settings.database_path) as conn:
             event_counts = dict(
                 conn.execute(
@@ -1321,6 +1469,55 @@ class ApiTests(unittest.TestCase):
         self.assertIn("return_d1_users_30d", dashboard["overview"])
         self.assertIn("return_d7_users_30d", dashboard["overview"])
 
+    def test_admin_dashboard_attributes_root_service_route_without_mixing_check(self) -> None:
+        user, _ = login("admin-root-service-route@example.ru")
+        campaign = "new_owner_service_202609"
+        flow_id = "admin-root-service-route-flow"
+        headers = {
+            "user-agent": "Mozilla/5.0",
+            "x-tvv-traffic-source": "yandex",
+            "x-tvv-utm-source": "yandex",
+            "x-tvv-utm-medium": "cpc",
+            "x-tvv-utm-campaign": campaign,
+            "x-tvv-landing-path": "%2F",
+            "x-tvv-current-flow-id": flow_id,
+            "x-tvv-funnel-session": flow_id,
+            "x-tvv-has-yclid": "1",
+        }
+        api._track_funnel(request("/", method="GET", headers=headers), "landing.view")
+        api._track_funnel(request("/api/funnel/event", headers=headers), "landing.primary_cta_click")
+        pet = api.create_pet(
+            api.PetPayload(pet_type="кошка", pet_name="Луна", client_request_id="admin-root-service-pet"),
+            request("/api/pets", headers=headers),
+            user=user,
+        )["item"]
+        api.add_pet_observation(
+            int(pet["id"]),
+            api.ObservationPayload(obs_type="note", text="Аппетит обычный"),
+            request(f"/api/pets/{pet['id']}/observations", headers=headers),
+            user=user,
+        )
+        check_headers = {
+            **headers,
+            "x-tvv-landing-path": "%2Fcheck%2Fcat-not-eating",
+            "x-tvv-current-flow-id": "admin-check-route-flow",
+            "x-tvv-funnel-session": "admin-check-route-flow",
+        }
+        api._track_funnel(request("/check/cat-not-eating", method="GET", headers=check_headers), "check.view")
+
+        dashboard = api._admin_dashboard_payload()
+        route = dashboard["conversion_funnel_72h_service_route"]
+        route_steps = {item["step"]: item for item in route["steps"]}
+        campaigns = {item["name"]: item["sessions"] for item in route["cuts"]["campaign"]}
+        landings = {item["name"]: item["sessions"] for item in route["cuts"]["landing"]}
+
+        self.assertGreaterEqual(route_steps["landing"]["unique_count"], 1)
+        self.assertGreaterEqual(route_steps["primary_cta"]["unique_count"], 1)
+        self.assertGreaterEqual(route_steps["pet_created"]["unique_count"], 1)
+        self.assertGreaterEqual(route_steps["service_activated"]["unique_count"], 1)
+        self.assertEqual(campaigns[campaign], 1)
+        self.assertEqual(landings, {"home": 1})
+
     def test_admin_dashboard_keeps_raw_bot_logs_and_tracks_public_loss_reasons(self) -> None:
         before = api._admin_dashboard_payload()
         before_loss = before["funnel_loss_reasons_72h"]
@@ -1862,6 +2059,38 @@ class ApiTests(unittest.TestCase):
         self.assertIn("RuntimeError", serialized)
         self.assertNotIn("секретный медицинский текст", serialized)
         self.assertNotIn("собаку тошнит", serialized)
+
+    def test_case_observation_is_linked_and_cannot_reference_another_owner(self) -> None:
+        user, _ = login("case-observation-owner@example.ru")
+        stranger, _ = login("case-observation-stranger@example.ru")
+        saved = api.save_public_check_preview(
+            api.PublicCheckPreviewSaveRequest(
+                pet_type="cat", text="Тестовый случай для проверки связи записей",
+                answer="Тестовый разбор для локальной проверки сохранения и последующего наблюдения.",
+                urgency="green", create_pet=True, client_request_id="case-observation-test",
+            ), request("/api/check/preview/save"), user,
+        )
+        pet_id = int(saved["pet"]["id"])
+        note = api.ObservationPayload(text="Стало лучше", triage_id=saved["triage_id"])
+        created = api.add_pet_observation(pet_id, note, request(), user)
+        self.assertEqual(created["item"]["payload"]["triage_id"], saved["triage_id"])
+        self.assertEqual(created["item"]["payload"]["text"], "Стало лучше")
+        self.assertTrue(created["item"]["payload"]["case_created_at"])
+        with self.assertRaises(HTTPException) as caught:
+            api.add_pet_observation(pet_id, note, request(), stranger)
+        self.assertEqual(caught.exception.status_code, 404)
+        self._activate_plus(user)
+        other_pet = api.create_pet(api.PetPayload(pet_type="собака", pet_name="Другой"), request(), user)
+        with self.assertRaises(HTTPException):
+            api.add_pet_observation(int(other_pet["item"]["id"]), note, request(), user)
+
+    def test_saved_check_event_requires_server_confirmation(self) -> None:
+        response = api.funnel_event(api.FunnelEventRequest(
+            event_type="check.saved_after_login", session_id="forged-client-save",
+        ), request())
+        self.assertTrue(response["ignored"])
+        self.assertNotEqual(api.FUNNEL_EVENT_STEPS["check.limit_login_click"], "check_save")
+        self.assertNotEqual(api.FUNNEL_EVENT_STEPS["check.result_restored"], "check_result")
 
     def test_public_check_preview_save_after_login_creates_pet_history_without_quota_spend(self) -> None:
         user, _ = login("preview-save@example.ru")

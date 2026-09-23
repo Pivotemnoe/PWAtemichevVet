@@ -20,7 +20,10 @@ import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
 from app.config import Settings, get_settings
@@ -308,6 +311,10 @@ FUNNEL_EVENT_STEPS = {
     "check.red_flag": "check_result",
     "check.save_cta_view": "check_save_cta_view",
     "check.save_click": "check_save",
+    "check.limit_login_click": "check_limit_login",
+    "check.result_restored": "check_restored",
+    "check.save_started": "check_save_started",
+    "check.save_failed": "check_save_failed",
     "check.saved_after_login": "check_saved",
     "pet.landing_view": "pet_landing",
     "pet.card_start_click": "pet_card_start",
@@ -323,6 +330,7 @@ FUNNEL_EVENT_STEPS = {
     "reminder.created": "first_record",
     "service.first_record_saved": "first_record",
     "service.activated": "service_activated",
+    "service.returned": "service_returned",
     "summary.viewed": "summary_view",
     "summary.exported": "summary_export",
     "landing.primary_cta_click": "primary_cta",
@@ -347,12 +355,14 @@ FUNNEL_EVENT_STEPS = {
 }
 
 SERVER_ONLY_FUNNEL_EVENTS = {
+    "check.saved_after_login",
     "pet.created",
     "weight.created",
     "observation.created",
     "reminder.created",
     "service.first_record_saved",
     "service.activated",
+    "service.returned",
     "summary.viewed",
     "summary.exported",
     "food.saved_after_login",
@@ -375,6 +385,7 @@ def _funnel_metadata_value(metadata: dict[str, Any], key: str, *, max_length: in
 
 
 FUNNEL_METADATA_FIELD_LIMITS: dict[str, int] = {
+    "attempt_id": 128,
     "source": 80,
     "target": 80,
     "slug": 80,
@@ -424,6 +435,36 @@ FUNNEL_BOOLEAN_METADATA_FIELDS = {
 }
 FUNNEL_NUMERIC_METADATA_FIELDS = {"amount_rub", "matched_count"}
 
+CHECK_SAVE_ERROR_CODES = {
+    "validation_error", "authorization_required", "invalid_authorization_header", "invalid_session",
+    "invalid_check_preview_save", "invalid_check_preview_pet_selection", "check_preview_pet_required",
+    "check_preview_pet_not_found", "check_preview_pet_type_mismatch", "pet_limit_reached",
+    "rate_limited", "network_error", "http_error", "server_error", "invalid_save_response", "client_error",
+}
+CHECK_SAVE_STAGES = {"load_pets", "prepare_save", "save_request", "validate_response", "validation", "authorization", "server"}
+CHECK_SAVE_VALIDATION_TYPES = {"missing", "string_too_short", "string_too_long", "string_type", "literal_error",
+                               "int_parsing", "int_type", "greater_than_equal", "less_than_equal", "bool_parsing"}
+
+
+def _safe_check_save_diagnostics(raw: dict[str, Any]) -> dict[str, Any]:
+    # Never copy exception messages, validation input or medical payloads into telemetry.
+    safe = {"error_code": raw.get("error_code") if isinstance(raw.get("error_code"), str)
+            and raw["error_code"] in CHECK_SAVE_ERROR_CODES else "unknown"}
+    safe["stage"] = raw.get("stage") if isinstance(raw.get("stage"), str) and raw["stage"] in CHECK_SAVE_STAGES else "unknown"
+    status = raw.get("http_status")
+    if type(status) is int and (status == 0 or 100 <= status <= 599):
+        safe["http_status"] = status
+    attempt = raw.get("attempt_id")
+    if isinstance(attempt, str) and re.fullmatch(r"(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9]{13}-[0-9a-f]{1,32})", attempt):
+        safe["attempt_id"] = attempt
+    fields = raw.get("validation_fields")
+    if isinstance(fields, str):
+        allowed = {f"{field}:{kind}" for field in PublicCheckPreviewSaveRequest.model_fields for kind in CHECK_SAVE_VALIDATION_TYPES}
+        safe_fields = sorted(set(fields.split(",")) & allowed)
+        if safe_fields:
+            safe["validation_fields"] = ",".join(safe_fields)[:240]
+    return safe
+
 
 def _safe_funnel_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     raw = metadata if isinstance(metadata, dict) else {}
@@ -440,6 +481,9 @@ def _safe_funnel_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
         value = raw.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             safe[key] = value
+    if "stage" in raw or "error_code" in raw or "http_status" in raw:
+        safe.pop("attempt_id", None)
+        safe.update(_safe_check_save_diagnostics(raw))
     return safe
 
 
@@ -862,10 +906,44 @@ def _review_login_error_response() -> HTMLResponse:
     return response
 
 
+def _audit_check_save_rejection(request: Request, status: int, code: Any, stage: str, validation_fields: str = "") -> None:
+    if request.method != "POST" or request.url.path != "/api/check/preview/save":
+        return
+    _audit(request, "check.preview_save_rejected", status="error", actor="system",
+           user_id=_site_visit_user_id(request), metadata=_safe_check_save_diagnostics({
+               "stage": stage, "http_status": status, "error_code": code,
+               "attempt_id": request.headers.get("x-tvv-save-attempt"),
+               "validation_fields": validation_fields,
+           }))
+
+
+@app.exception_handler(RequestValidationError)
+async def audited_request_validation_error(request: Request, exc: RequestValidationError):
+    fields = []
+    if request.method == "POST" and request.url.path == "/api/check/preview/save":
+        for error in exc.errors():
+            loc = error.get("loc", ())
+            field = loc[1] if len(loc) == 2 and loc[0] == "body" else None
+            kind = error.get("type")
+            if field in PublicCheckPreviewSaveRequest.model_fields and kind in CHECK_SAVE_VALIDATION_TYPES:
+                fields.append(f"{field}:{kind}")
+    _audit_check_save_rejection(request, 422, "validation_error", "validation", ",".join(fields))
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def audited_http_error(request: Request, exc: StarletteHTTPException):
+    code = exc.detail if isinstance(exc.detail, str) and exc.detail in CHECK_SAVE_ERROR_CODES else "http_error"
+    _audit_check_save_rejection(request, exc.status_code, code,
+                                "authorization" if exc.status_code in {401, 403} else "save_request")
+    return await http_exception_handler(request, exc)
+
+
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     retry_after = _request_rate_limit_retry_after(request)
     if retry_after is not None:
+        _audit_check_save_rejection(request, 429, "rate_limited", "server")
         response = JSONResponse(
             status_code=429,
             content={"detail": "rate_limited", "retry_after": retry_after},
@@ -876,6 +954,7 @@ async def security_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception as exc:
+        _audit_check_save_rejection(request, 500, "server_error", "server")
         _audit(
             request,
             "http.server_error",
@@ -987,7 +1066,6 @@ class PublicCheckPreviewSaveRequest(BaseModel):
     text: str = Field(min_length=3, max_length=1200)
     answer: str = Field(min_length=20, max_length=12000)
     urgency: str | None = Field(default=None, max_length=30)
-    urgency_label: str | None = Field(default=None, max_length=80)
     summary: str | None = Field(default=None, max_length=240)
     model: str | None = Field(default=None, max_length=80)
     prompt_tokens: int | None = Field(default=None, ge=0, le=200000)
@@ -1046,6 +1124,7 @@ class MeasurementPayload(BaseModel):
 class ObservationPayload(BaseModel):
     obs_type: str = Field(default="note", max_length=40)
     text: str = Field(min_length=2, max_length=2000)
+    triage_id: int | None = Field(default=None, gt=0)
 
 
 class ReminderPayload(BaseModel):
@@ -2336,6 +2415,8 @@ def _admin_is_public_check_step(step: str) -> bool:
         "check_result",
         "check_save_cta_view",
         "check_save",
+        "check_save_started",
+        "check_save_failed",
         "check_saved",
     }
 
@@ -2453,6 +2534,8 @@ def _admin_funnel_landing_label(row: dict[str, Any]) -> str:
     path = str(row.get("path") or "").strip()
     normalized_path = path.rstrip("/") or "/"
     campaign_landings = {
+        "/": "home",
+        "home": "home",
         "/pet": "pet",
         "pet": "pet",
         "/food/dog": "food-dog",
@@ -2623,8 +2706,11 @@ def _admin_funnel_loss_reasons(
 ) -> dict[str, int]:
     public_rows = [item for item in rows if _admin_funnel_row_is_public(item)]
     sessions: dict[str, dict[str, bool]] = {}
-    for row in public_rows:
+    public_sessions = {_admin_funnel_session_id(row) for row in public_rows}
+    for row in rows:
         session_id = _admin_funnel_session_id(row)
+        if session_id not in public_sessions:
+            continue
         item = sessions.setdefault(
             session_id,
             {
@@ -2635,11 +2721,17 @@ def _admin_funnel_loss_reasons(
                 "check_save_cta_view": False,
                 "check_save": False,
                 "check_saved": False,
+                "save_failed": False,
+                "authenticated_save": False,
                 "login_opened": False,
                 "login_success": False,
             },
         )
         step = str(row.get("step") or "")
+        if step in {"check_save", "check_save_started", "check_save_failed"} and row.get("user_id") is not None:
+            item["authenticated_save"] = True
+        if step == "check_save_failed":
+            item["save_failed"] = True
         if step == "check_view":
             item["check_view"] = True
         elif step == "check_start":
@@ -2691,6 +2783,10 @@ def _admin_funnel_loss_reasons(
         (since,),
     )
 
+    incomplete = [session for session in sessions.values() if session["check_save"] and not session["check_saved"]]
+    def authenticated(session: dict[str, bool]) -> bool:
+        return session["login_success"] or session["authenticated_save"]
+
     return {
         "not_started": sum(1 for session in sessions.values() if session["check_view"] and not session["check_start"]),
         "not_submitted": sum(1 for session in sessions.values() if session["check_start"] and not session["check_submit"]),
@@ -2706,6 +2802,11 @@ def _admin_funnel_loss_reasons(
             if session["check_save_cta_view"] and not session["check_save"]
         ),
         "save_incomplete": sum(1 for session in sessions.values() if session["check_save"] and not session["check_saved"]),
+        "save_request_failed": len({_admin_funnel_session_id(row) for row in public_rows if row.get("step") == "check_save_failed"}),
+        "save_before_login": sum(not authenticated(s) and not s["save_failed"] for s in incomplete),
+        "save_failed_after_login": sum(authenticated(s) and s["save_failed"] for s in incomplete),
+        "save_after_login_pending": sum(authenticated(s) and not s["save_failed"] for s in incomplete),
+        "save_failed_auth_unconfirmed": sum(not authenticated(s) and s["save_failed"] for s in incomplete),
         "repeat_limit": repeat_limit,
         "model_error": model_error_rows,
         "login_opened": sum(1 for session in sessions.values() if session["login_opened"]),
@@ -2721,6 +2822,26 @@ def _admin_funnel_returning_segments(rows: list[dict[str, Any]], *, since: str, 
         {"name": "new", "sessions": new_sessions},
         {"name": "returning", "sessions": returning_sessions},
     ]
+
+
+def _admin_check_save_diagnostics(conn: sqlite3.Connection, rows: list[dict[str, Any]], since: str) -> list[dict[str, Any]]:
+    failures = [{**row, "origin": "client"} for row in rows if row.get("step") == "check_save_failed"]
+    failures.extend({**row, "origin": "server"} for row in _admin_rows(conn, """
+        SELECT id, created_at, metadata FROM security_audit_events
+        WHERE created_at >= ? AND event_type = 'check.preview_save_rejected'
+        ORDER BY id DESC LIMIT 80
+    """, (since,)))
+    result = []
+    for row in sorted(failures, key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)), reverse=True)[:80]:
+        metadata = row.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        result.append({"created_at": row.get("created_at"), "origin": row["origin"],
+                       **_safe_check_save_diagnostics(metadata if isinstance(metadata, dict) else {})})
+    return result
 
 
 def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, Any]:
@@ -2740,11 +2861,17 @@ def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, 
         explicit_steps={"food_landing", "food_submit", "food_result", "food_save_cta_view", "food_card_start", "food_saved"},
         landing_names={"food-dog", "food-cat"},
     )
+    service_route_rows = _admin_funnel_scope_rows(
+        product_rows,
+        explicit_steps=set(),
+        landing_names={"home"},
+    )
     public_steps = _admin_build_funnel_steps(public_rows, PUBLIC_CHECK_FUNNEL_STEPS)
     auth_steps = _admin_build_funnel_steps(auth_rows, AUTH_FUNNEL_STEPS)
     pet_steps = _admin_build_funnel_steps(pet_rows, PET_CAMPAIGN_FUNNEL_STEPS)
     food_steps = _admin_build_funnel_steps(food_rows, FOOD_CAMPAIGN_FUNNEL_STEPS)
     service_steps = _admin_build_funnel_steps(product_rows, SERVICE_FUNNEL_STEPS)
+    service_route_steps = _admin_build_funnel_steps(service_route_rows, SERVICE_FUNNEL_STEPS)
     product_login_rows = [row for row in product_rows if str(row.get("step") or "") == "login_success"]
 
     first_seen = _admin_funnel_first_seen(conn)
@@ -2756,6 +2883,7 @@ def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, 
         "pet_steps": pet_steps,
         "food_steps": food_steps,
         "service_steps": service_steps,
+        "service_route_steps": service_route_steps,
         "product_events": len(product_rows),
         "product_sessions": len({_admin_funnel_session_id(row) for row in product_rows}),
         "synthetic_events": len(synthetic_rows),
@@ -2768,11 +2896,14 @@ def _admin_conversion_funnel(conn: sqlite3.Connection, since: str) -> dict[str, 
             "public": _admin_funnel_cuts(public_rows),
             "pet": _admin_funnel_cuts(pet_rows),
             "food": _admin_funnel_cuts(food_rows),
+            "service_route": _admin_funnel_cuts(service_route_rows),
             "returning": _admin_funnel_returning_segments(public_rows, since=since, first_seen=first_seen),
             "pet_returning": _admin_funnel_returning_segments(pet_rows, since=since, first_seen=first_seen),
             "food_returning": _admin_funnel_returning_segments(food_rows, since=since, first_seen=first_seen),
+            "service_route_returning": _admin_funnel_returning_segments(service_route_rows, since=since, first_seen=first_seen),
         },
         "loss_reasons": _admin_funnel_loss_reasons(conn, product_rows, since=since),
+        "save_failures": _admin_check_save_diagnostics(conn, product_rows, since),
         "pet_loss_reasons": _admin_campaign_loss_reasons(pet_rows, kind="pet"),
         "food_loss_reasons": _admin_campaign_loss_reasons(food_rows, kind="food"),
         "food_result_levels": _admin_funnel_metadata_breakdown(food_rows, step="food_result", key="level"),
@@ -3149,6 +3280,12 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         "conversion_funnel_72h_service": {
             "since": conversion_funnel_72h["since"],
             "steps": conversion_funnel_72h.get("service_steps", []),
+        },
+        "conversion_funnel_72h_service_route": {
+            "since": conversion_funnel_72h["since"],
+            "steps": conversion_funnel_72h.get("service_route_steps", []),
+            "cuts": conversion_funnel_72h.get("cuts", {}).get("service_route", {}),
+            "returning": conversion_funnel_72h.get("cuts", {}).get("service_route_returning", []),
         },
         "conversion_funnel_72h_auth": {
             "since": conversion_funnel_72h["since"],
@@ -3956,6 +4093,7 @@ def funnel_event(payload: FunnelEventRequest, request: Request) -> dict[str, Any
     _track_funnel(
         request,
         event_type,
+        status="error" if event_type == "check.save_failed" else "ok",
         session_id=payload.session_id,
         metadata=payload.metadata or {},
     )
@@ -4390,6 +4528,7 @@ def save_public_check_preview(
         user_id=int(user["id"]),
         session_id=payload.session_id,
         metadata={
+            "attempt_id": payload.client_request_id,
             "urgency": urgency,
             "slug": landing_slug,
             "pet_type": pet_type,
@@ -5146,7 +5285,7 @@ def _track_service_record(
     record_event: str | None,
     record_kind: str,
     session_id: str | None = None,
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     if pet_id is None:
         return {"first_record_saved": False, "activated": False}
     metadata = {"has_pet": True, "record_kind": record_kind}
@@ -5174,7 +5313,23 @@ def _track_service_record(
         metadata=metadata,
         once_per_user=True,
     )
-    return {"first_record_saved": first_record_saved, "activated": activated}
+    # A return means another successfully saved record at least 24 hours after
+    # activation, not a reload, login, or second click in the same visit.
+    returned = False
+    try:
+        with closing(db.connect(settings.database_path)) as conn:
+            initial = conn.execute(
+                "SELECT created_at FROM funnel_events WHERE user_id = ? AND event_type = 'service.activated' ORDER BY id LIMIT 1",
+                (int(user["id"]),),
+            ).fetchone()
+        if initial:
+            activated_at = datetime.fromisoformat(initial["created_at"])
+            returned = utc_now() - activated_at >= timedelta(hours=24)
+        if returned:
+            _track_funnel(request, "service.returned", user_id=int(user["id"]), session_id=session_id, metadata=metadata)
+    except Exception as exc:
+        logger.warning("Service return measurement failed: %s", exc)
+    return {"first_record_saved": first_record_saved, "activated": activated, "record_kind": record_kind, "returned": returned}
 
 
 @app.post("/api/pets")
@@ -5490,7 +5645,21 @@ def pet_observations(pet_id: int, request: Request, user: dict = Depends(current
 
 @app.post("/api/pets/{pet_id}/observations")
 def add_pet_observation(pet_id: int, payload: ObservationPayload, request: Request, user: dict = Depends(current_user)) -> dict:
-    body = json.dumps({"text": _clean_text(payload.text)}, ensure_ascii=False)
+    observation_data = {"text": _clean_text(payload.text)}
+    if payload.triage_id is not None:
+        with closing(db.connect(settings.database_path)) as conn:
+            case = conn.execute(
+                "SELECT id, created_at, complaint_text FROM triage_logs WHERE id = ? AND user_id = ? AND pet_id = ?",
+                (payload.triage_id, int(user["id"]), pet_id),
+            ).fetchone()
+        if not case:
+            raise HTTPException(status_code=404, detail="check_preview_pet_not_found")
+        observation_data.update({
+            "triage_id": int(case["id"]),
+            "case_created_at": case["created_at"],
+            "case_title": str(case["complaint_text"] or "")[:200],
+        })
+    body = json.dumps(observation_data, ensure_ascii=False)
     item = db.create_observation(
         settings.database_path,
         owner_id=int(user["id"]),

@@ -228,8 +228,9 @@ def main() -> None:
         "Что важно сейчас",
         "Константин Валерьевич Темичев",
         "ветеринарный врач",
-        "Сохранить случай",
-        "Вернитесь к результату и проверьте, стало ли питомцу лучше или хуже.",
+        "Сохранить этот разбор",
+        "Сохраните ваше описание и этот разбор вместе. Позже сможете добавить, что изменилось, и показать историю ветеринару.",
+        "Сохранить результат",
         "Добавить питомца",
         "Можно ли собаке этот продукт или блюдо?",
         "Можно ли кошке этот продукт или блюдо?",
@@ -266,7 +267,8 @@ def main() -> None:
         'renderPublicCheckAuthPrompt(readableError("check_preview_already_used"))',
         '"check.save_cta_view"',
         'function scheduleCheckStickySave(resultEl, level)',
-        'if (level !== "red") window.setTimeout(reveal, 8000);',
+        'if (level !== "red") {',
+        "timerElapsed = true;",
         '"После входа автоматически вернём вас к результату и сохраним его."',
     ):
         if public_check_save_guard not in js:
@@ -342,6 +344,7 @@ def main() -> None:
         '"conversion_funnel_72h_pet"',
         '"conversion_funnel_72h_food"',
         '"conversion_funnel_72h_service"',
+        '"conversion_funnel_72h_service_route"',
         '@app.get("/api/pets/{pet_id}/summary")',
         '@app.post("/api/pets/{pet_id}/summary/export")',
     ):
