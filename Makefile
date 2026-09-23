@@ -16,6 +16,7 @@ check:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test_monitor_public.py
 	$(NODE) scripts/test_frontend_attribution.mjs
 	$(NODE) scripts/test_check_save_flow.mjs
+	$(NODE) scripts/test_check_save_validation.mjs
 	$(NODE) --check web/app.js
 	$(NODE) --check web/sw.js
 	$(PYTHON) -m json.tool web/manifest.webmanifest >/dev/null

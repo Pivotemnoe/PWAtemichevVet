@@ -8,6 +8,15 @@ __pycache__/
 *.log
 .DS_Store
 audits/
+/audit/
+/output/
+/marketing/ads-*/
+/design-qa.md
+/docs/CODEX_MARKETING_FUNNEL_TASK.md
+/web/assets/campaign-*.png
+/web/assets/doctor-konstantin-cat.jpg
+/web/assets/doctor-konstantin-diagnostics.jpg
+/web/assets/pet-card-preview*.png
 dist/
 build/
 node_modules/
