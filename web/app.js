@@ -1156,7 +1156,6 @@ function publicCheckSavePayload(data, variant, formValues) {
     text: formValues.text || "",
     answer: data.answer || "",
     urgency: data.urgency || "",
-    urgency_label: data.urgency_label || "",
     summary: data.summary || "",
     model: data.model || "",
     prompt_tokens: data.prompt_tokens || 0,
@@ -1168,6 +1167,45 @@ function publicCheckSavePayload(data, variant, formValues) {
     ...attributionEventMetadata(),
     created_at: new Date().toISOString()
   };
+}
+
+function publicCheckSaveRequestPayload(pending) {
+  // Persist the full result for restoration, but send only fields consumed by
+  // the API. Older cached results can contain a long display-only
+  // urgency_label, which used to make the whole request fail with HTTP 422.
+  const payload = {};
+  const stringLimits = {
+    pet_type: 30,
+    age: 80,
+    text: 1200,
+    answer: 12000,
+    urgency: 30,
+    summary: 240,
+    model: 80,
+    landing_slug: 80,
+    session_id: 128,
+    client_request_id: 128,
+    traffic_source: 80,
+    utm_source: 80,
+    utm_medium: 80,
+    utm_campaign: 120,
+    utm_content: 120,
+    utm_term: 120,
+    landing_path: 160,
+  };
+  for (const [field, limit] of Object.entries(stringLimits)) {
+    if (typeof pending?.[field] !== "string") continue;
+    payload[field] = pending[field].slice(0, limit);
+  }
+  for (const [field, limit] of [["prompt_tokens", 200000], ["completion_tokens", 200000], ["total_tokens", 300000]]) {
+    const value = Number(pending?.[field]);
+    if (Number.isInteger(value) && value >= 0 && value <= limit) payload[field] = value;
+  }
+  const petId = Number(pending?.pet_id);
+  if (Number.isInteger(petId) && petId > 0) payload.pet_id = petId;
+  payload.create_pet = Boolean(pending?.create_pet);
+  payload.has_yclid = Boolean(pending?.has_yclid);
+  return payload;
 }
 
 function renderCheckSaveCallout() {
@@ -1293,12 +1331,30 @@ async function completePendingPetAfterLogin() {
   }
 }
 
+function isTransientCheckSaveError(error) {
+  const status = Number(error?.httpStatus || 0);
+  return error?.code === "network_error"
+    || error?.code === "invalid_save_response"
+    || [408, 425, 502, 503, 504].includes(status);
+}
+
+async function withTransientCheckSaveRetry(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientCheckSaveError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    return operation();
+  }
+}
+
 async function completePendingPublicCheckAfterLogin() {
   const pending = pendingPublicCheckSave();
   if (!pending) return false;
   ensureDashboardView();
+  let confirmedSaved = false;
   try {
-    await refreshPets();
+    await withTransientCheckSaveRetry(() => refreshPets());
     if (pendingPublicCheckNeedsPetSelection(pending)) {
       renderPendingPublicCheckPetSelection(pending);
       return true;
@@ -1314,15 +1370,24 @@ async function completePendingPublicCheckAfterLogin() {
     }
     storePendingPublicCheckSave(savePayload);
     setWorkspace(`<div class="notice check-saved-state">Сохраняю пробный разбор в личный кабинет...</div>`);
-    const data = await api("/api/check/preview/save", {
-      method: "POST",
-      body: JSON.stringify(savePayload)
+    const data = await withTransientCheckSaveRetry(async () => {
+      const response = await api("/api/check/preview/save", {
+        method: "POST",
+        headers: { "X-Tvv-Save-Attempt": savePayload.client_request_id },
+        body: JSON.stringify(publicCheckSaveRequestPayload(savePayload))
+      });
+      if (!response.pet?.id || response.status !== "saved" || !response.triage_id) {
+        const error = new Error("invalid_save_response");
+        error.code = "invalid_save_response";
+        error.httpStatus = 200;
+        throw error;
+      }
+      return response;
     });
-    if (!data.pet?.id) throw new Error("check_preview_pet_required");
-    trackServiceGoals(data, `check:${data.item?.id || data.pet.id}`);
+    confirmedSaved = true;
     clearPendingPublicCheckSave();
-    await refreshAccountState();
-    await refreshPets();
+    trackServiceGoals(data, `check:${data.item?.id || data.pet.id}`);
+    await Promise.allSettled([refreshAccountState(), refreshPets()]);
     state.currentPetId = data.pet.id;
     const petName = `«${escapeHtml(data.pet.pet_name || "Питомец")}»`;
     trackMetrikaGoal("check.saved_after_login", {
@@ -1348,6 +1413,10 @@ async function completePendingPublicCheckAfterLogin() {
     `);
     return true;
   } catch (error) {
+    if (confirmedSaved) {
+      setWorkspace(`<div class="notice success check-saved-state"><strong>Результат сохранён</strong><p>Не удалось обновить экран. Откройте историю питомца после обновления страницы.</p></div>`);
+      return true;
+    }
     const selectionErrors = new Set([
       "check_preview_pet_required",
       "check_preview_pet_not_found",
@@ -2575,10 +2644,22 @@ async function api(path, options = {}) {
   if (state.token) {
     headers.Authorization = `Bearer ${state.token}`;
   }
-  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  let response;
+  try {
+    response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  } catch (error) {
+    const failure = new Error(error?.message || "request_failed");
+    failure.code = "network_error";
+    failure.httpStatus = 0;
+    throw failure;
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || "request_failed");
+    const error = new Error(typeof data.detail === "string" ? data.detail : "request_failed");
+    error.httpStatus = response.status;
+    error.code = response.status === 422 ? "validation_error" :
+      (typeof data.detail === "string" ? data.detail : "http_error");
+    throw error;
   }
   return data;
 }

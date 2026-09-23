@@ -2008,6 +2008,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(saved_history, 1)
         self.assertEqual(saved_funnel_events, 1)
 
+    def test_public_check_save_ignores_display_only_urgency_label(self) -> None:
+        user, _ = login("save-long-urgency-label@example.ru")
+        values = self._public_check_save_payload(
+            client_request_id="long-urgency-label-save",
+            create_pet=True,
+        ).model_dump()
+        values["urgency_label"] = "Нужна консультация — " + ("длинное пояснение " * 20)
+        payload = api.PublicCheckPreviewSaveRequest.model_validate(values)
+        self.assertNotIn("urgency_label", api.PublicCheckPreviewSaveRequest.model_fields)
+
+        result = api.save_public_check_preview(
+            payload,
+            request("/api/check/preview/save"),
+            user,
+        )
+        self.assertEqual(result["status"], "saved")
+        self.assertEqual(result["pet"]["pet_type"], "кошка")
+
     def test_public_check_preview_save_requires_choice_for_single_different_pet(self) -> None:
         user, _ = login("preview-save-one-other@example.ru")
         self._activate_plus(user)

@@ -987,7 +987,6 @@ class PublicCheckPreviewSaveRequest(BaseModel):
     text: str = Field(min_length=3, max_length=1200)
     answer: str = Field(min_length=20, max_length=12000)
     urgency: str | None = Field(default=None, max_length=30)
-    urgency_label: str | None = Field(default=None, max_length=80)
     summary: str | None = Field(default=None, max_length=240)
     model: str | None = Field(default=None, max_length=80)
     prompt_tokens: int | None = Field(default=None, ge=0, le=200000)
