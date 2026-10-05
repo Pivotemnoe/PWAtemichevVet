@@ -3410,6 +3410,7 @@ function renderAdminOverviewPage(data) {
 }
 
 function renderAdminFunnelPage(data) {
+  const adCohorts = data.ad_cohort_windows || {};
   const serviceFunnel = data.conversion_funnel_72h_service || {};
   const serviceRouteFunnel = data.conversion_funnel_72h_service_route || {};
   const publicFunnel = data.conversion_funnel_72h_public || {};
@@ -3432,6 +3433,29 @@ function renderAdminFunnelPage(data) {
     { key: "last_at", label: "Последний раз", render: (row) => formatDateTime(row.last_at) },
     { key: "help", label: "Что значит" }
   ];
+  const adCohortColumns = [
+    { key: "campaign", label: "Кампания", render: (row) => `<strong>${escapeHtml(row.campaign || "без кампании")}</strong>` },
+    { key: "sessions", label: "Рекламные сессии" },
+    { key: "check_start", label: "Начали" },
+    { key: "check_submit", label: "Отправили" },
+    { key: "check_result", label: "Результат" },
+    { key: "result_rate", label: "Результат / сессия", render: (row) => `${escapeHtml(row.result_rate ?? 0)}%` },
+    { key: "check_save", label: "Нажали сохранить" },
+    { key: "login_success", label: "Вошли" },
+    { key: "check_saved", label: "Сохранили" },
+    { key: "registrations", label: "Новые регистрации" },
+    { key: "pet_created", label: "Создали питомца" },
+    { key: "service_activated", label: "Активировали сервис" },
+    { key: "subscription_open", label: "Открыли Plus" },
+    { key: "payment_success", label: "Оплатили Plus" },
+    { key: "revenue_rub", label: "Выручка", render: (row) => `${formatAdminInteger(row.revenue_rub || 0)} ₽` },
+    { key: "last_at", label: "Последнее событие", render: (row) => formatDateTime(row.last_at) }
+  ];
+  const adCohortRows = (key) => {
+    const report = adCohorts[key] || {};
+    if (!Number(report.total?.sessions || 0)) return [];
+    return [report.total, ...(report.campaigns || [])];
+  };
   const lossRows = [
     { name: "Не начат", sessions: lossReasons.not_started || 0 },
     { name: "Не отправлен", sessions: lossReasons.not_submitted || 0 },
@@ -3494,6 +3518,14 @@ function renderAdminFunnelPage(data) {
     <section class="admin-section">
       <p class="admin-explain">Уникальность считается по обезличенной сессии или пользователю. Прямой переход из рекламы на /check считается с шага «Открыли проверку», поэтому главная страница больше не искажает конверсию.</p>
     </section>
+    ${renderAdminTable("Рекламные когорты — последние 24 часа", adCohortRows("24h"), adCohortColumns, "Рекламных сессий Яндекса за последние 24 часа пока нет.")}
+    ${renderAdminTable("Рекламные когорты — последние 7 дней", adCohortRows("7d"), adCohortColumns, "Рекламных сессий Яндекса за последние 7 дней пока нет.")}
+    ${renderAdminTechnicalDetails(
+      "Рекламные когорты — последние 30 дней",
+      renderAdminTable("Кампании", adCohortRows("30d"), adCohortColumns, "Рекламных сессий Яндекса за последние 30 дней пока нет."),
+      "Для долгого хвоста регистраций, активаций Plus и оплат."
+    )}
+    <p class="admin-data-note">Когорта начинается с обезличенной рекламной сессии Яндекса. После успешного входа более поздние события того же пользователя относятся к последней предшествующей рекламной сессии. Фактические поисковые запросы по-прежнему проверяются в Яндекс Директе: UTM-метка не заменяет отчёт по запросам.</p>
     ${renderAdminTable("Главная продуктовая воронка — последние 72 часа", serviceFunnel.steps || [], funnelColumns, "За последние 72 часа продуктовых событий пока нет.")}
     ${renderAdminTable("Рекламный маршрут общего сервиса — последние 72 часа", serviceRouteFunnel.steps || [], funnelColumns, "За последние 72 часа событий общего маршрута с главной страницы пока нет.")}
     ${renderAdminTable("Электронный паспорт — последние 72 часа", petFunnel.steps || [], funnelColumns, "За последние 72 часа событий паспорта пока нет.")}

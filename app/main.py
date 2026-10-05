@@ -2334,15 +2334,27 @@ def _admin_funnel_session_id(row: dict[str, Any]) -> str:
 
 
 def _admin_funnel_metadata_value(row: dict[str, Any], key: str, *, max_length: int) -> str | None:
+    raw = _admin_funnel_metadata(row)
+    return _funnel_metadata_value(raw, key, max_length=max_length)
+
+
+def _admin_funnel_metadata(row: dict[str, Any]) -> dict[str, Any]:
     raw = row.get("metadata") or {}
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
         except json.JSONDecodeError:
-            return None
+            return {}
     if not isinstance(raw, dict):
-        return None
-    return _funnel_metadata_value(raw, key, max_length=max_length)
+        return {}
+    return raw
+
+
+def _admin_funnel_metadata_flag(row: dict[str, Any], key: str) -> bool:
+    value = _admin_funnel_metadata(row).get(key)
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes"}
 
 
 def _admin_funnel_row_is_synthetic(row: dict[str, Any]) -> bool:
@@ -2600,6 +2612,251 @@ def _admin_funnel_cuts(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, A
         "campaign": as_report(campaign_rows),
         "landing": as_report(landing_rows),
         "device": as_report(device_rows),
+    }
+
+
+AD_COHORT_STEPS: tuple[str, ...] = (
+    "check_start",
+    "check_submit",
+    "check_result",
+    "check_save",
+    "login_success",
+    "check_saved",
+    "pet_created",
+    "service_activated",
+    "subscription_open",
+    "payment_success",
+)
+
+
+def _admin_funnel_row_is_yandex_ad(row: dict[str, Any]) -> bool:
+    values = [
+        row.get("source"),
+        _admin_funnel_metadata_value(row, "traffic_source", max_length=80),
+        _admin_funnel_metadata_value(row, "current_traffic_source", max_length=80),
+        _admin_funnel_metadata_value(row, "utm_source", max_length=80),
+        _admin_funnel_metadata_value(row, "current_utm_source", max_length=80),
+    ]
+    if any("yandex" in str(value or "").casefold() for value in values):
+        return True
+    return _admin_funnel_metadata_flag(row, "has_yclid") or _admin_funnel_metadata_flag(
+        row,
+        "current_has_yclid",
+    )
+
+
+def _admin_ad_cohorts(
+    conn: sqlite3.Connection,
+    *,
+    since: str,
+    until: str,
+) -> dict[str, dict[str, Any]]:
+    """Build a privacy-safe last-touch Yandex cohort through later user events.
+
+    Anonymous steps are grouped by the existing hashed browser flow. Once a
+    successful login attaches a user to that flow, later events for the same
+    user (including a provider-side payment callback without a browser session)
+    continue the most recent preceding advertising cohort.
+    """
+    rows = [
+        row
+        for row in _admin_funnel_rows(conn, since)
+        if str(row.get("created_at") or "") <= until and not _admin_funnel_row_is_synthetic(row)
+    ]
+    rows.sort(key=lambda row: (str(row.get("created_at") or ""), int(row.get("id") or 0)))
+
+    rows_by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row.get("session_hash"):
+            rows_by_session[_admin_funnel_session_id(row)].append(row)
+
+    cohorts: dict[str, dict[str, Any]] = {}
+
+    def first_metadata(rows_for_session: list[dict[str, Any]], *keys: str, max_length: int = 120) -> str | None:
+        for item in rows_for_session:
+            for key in keys:
+                value = _admin_funnel_metadata_value(item, key, max_length=max_length)
+                if value:
+                    return value
+        return None
+
+    def add_row(cohort: dict[str, Any], row: dict[str, Any]) -> None:
+        row_id = int(row.get("id") or 0)
+        if row_id and row_id in cohort["event_ids"]:
+            return
+        if row_id:
+            cohort["event_ids"].add(row_id)
+        step = str(row.get("step") or "")
+        if step:
+            cohort["steps"].add(step)
+        if row.get("user_id") is not None:
+            cohort["user_ids"].add(int(row["user_id"]))
+        created_at = str(row.get("created_at") or "")
+        if created_at and created_at > cohort["last_at"]:
+            cohort["last_at"] = created_at
+        if step == "payment_success" and row_id:
+            metadata = _admin_funnel_metadata(row)
+            try:
+                amount_rub = max(int(metadata.get("amount_rub") or 0), 0)
+            except (TypeError, ValueError):
+                amount_rub = 0
+            cohort["payment_events"][row_id] = amount_rub
+
+    for session_key, session_rows in rows_by_session.items():
+        advertising_rows = [row for row in session_rows if _admin_funnel_row_is_yandex_ad(row)]
+        if not advertising_rows:
+            continue
+        entry = advertising_rows[0]
+        campaign = first_metadata(
+            advertising_rows,
+            "utm_campaign",
+            "current_utm_campaign",
+        ) or "без кампании"
+        source = first_metadata(
+            advertising_rows,
+            "utm_source",
+            "current_utm_source",
+            "traffic_source",
+            "current_traffic_source",
+            max_length=80,
+        ) or str(entry.get("source") or "yandex")
+        cohort = {
+            "session_key": session_key,
+            "first_at": str(entry.get("created_at") or ""),
+            "last_at": str(entry.get("created_at") or ""),
+            "campaign": campaign,
+            "source": source,
+            "landing": _admin_funnel_landing_label(entry),
+            "device": str(entry.get("device") or "неизвестно"),
+            "steps": set(),
+            "user_ids": set(),
+            "event_ids": set(),
+            "payment_events": {},
+            "registrations": set(),
+        }
+        for row in session_rows:
+            add_row(cohort, row)
+        cohorts[session_key] = cohort
+
+    user_cohorts: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for cohort in cohorts.values():
+        for user_id in cohort["user_ids"]:
+            user_cohorts[user_id].append(cohort)
+    for items in user_cohorts.values():
+        items.sort(key=lambda item: item["first_at"])
+
+    for row in rows:
+        if row.get("user_id") is None:
+            continue
+        user_id = int(row["user_id"])
+        created_at = str(row.get("created_at") or "")
+        candidates = [item for item in user_cohorts.get(user_id, []) if item["first_at"] <= created_at]
+        if candidates:
+            add_row(candidates[-1], row)
+
+    user_ids = sorted({user_id for cohort in cohorts.values() for user_id in cohort["user_ids"]})
+    if user_ids:
+        placeholders = ", ".join("?" for _ in user_ids)
+        created_by_user = {
+            int(row["id"]): str(row.get("created_at") or "")
+            for row in _admin_rows(
+                conn,
+                f"SELECT id, created_at FROM users WHERE id IN ({placeholders})",
+                tuple(user_ids),
+            )
+        }
+        for cohort in cohorts.values():
+            for user_id in cohort["user_ids"]:
+                created_at = created_by_user.get(user_id, "")
+                if cohort["first_at"] <= created_at <= until:
+                    cohort["registrations"].add(user_id)
+
+    return cohorts
+
+
+def _admin_ad_cohort_report(
+    cohorts: dict[str, dict[str, Any]],
+    *,
+    since: str,
+    until: str,
+) -> dict[str, Any]:
+    scoped_cohorts = [
+        cohort
+        for cohort in cohorts.values()
+        if since <= str(cohort.get("first_at") or "") <= until
+    ]
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for cohort in scoped_cohorts:
+        campaign = str(cohort["campaign"] or "без кампании")
+        item = grouped.setdefault(
+            campaign,
+            {
+                "campaign": campaign,
+                "sessions": 0,
+                "registrations": 0,
+                "revenue_rub": 0,
+                "last_at": None,
+                **{step: 0 for step in AD_COHORT_STEPS},
+            },
+        )
+        item["sessions"] += 1
+        item["registrations"] += len(cohort["registrations"])
+        item["revenue_rub"] += sum(cohort["payment_events"].values())
+        item["last_at"] = max(str(item["last_at"] or ""), str(cohort["last_at"] or "")) or None
+        for step in AD_COHORT_STEPS:
+            item[step] += 1 if step in cohort["steps"] else 0
+
+    def with_rates(item: dict[str, Any]) -> dict[str, Any]:
+        sessions = int(item.get("sessions") or 0)
+        return {
+            **item,
+            "result_rate": round((int(item.get("check_result") or 0) / sessions) * 100, 1) if sessions else 0.0,
+            "saved_rate": round((int(item.get("check_saved") or 0) / sessions) * 100, 1) if sessions else 0.0,
+            "payment_rate": round((int(item.get("payment_success") or 0) / sessions) * 100, 1) if sessions else 0.0,
+        }
+
+    campaigns = [
+        with_rates(item)
+        for item in sorted(grouped.values(), key=lambda item: (-int(item["sessions"]), str(item["campaign"])))
+    ]
+    total = {
+        "campaign": "Итого",
+        "sessions": len(scoped_cohorts),
+        "registrations": sum(len(cohort["registrations"]) for cohort in scoped_cohorts),
+        "revenue_rub": sum(sum(cohort["payment_events"].values()) for cohort in scoped_cohorts),
+        "last_at": max((str(cohort["last_at"] or "") for cohort in scoped_cohorts), default=None),
+        **{
+            step: sum(1 if step in cohort["steps"] else 0 for cohort in scoped_cohorts)
+            for step in AD_COHORT_STEPS
+        },
+    }
+    return {
+        "since": since,
+        "until": until,
+        "attribution_model": "last_yandex_session_then_user",
+        "total": with_rates(total),
+        "campaigns": campaigns,
+    }
+
+
+def _admin_ad_cohort_windows(conn: sqlite3.Connection, now: datetime) -> dict[str, dict[str, Any]]:
+    until = now.isoformat()
+    # Current browser acquisition flows expire after 24 hours. Loading one
+    # extra day prevents a flow that began just before a reporting boundary
+    # from being misclassified as a new cohort inside that window.
+    cohorts = _admin_ad_cohorts(
+        conn,
+        since=(now - timedelta(days=31)).isoformat(),
+        until=until,
+    )
+    return {
+        key: _admin_ad_cohort_report(
+            cohorts,
+            since=(now - timedelta(days=days)).isoformat(),
+            until=until,
+        )
+        for key, days in (("24h", 1), ("7d", 7), ("30d", 30))
     }
 
 
@@ -3238,6 +3495,7 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         recent_site_visits = recent_site_visits[:80]
 
         conversion_funnel_72h = _admin_conversion_funnel(conn, since_72h)
+        ad_cohort_windows = _admin_ad_cohort_windows(conn, now)
         overview["successful_login_users_72h"] = int(conversion_funnel_72h.get("product_login_users") or 0)
         overview["successful_login_events_72h"] = int(conversion_funnel_72h.get("product_login_events") or 0)
 
@@ -3271,6 +3529,7 @@ def _admin_dashboard_payload() -> dict[str, Any]:
         "overview": overview,
         "telegram_bot": telegram_bot,
         "conversion_funnel_72h": conversion_funnel_72h,
+        "ad_cohort_windows": ad_cohort_windows,
         "conversion_funnel_72h_public": {
             "since": conversion_funnel_72h["since"],
             "steps": conversion_funnel_72h.get("public_steps", []),

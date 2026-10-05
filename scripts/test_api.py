@@ -1220,6 +1220,119 @@ class ApiTests(unittest.TestCase):
                 conn.execute("DELETE FROM funnel_events WHERE session_hash = ?", (expected_hash,))
                 conn.commit()
 
+    def test_admin_ad_cohort_links_later_user_and_payment_events(self) -> None:
+        campaign = "cohort-yandex-test-20261005"
+        raw_session = "cohort-yandex-session-20261005"
+        later_session = "cohort-later-session-20261005"
+        qa_session = "cohort-marketing_funnel_qa-20261005"
+        headers = {
+            "user-agent": "Mozilla/5.0 (Linux; Android 14)",
+            "x-tvv-current-flow-id": raw_session,
+            "x-tvv-funnel-session": raw_session,
+            "x-tvv-traffic-source": "yandex_direct",
+            "x-tvv-utm-source": "yandex",
+            "x-tvv-utm-medium": "cpc",
+            "x-tvv-utm-campaign": campaign,
+            "x-tvv-landing-path": "%2Fcheck%2Fcat-not-eating",
+            "x-tvv-has-yclid": "1",
+        }
+        for event_type in (
+            "check.view",
+            "check.start_click",
+            "check.submit",
+            "check.result_shown",
+            "check.save_click",
+        ):
+            api._track_funnel(request("/check/cat-not-eating", headers=headers), event_type)
+
+        user, _ = login("cohort-attribution-20261005@example.ru")
+        user_id = int(user["id"])
+        api._track_funnel(
+            request("/api/auth/email/verify", headers=headers),
+            "auth.login_success",
+            user_id=user_id,
+            metadata={"provider": "email"},
+        )
+        api._track_funnel(
+            request("/api/check/preview/save", headers=headers),
+            "check.saved_after_login",
+            user_id=user_id,
+        )
+
+        later_headers = {
+            **headers,
+            "x-tvv-current-flow-id": later_session,
+            "x-tvv-funnel-session": later_session,
+            "x-tvv-traffic-source": "direct",
+            "x-tvv-utm-source": "",
+            "x-tvv-utm-campaign": "",
+            "x-tvv-has-yclid": "0",
+        }
+        api._track_funnel(
+            request("/api/pets", headers=later_headers),
+            "pet.created",
+            user_id=user_id,
+        )
+        api._track_funnel(
+            request("/api/pets/1/observations", headers=later_headers),
+            "service.activated",
+            user_id=user_id,
+        )
+        api._track_funnel(
+            request("/api/subscription", headers=later_headers),
+            "subscription.open_click",
+            user_id=user_id,
+        )
+        api._track_funnel(
+            None,
+            "payment.succeeded",
+            user_id=user_id,
+            metadata={"provider": "yookassa", "amount_rub": 200},
+        )
+
+        qa_headers = {
+            **headers,
+            "x-tvv-current-flow-id": qa_session,
+            "x-tvv-funnel-session": qa_session,
+            "x-tvv-utm-campaign": "marketing_funnel_qa",
+        }
+        api._track_funnel(request("/check", headers=qa_headers), "check.view")
+
+        try:
+            dashboard = api._admin_dashboard_payload()
+            for key in ("24h", "7d", "30d"):
+                report = dashboard["ad_cohort_windows"][key]
+                row = next(item for item in report["campaigns"] if item["campaign"] == campaign)
+                self.assertEqual(row["sessions"], 1)
+                self.assertEqual(row["check_start"], 1)
+                self.assertEqual(row["check_submit"], 1)
+                self.assertEqual(row["check_result"], 1)
+                self.assertEqual(row["check_save"], 1)
+                self.assertEqual(row["login_success"], 1)
+                self.assertEqual(row["check_saved"], 1)
+                self.assertEqual(row["registrations"], 1)
+                self.assertEqual(row["pet_created"], 1)
+                self.assertEqual(row["service_activated"], 1)
+                self.assertEqual(row["subscription_open"], 1)
+                self.assertEqual(row["payment_success"], 1)
+                self.assertEqual(row["revenue_rub"], 200)
+                self.assertEqual(row["result_rate"], 100.0)
+                self.assertEqual(row["saved_rate"], 100.0)
+                self.assertEqual(row["payment_rate"], 100.0)
+                self.assertNotIn("marketing_funnel_qa", {item["campaign"] for item in report["campaigns"]})
+        finally:
+            hashes = tuple(
+                api.hash_value(value, api.settings.session_secret)[:24]
+                for value in (raw_session, later_session, qa_session)
+            )
+            with db.connect(api.settings.database_path) as conn:
+                conn.execute(
+                    "DELETE FROM funnel_events WHERE user_id = ? OR session_hash IN (?, ?, ?)",
+                    (user_id, *hashes),
+                )
+                conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                conn.commit()
+
     def test_current_flow_keeps_check_and_food_first_touches_out_of_pet_conversion(self) -> None:
         user, _ = login("current-flow-owner@example.ru")
         self._activate_plus(user)
