@@ -1,3 +1,5 @@
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261008-retention-1";
+
 const legacySessionToken = localStorage.getItem("tvv_token") || "";
 
 const state = {
@@ -25,7 +27,7 @@ const OPERATOR_EMAIL = "support@temichevvet.ru";
 const METRIKA_ID = 109726654;
 let metrikaLoaded = false;
 const isAdminRoute = window.location.pathname.replace(/\/+$/, "") === "/admin";
-const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more"]);
+const STARTUP_ACTIONS = new Set(["home", "triage", "pets", "reminders", "subscription", "more", "install", "notifications"]);
 const PENDING_STARTUP_ACTION_KEY = "tvv_pending_startup_action";
 let consumedStartupAction = "";
 let checkLandingViewTrackedPath = "";
@@ -638,6 +640,7 @@ let adminMarkupReady = false;
 const ADMIN_PAGES = [
   { id: "overview", label: "Обзор" },
   { id: "funnel", label: "Воронка" },
+  { id: "retention", label: "Сообщения и возвраты" },
   { id: "traffic", label: "Посещения" },
   { id: "system", label: "Система" },
   { id: "payments", label: "Платежи" },
@@ -3383,8 +3386,8 @@ function renderAdminOverviewPage(data) {
       )}
       ${renderAdminMetric("Проверок в кабинете за 24 часа", overview.triage_24h)}
       ${renderAdminMetric("Активный Plus", overview.active_plus)}
-      ${renderAdminMetric("Возврат D1 за 30 дней", overview.return_d1_users_30d || 0)}
-      ${renderAdminMetric("Возврат D7 за 30 дней", overview.return_d7_users_30d || 0)}
+      ${renderAdminMetric("Возврат D1 после регистрации", data.retention?.cohorts?.find((x) => x.day === "D1")?.returned || 0, `Из ${data.retention?.cohorts?.find((x) => x.day === "D1")?.eligible || 0} измеряемых аккаунтов`)}
+      ${renderAdminMetric("Возврат D7 после регистрации", data.retention?.cohorts?.find((x) => x.day === "D7")?.returned || 0, `Из ${data.retention?.cohorts?.find((x) => x.day === "D7")?.eligible || 0} измеряемых аккаунтов`)}
       ${renderAdminMetric("Платежей за 30 дней", overview.paid_payments_30d, `${overview.revenue_30d_rub || 0} ₽`)}
       ${renderAdminMetric(
         "Токенов за 30 дней",
@@ -3827,6 +3830,7 @@ function renderAdminAuditPage(data) {
 }
 
 function renderAdminPageContent(data, system, statusItems) {
+  if (adminCurrentPage === "retention") return retentionAdmin(data, { head: renderAdminPageHead, metric: renderAdminMetric, table: renderAdminTable, date: formatDateTime });
   if (adminCurrentPage === "funnel") return renderAdminFunnelPage(data);
   if (adminCurrentPage === "traffic") return renderAdminTrafficPage(data);
   if (adminCurrentPage === "system") return renderAdminSystemPage(data, system, statusItems);
@@ -3902,7 +3906,19 @@ function clearStartupAction() {
 }
 
 async function renderStartupView() {
-  const startupAction = getStartupAction();
+  const target = await retentionActivity(api, { token: true });
+  state.retentionTarget = target;
+  const startupAction = target?.action || getStartupAction();
+  if (startupAction === "install") {
+    await renderInstallInstructions();
+    clearStartupAction();
+    return;
+  }
+  if (startupAction === "notifications") {
+    await notificationSettings(api, setWorkspace, escapeHtml);
+    clearStartupAction();
+    return;
+  }
   if (startupAction === "home") {
     await renderHome();
     clearStartupAction();
@@ -3957,6 +3973,7 @@ function applyAccountState(data) {
   state.subscription = data.subscription || null;
   state.telegramProfileSync = data.telegram_profile_sync || null;
   state.lastSyncCheckAt = new Date().toISOString();
+  if (state.user?.id) void retentionActivity(api);
 }
 
 function clearAccountState() {
@@ -4090,6 +4107,7 @@ async function loadPushStatus() {
   } catch {
     status = { enabled: Boolean(config.enabled), count: 0, items: [] };
   }
+  status.current_device = await currentDevicePush(status);
   return { config, status };
 }
 
@@ -4164,6 +4182,12 @@ function renderHomeGuide(hasPets) {
 
 function isStandalonePwa() {
   return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+async function renderInstallInstructions() {
+  const push = await loadPushStatus();
+  setWorkspace(`<div class="workspace-head"><div><h2>Приложение на телефоне</h2><p>Электронный паспорт и история здоровья — под рукой.</p></div><button class="secondary-button compact" data-action="home" type="button">Назад</button></div>${renderPwaInstallGuide()}<section class="profile-card"><p>Если сайт открыт внутри MAX, сначала откройте его во внешнем браузере. После установки откройте значок приложения и при желании включите уведомления.</p></section>${renderPushCard(push)}`);
+  void retentionActivity(api, { kind: "install_instruction" });
 }
 
 function renderPwaInstallGuide() {
@@ -4327,7 +4351,8 @@ function renderEmptyBlock({ icon = "activity", title, text, action, actionText }
 
 async function loadDueFollowups() {
   try {
-    const data = await api("/api/followups/due");
+    const suffix = state.retentionTarget?.followup_id ? `?followup_id=${encodeURIComponent(state.retentionTarget.followup_id)}` : "";
+    const data = await api("/api/followups/due" + suffix);
     return data.items || [];
   } catch {
     return [];
@@ -4416,7 +4441,9 @@ async function renderHome() {
     `}
     <article class="profile-card plan-status-card"><p class="section-label">Доступ</p><h3>${escapeHtml(sub.planTitle)}</h3><p>${sub.quotaLeft} из ${sub.quotaTotal} разборов доступно. Данные питомцев и записи не удаляются после окончания Plus.</p><button class="text-button" data-action="subscription" type="button">Условия подписки</button></article>
     ${renderDueFollowups(dueFollowups)}
+    ${mainPet && latestHistory && !isStandalonePwa() && window.matchMedia?.("(pointer: coarse)")?.matches ? `<section class="profile-card"><h3>История здоровья — под рукой</h3><p>Добавьте TemichevVet на экран телефона, чтобы открывать электронный паспорт через значок приложения.</p><button class="secondary-button" data-action="install" type="button">Как установить приложение</button></section>` : ""}
   `, { scroll: false });
+  if (mainPet && latestHistory && !isStandalonePwa() && window.matchMedia?.("(pointer: coarse)")?.matches) void retentionActivity(api, { kind: "install_shown" });
 }
 
 function renderMore() {
@@ -4511,7 +4538,7 @@ function renderSyncStatusCard() {
 function renderPushCard(push) {
   const supported = pushSupported();
   const enabled = Boolean(push?.config?.enabled);
-  const count = Number(push?.status?.count || 0);
+  const count = push?.status?.current_device ? 1 : 0;
   let statusText = "Разрешите напоминания, чтобы не пропустить важную дату или проверку самочувствия.";
   let button = "";
   if (!supported) {
@@ -4530,6 +4557,7 @@ function renderPushCard(push) {
       <h3>Напоминания на этом устройстве</h3>
       <p>${escapeHtml(statusText)}</p>
       ${button ? `<div class="inline-actions">${button}</div>` : ""}
+      <div class="inline-actions"><button class="text-button" data-action="notifications" type="button">Сообщения на почту и в MAX</button></div>
     </div>
   `;
 }
@@ -6206,6 +6234,8 @@ document.addEventListener("click", async (event) => {
     if (action === "pay-plus") await startPlusPayment();
     if (action === "check-plus-payment") await checkPlusPaymentStatus();
     if (action === "account") await renderAccountLinks();
+    if (action === "notifications") await notificationSettings(api, setWorkspace, escapeHtml);
+    if (action === "install") await renderInstallInstructions();
     if (action === "enable-push") await enablePushNotifications();
     if (action === "disable-push") await disablePushNotifications();
     if (action === "export-account-data") await downloadAccountData();
@@ -6229,7 +6259,8 @@ window.addEventListener("beforeinstallprompt", (event) => {
 installBtn.addEventListener("click", async () => {
   if (!state.deferredInstall) return;
   state.deferredInstall.prompt();
-  await state.deferredInstall.userChoice;
+  const choice = await state.deferredInstall.userChoice;
+  if (choice.outcome === "accepted") void retentionActivity(api, { kind: "install_accepted" });
   state.deferredInstall = null;
   installBtn.hidden = true;
 });

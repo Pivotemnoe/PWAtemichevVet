@@ -3962,7 +3962,9 @@ class ApiTests(unittest.TestCase):
             _=None,
         )
         self.assertEqual(result["sent"], 0)
-        self.assertGreaterEqual(result["skipped"], 1)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["followups"], 0)
+        self.assertEqual(db.list_due_triage_followups(api.settings.database_path, owner_id=int(user["id"]))[0]["id"], followup["id"])
         events = db.list_security_audit_events(api.settings.database_path, event_type="push.followups_send")
         self.assertEqual(events, [])
 

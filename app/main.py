@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -25,7 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import db
+from app import db, retention
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
 from app.followups import detect_followup_scenario, followup_due_at, followup_payload
@@ -117,6 +118,7 @@ async def _app_lifespan(_: FastAPI):
 
 app = FastAPI(title="TemichevVet PWA API", version="0.1.0", lifespan=_app_lifespan)
 db.init_db(settings.database_path)
+retention.init_schema(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 logger = logging.getLogger(__name__)
 _payment_create_lock = threading.Lock()
@@ -579,6 +581,11 @@ def _track_funnel(
             "browser": browser,
             "metadata": event_metadata,
         }
+        if status == "ok":
+            try:
+                retention.track_product(settings, resolved_user_id, event_type, step, event_metadata)
+            except Exception as exc:
+                logger.warning("Retention measurement failed: %s", type(exc).__name__)
         if once_per_user:
             if resolved_user_id is None:
                 return False
@@ -4190,6 +4197,7 @@ def admin_logout(request: Request, response: Response, token: str = Depends(_req
 @app.get("/api/admin/dashboard")
 def admin_dashboard(request: Request, _: dict = Depends(current_admin_session)) -> dict:
     payload = _admin_dashboard_payload()
+    payload["retention"] = retention.stats(settings)
     _audit(request, "admin.dashboard_view", status="ok", actor="admin")
     return payload
 
@@ -4333,6 +4341,9 @@ def telegram_core_sync_outbound_ack(
         )
         conn.commit()
     return {"ok": True, "acked": int(cur.rowcount or 0)}
+
+
+retention.install_routes(app, settings, current_user, current_admin_session, _require_monitoring_api_secret)
 
 
 @app.get("/api/config")
@@ -5190,6 +5201,7 @@ def push_subscriptions(user: dict = Depends(current_user)) -> dict:
             {
                 "id": int(item["id"]),
                 "endpoint": _mask_endpoint(str(item.get("endpoint") or "")),
+                "endpoint_hash": hashlib.sha256(str(item.get("endpoint") or "").encode()).hexdigest(),
                 "user_agent": item.get("user_agent"),
                 "created_at": item.get("created_at"),
                 "updated_at": item.get("updated_at"),
@@ -5217,6 +5229,7 @@ def push_subscribe(
         user_agent=request.headers.get("user-agent"),
     )
     _audit(request, "push.subscribe", user_id=int(user["id"]), status="ok", actor="user", entity_type="push_subscription", entity_id=str(item.get("id") or ""))
+    retention.track_saved(settings, int(user["id"]), "push_enabled")
     return {
         "ok": True,
         "message": "Уведомления подключены для этого устройства.",
@@ -5989,6 +6002,7 @@ def delete_reminder(reminder_id: int, request: Request, user: dict = Depends(cur
         _audit_ownership_denied(request, user, entity_type="reminder", entity_id=reminder_id)
         raise HTTPException(status_code=404, detail="reminder_not_found")
     sync_result = _safe_sync_pwa_reminder_deactivation(user, reminder_id)
+    retention.track_saved(settings, int(user["id"]), "reminder_closed")
     _enqueue_core_outbound_from_sync(sync_result, (("telegram_reminder_id", "reminders"),))
     return {"ok": True}
 
@@ -6169,7 +6183,13 @@ def create_feedback(payload: FeedbackPayload, user: dict = Depends(current_user)
 
 
 @app.get("/api/followups/due")
-def due_followups(user: dict = Depends(current_user)) -> dict:
+def due_followups(followup_id: int | None = None, user: dict = Depends(current_user)) -> dict:
+    if followup_id is not None:
+        with closing(db.connect(settings.database_path)) as conn:
+            row = conn.execute("SELECT f.*,p.pet_name,p.pet_type FROM triage_followups f LEFT JOIN pets p ON p.id=f.pet_id "
+                "WHERE f.id=? AND f.user_id=? AND f.status='scheduled' AND f.scheduled_at<=? AND f.created_at>=?",
+                (followup_id,int(user["id"]),utc_now().isoformat(),(utc_now()-timedelta(hours=48)).isoformat())).fetchone()
+        return {"items": [dict(row)] if row else []}
     return {"items": db.list_due_triage_followups(settings.database_path, owner_id=int(user["id"]))}
 
 
@@ -6192,6 +6212,7 @@ def answer_followup(followup_id: int, payload: FollowupAnswerPayload, request: R
         "worse": "Ухудшение состояния — повод для очного осмотра. Рекомендуется обратиться в клинику как можно скорее.",
         "retry": "Откройте новый разбор и добавьте свежие симптомы. Это будет отдельная проверка состояния.",
     }
+    retention.track_saved(settings, int(user["id"]), "followup_answer")
     return {"ok": True, "message": messages[answer]}
 
 

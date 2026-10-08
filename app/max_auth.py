@@ -18,7 +18,7 @@ from app.security import constant_time_equal, expires_in, hash_value, make_token
 
 
 MAX_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{12,80}$")
-MAX_WEBHOOK_UPDATE_TYPES = ("bot_started", "message_created", "message_callback")
+MAX_WEBHOOK_UPDATE_TYPES = ("bot_started", "message_created", "message_callback", "bot_stopped", "dialog_removed")
 MAX_INIT_DATA_MAX_AGE_SECONDS = 60 * 60
 logger = logging.getLogger(__name__)
 
@@ -366,6 +366,14 @@ def _extract_message_text(update: dict[str, Any]) -> str:
 
 def process_max_update(settings: Settings, update: dict[str, Any]) -> dict[str, Any]:
     update_type = str(update.get("update_type") or update.get("type") or "")
+    from app.retention import channel_state
+    provider_user_id, _ = _extract_user(update)
+    if update_type in {"bot_stopped", "dialog_removed"}:
+        if provider_user_id:
+            channel_state(settings, provider_user_id, False)
+        return {"handled": True, "action": "notifications_stopped"}
+    if provider_user_id and update_type in {"bot_started", "message_created", "message_callback"}:
+        channel_state(settings, provider_user_id, True)
     if update_type in {"", "bot_started"}:
         state = _extract_start_payload(update)
         provider_user_id, display_name = _extract_user(update)

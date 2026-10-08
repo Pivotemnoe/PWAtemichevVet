@@ -1200,19 +1200,27 @@ def list_active_push_subscriptions_for_delivery(db_path: Path, *, limit: int = 5
 
 def list_due_triage_followups_for_push(db_path: Path, *, limit: int = 50) -> list[dict[str, Any]]:
     now = utc_now_iso()
+    from datetime import datetime, timedelta
+    cutoff = (datetime.fromisoformat(now) - timedelta(hours=48)).isoformat()
     with closing(connect(db_path)) as conn:
+        delivered_filter = ""
+        if _table_exists(conn.cursor(), "retention_outbox"):
+            delivered_filter = "AND NOT EXISTS (SELECT 1 FROM retention_outbox o WHERE o.user_id=f.user_id AND o.category='followup' AND o.source_key='f:'||f.id AND o.status IN ('accepted','sending','unknown'))"
         rows = conn.execute(
-            """
+            f"""
             SELECT f.*, p.pet_name, p.pet_type
             FROM triage_followups f
             LEFT JOIN pets p ON p.id = f.pet_id
             WHERE f.status = 'scheduled'
               AND f.scheduled_at <= ?
               AND f.push_notified_at IS NULL
+              AND f.created_at >= ?
+              AND EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.user_id=f.user_id AND s.revoked_at IS NULL)
+              {delivered_filter}
             ORDER BY f.scheduled_at ASC, f.id ASC
             LIMIT ?
             """,
-            (now, int(limit)),
+            (now, cutoff, int(limit)),
         ).fetchall()
     return rows_to_dicts(rows)
 
@@ -1807,6 +1815,8 @@ def merge_users(db_path: Path, *, source_user_id: int, target_user_id: int) -> d
             else:
                 cur.execute("UPDATE external_accounts SET user_id = ? WHERE id = ?", (target_id, int(account["id"])))
 
+        from app.retention import merge_identity
+        merge_identity(cur, source_id, target_id)
         cur.execute("DELETE FROM users WHERE id = ?", (source_id,))
         conn.commit()
         cur.execute("SELECT * FROM users WHERE id = ?", (target_id,))

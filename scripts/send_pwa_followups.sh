@@ -21,3 +21,6 @@ fi
 
 curl -fsS --max-time 25 -X POST "${APP_URL}/api/internal/push/followups/send?limit=50" \
   -H "X-Temichevvet-Monitoring-Secret: ${SECRET}" >/dev/null
+
+curl -fsS --max-time 75 -X POST "${APP_URL}/api/internal/retention/send?limit=3" \
+  -H "X-Temichevvet-Monitoring-Secret: ${SECRET}" >/dev/null
