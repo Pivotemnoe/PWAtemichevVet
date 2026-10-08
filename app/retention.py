@@ -413,8 +413,9 @@ def resolve(settings, token, user_id=None):
 
 
 def message_urls(settings, row):
+    from app.max_auth import _app_url
     token = f"{row['id']}.{signature(settings,row['id'])}"
-    base = settings.app_base_url.rstrip("/")
+    base = _app_url(settings)
     return f"{base}/r/{token}", f"{base}/r/{token}/stop"
 
 

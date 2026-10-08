@@ -130,6 +130,15 @@ class RetentionTests(unittest.TestCase):
         self.assertIn("/stop",message["List-Unsubscribe"])
         self.assertEqual(message["List-Unsubscribe-Post"],"List-Unsubscribe=One-Click")
 
+    def test_message_links_use_public_site_with_legacy_loopback_config(self):
+        for base in ("http://127.0.0.1:8080", "http://localhost:8081", "http://0.0.0.0", "http://[::1]:8080", ""):
+            settings=replace(self.settings,app_base_url=base)
+            action,stop=retention.message_urls(settings,{"id":123})
+            self.assertTrue(action.startswith("https://temichevvet.ru/r/"),base)
+            self.assertEqual(stop,action+"/stop")
+        action,_=retention.message_urls(self.settings,{"id":123})
+        self.assertTrue(action.startswith("https://example.test/r/"))
+
     def test_confirmed_payment_after_link_is_counted_once(self):
         row=self.accepted()
         token=f"{row['id']}.{retention.signature(self.settings,row['id'])}"
