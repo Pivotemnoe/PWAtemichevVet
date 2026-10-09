@@ -1,0 +1,36 @@
+{
+  "captured_at_utc": "2026-10-09T15:45:52.945834+00:00",
+  "shop_id": "1376677",
+  "backup": "/opt/temichevvet/backups/subscription-enable-20261009T154551Z",
+  "subscriptions_enabled": true,
+  "autorenew_enabled": true,
+  "running_process_flags_verified": true,
+  "paid_periods_preserved": true,
+  "billing_counts": {
+    "billing_agreements": 0,
+    "billing_charges": 0,
+    "billing_events": 0
+  },
+  "quick_check": "ok",
+  "foreign_key_violations": 0,
+  "neighbor_services": {
+    "nginx": "active",
+    "temichevvet_bot.service": "inactive",
+    "temichevvet_pwa_followups.timer": "active",
+    "temichevvet_pwa_monitor.timer": "active"
+  },
+  "pwa_service": "active",
+  "retention_flags": {
+    "RETENTION_ENABLED": "1",
+    "RETENTION_WEEKLY_SERIES": "0"
+  },
+  "payment_created": false,
+  "live_charge_or_renewal_verified": false,
+  "application_hashes": {
+    "app/main.py": "4a7b5c5737193fc133e29a507368d620bc3dbaac538a4b47f7aa24fd810b95d2",
+    "app/billing.py": "b5c0f817527c7ef48fb6e18d792a701ba74ff960e0623748b6d82f627c797e44",
+    "app/payments/yookassa.py": "bc85429c7510e3f0a5c64ed3f4ed121de38165dfb29e25ec0e73f336fb668309",
+    "web/app.js": "d3d0ac91bfb0502d46ebad1cad7d51afaaf6b1975283e8583ba641d0377e55f1"
+  }
+}
+
