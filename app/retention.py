@@ -31,8 +31,24 @@ TITLES = {
     "followup": "Как сейчас чувствует себя ваш питомец?",
     "date": "Напоминание о вашей важной дате",
     "install": "TemichevVet — на экране телефона",
+    "billing_renewal": "Скоро продлится ваша подписка Plus",
+    "billing_success": "Plus оплачен — доступ продлён",
+    "billing_failed": "Не получилось продлить Plus",
+    "billing_canceled": "Автопродление Plus отключено",
 }
 TEXTS = {
+    "billing_renewal": ("Здравствуйте!\n\nВаша подписка Plus продлится {date}. "
+        "Спишем 200 ₽ за следующие 30 дней с сохранённого способа оплаты.\n\n"
+        "Если хотите остановить продление, нажмите «Отменить подписку» в кабинете. "
+        "Оплаченный доступ останется до конца срока."),
+    "billing_success": ("Здравствуйте!\n\nОплата Plus прошла: 200 ₽ за 30 дней. "
+        "Доступ действует до {date}. История здоровья, важные даты и возможности Plus — в вашем кабинете."),
+    "billing_failed": ("Здравствуйте!\n\nНе получилось продлить Plus. "
+        "Откройте раздел подписки, чтобы посмотреть статус оплаты и следующие шаги. "
+        "Ваши питомцы и записи сохранены."),
+    "billing_canceled": ("Здравствуйте!\n\nАвтопродление Plus отключено. "
+        "Новые списания для продления не будут создаваться. Оплаченный доступ останется до конца срока. "
+        "История питомца сохранена в кабинете."),
     "first_pet": ("Здравствуйте!\n\nВсё важное о питомце удобно держать в одном месте: "
                   "историю здоровья, питание, вес и важные даты.\n\n"
                   "Ваш личный кабинет TemichevVet уже готов. Добавьте питомца — "
@@ -56,6 +72,8 @@ TEXTS = {
                 "После установки уведомления можно отдельно включить в профиле."),
 }
 BUTTONS = {
+    "billing_renewal":"Управлять подпиской", "billing_success":"Открыть Plus",
+    "billing_failed":"Проверить подписку", "billing_canceled":"Открыть подписку",
     "first_pet": "Добавить питомца", "first_record": "Открыть электронный паспорт",
     "history": "Открыть историю здоровья", "followup": "Отметить самочувствие",
     "date": "Открыть важную дату", "install": "Как установить приложение",
@@ -515,6 +533,9 @@ def _cancel_reason(c, row, now):
                       (payload["reminder_id"],row["user_id"])).fetchone()
         if not r or not r["is_active"] or r["due_date"]!=payload["date"]:
             return "date_changed"
+    elif row["category"]=="billing":
+        from app.billing import notice_cancel_reason
+        return notice_cancel_reason(c,row,payload)
     else:
         a = c.execute("SELECT last_seen_at FROM retention_activity WHERE user_id=?", (row["user_id"],)).fetchone()
         if a and a[0] > row["created_at"]:
@@ -557,7 +578,7 @@ def run(settings, *, limit=10, dry_run=False, now=None):
         with closing(db.connect(settings.database_path)) as c:
             c.execute("BEGIN IMMEDIATE")
             r = c.execute("SELECT * FROM retention_outbox WHERE status='queued' AND due_at<=? "
-                          "ORDER BY CASE category WHEN 'followup' THEN 0 WHEN 'date' THEN 1 ELSE 2 END,due_at,id LIMIT 1",
+                          "ORDER BY CASE category WHEN 'followup' THEN 0 WHEN 'date' THEN 1 WHEN 'billing' THEN 2 ELSE 3 END,due_at,id LIMIT 1",
                           (now.isoformat(),)).fetchone()
             if not r:
                 c.commit()

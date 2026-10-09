@@ -70,7 +70,7 @@ def _request_json(
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         raise YooKassaPaymentError(f"yookassa_http_{exc.code}: {raw[:500]}") from exc
-    except URLError as exc:
+    except (URLError, TimeoutError, ConnectionError) as exc:
         raise YooKassaPaymentError("yookassa_network_error") from exc
 
     try:
@@ -148,7 +148,36 @@ def get_payment(settings: Settings, payment_id: str) -> dict[str, Any]:
     payment_id = str(payment_id or "").strip()
     if not payment_id:
         raise YooKassaPaymentValidationError("empty_payment_id")
-    return _request_json(settings, method="GET", path=f"/payments/{payment_id}")
+    result = _request_json(settings, method="GET", path=f"/payments/{payment_id}")
+    if str(result.get('id') or '') != payment_id:
+        raise YooKassaPaymentError('yookassa_payment_id_mismatch')
+    return result
+
+
+def subscription_payload(settings: Settings, *, user_id: int, user_email: str | None,
+                         agreement_id: int, charge_id: int, payment_method_id: str | None = None) -> dict[str, Any]:
+    from app.max_auth import _app_url
+    description = "TemichevVet Plus — подписка на 30 дней"
+    payload = {
+        "amount": {"value": "200.00", "currency": "RUB"}, "capture": True,
+        "description": description,
+        "metadata": {"source": "pwa", "pwa_user_id": str(user_id), "plan_code": "plus",
+                     "access_days": "30", "billing_agreement_id": str(agreement_id),
+                     "billing_charge_id": str(charge_id)},
+    }
+    if payment_method_id:
+        payload["payment_method_id"] = payment_method_id
+    else:
+        payload["save_payment_method"] = True
+        payload["confirmation"] = {"type": "redirect", "return_url": _app_url(settings) + "/?payment=plus"}
+    receipt = _build_receipt(settings, amount_rub=200, description=description, user_email=user_email)
+    if receipt:
+        payload["receipt"] = receipt
+    return payload
+
+
+def create_subscription_payment(settings: Settings, *, payload: dict[str, Any], idempotence_key: str) -> dict[str, Any]:
+    return _request_json(settings, method="POST", path="/payments", payload=payload, idempotence_key=idempotence_key)
 
 
 def _decimal_amount(value: Any) -> Decimal:

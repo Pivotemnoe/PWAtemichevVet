@@ -14,6 +14,7 @@ check:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/check_project.py
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test_api.py
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test_retention.py
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test_billing.py
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/test_monitor_public.py
 	$(NODE) scripts/test_frontend_attribution.mjs
 	$(NODE) scripts/test_check_save_flow.mjs

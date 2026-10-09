@@ -2619,6 +2619,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 410)
         self.assertIn("Ссылка для аудита недействительна", second.body.decode("utf-8"))
 
+    def test_subscription_disclosure_and_legacy_checkout_agree(self) -> None:
+        user = db.get_or_create_user_by_email(api.settings.database_path, 'subscription-disclosure@example.ru')
+        with patch.dict(os.environ, {'BILLING_SUBSCRIPTIONS_ENABLED': '1', 'BILLING_AUTORENEW_ENABLED': '1'}):
+            landing = api.index().body.decode('utf-8')
+            self.assertIn('200 ₽ каждые 30 дней', landing)
+            self.assertNotIn('Оплата разовая, автосписаний нет', landing)
+            self.assertIn('отдельного согласия', api._legal_page_response('offer').body.decode('utf-8'))
+            self.assertEqual(api.spa_fallback('app').body.decode('utf-8'), landing)
+            with patch.object(api, 'create_yookassa_plus_payment') as create:
+                with self.assertRaises(HTTPException) as result:
+                    api._payment_plus_create_locked(request('/api/payments/plus/create'), user)
+                self.assertEqual(result.exception.detail, 'use_subscription_checkout')
+                create.assert_not_called()
+
     def test_legal_routes_are_standalone_documents(self) -> None:
         for page_key, page in api.LEGAL_PAGES.items():
             with self.subTest(page_key=page_key):

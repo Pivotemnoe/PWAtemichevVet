@@ -1,4 +1,4 @@
-import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261008-retention-1";
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261009-subscription-6";
 
 const legacySessionToken = localStorage.getItem("tvv_token") || "";
 
@@ -908,6 +908,14 @@ function readableError(message) {
     payment_confirmation_missing: "Не удалось получить ссылку оплаты. Попробуйте позже.",
     payment_not_found: "Платёж не найден. Сначала нажмите «Оплатить Plus».",
     payment_verification_failed: "Платёж не прошёл серверную проверку. Напишите в поддержку.",
+    subscriptions_not_enabled: "Подписки пока готовятся. Сейчас доступна разовая оплата Plus.",
+    use_subscription_checkout: "Теперь Plus подключается как подписка. Обновите страницу и откройте условия в кабинете.",
+    subscription_terms_changed: "Условия подписки обновились. Откройте раздел подписки заново.",
+    paid_access_already_active: "Plus уже оплачен. Подписку можно подключить после окончания текущего срока.",
+    subscription_already_exists: "Подписка уже есть. Откройте её в кабинете, чтобы проверить статус или отменить продление.",
+    payment_already_pending: "У вас уже есть незавершённая оплата. Сначала проверьте её статус.",
+    payment_result_unresolved: "Результат предыдущего платежа ещё проверяется. Напишите в поддержку; новый платёж пока не создаётся.",
+    receipt_email_required: "Укажите почту, на которую отправить чек.",
     push_not_configured: "Напоминания на этом устройстве временно недоступны. Остальные функции работают как обычно.",
     push_unsupported: "Этот браузер не поддерживает напоминания.",
     push_permission_denied: "Браузер не дал разрешение на уведомления.",
@@ -2527,51 +2535,11 @@ const legalDocuments = {
       </section>
       <section>
         <h3>5. Подписка и оплата</h3>
-        <p>Платные функции предоставляются по условиям выбранного тарифа. Plus оплачивается разово на указанный срок без автосписаний, если явно не указано иное. Платежные данные обрабатываются платежным провайдером.</p>
+        <p>Стоимость, срок доступа Plus и условия продления указаны в кабинете и публичной оферте. Автопродление подключается только с отдельным согласием пользователя. Платёжные данные обрабатываются ЮKassa.</p>
       </section>
       <section>
         <h3>6. Изменения</h3>
         <p>Сервис может обновлять функции, интерфейс, тарифы и документы. Актуальная редакция документов публикуется на сайте.</p>
-      </section>
-    `
-  },
-  offer: {
-    title: "Публичная оферта",
-    html: `
-      <div class="legal-meta">Редакция от ${LEGAL_UPDATED_AT}. Оферта определяет условия покупки доступа Plus в сервисе TemichevVet.</div>
-      <section>
-        <h3>1. Услуга</h3>
-        <p>Платная услуга TemichevVet — предоставление доступа Plus к расширенным функциям личного кабинета здоровья питомца на 30 календарных дней.</p>
-      </section>
-      <section>
-        <h3>2. Что входит в Plus</h3>
-        <ul>
-          <li>до 10 оценок состояния питомца в месяц;</li>
-          <li>расширенная история обращений по питомцам;</li>
-          <li>до 20 активных напоминаний;</li>
-          <li>ведение до 3 питомцев в личном кабинете;</li>
-          <li>синхронизация доступа между сайтом, PWA и подключёнными мессенджерами.</li>
-        </ul>
-      </section>
-      <section>
-        <h3>3. Стоимость и срок</h3>
-        <p>Стоимость Plus составляет 200 рублей за 30 дней. Оплата разовая, автоматических списаний нет. После окончания оплаченного срока сервис возвращает доступ на Free, если Plus не продлён повторной оплатой.</p>
-      </section>
-      <section>
-        <h3>4. Порядок оказания услуги</h3>
-        <p>Доступ Plus активируется после успешного подтверждения платежа платёжным провайдером. Полные данные банковской карты TemichevVet не хранит.</p>
-      </section>
-      <section>
-        <h3>5. Ограничения</h3>
-        <p>TemichevVet является информационным сервисом. Платный доступ не является медицинской услугой, ветеринарной консультацией, постановкой диагноза или назначением лечения.</p>
-      </section>
-      <section>
-        <h3>6. Возвраты и обращения</h3>
-        <p>По вопросам оплаты, технических ошибок и доступа Plus пользователь может написать на ${legalEmailLink()}. Запрос рассматривается по существу обращения и данным платежа.</p>
-      </section>
-      <section>
-        <h3>7. Принятие оферты</h3>
-        <p>Нажатие кнопки оплаты и успешная оплата означают принятие этой оферты, пользовательского соглашения, политики конфиденциальности и медицинского дисклеймера.</p>
       </section>
     `
   },
@@ -2639,6 +2607,10 @@ const legalDocuments = {
 };
 
 function openLegalModal(type = "privacy") {
+  if (type === "offer") {
+    window.location.href = "/offer";
+    return;
+  }
   const doc = legalDocuments[type] || legalDocuments.privacy;
   legalModalTitle.textContent = doc.title;
   legalContent.innerHTML = doc.html;
@@ -2655,7 +2627,6 @@ const legalPathMap = {
   "/privacy": "privacy",
   "/consent": "consent",
   "/terms": "terms",
-  "/offer": "offer",
   "/medical-disclaimer": "medical",
   "/cookies": "cookies",
   "/contacts": "contacts"
@@ -3751,8 +3722,46 @@ function renderAdminSystemPage(data, system, statusItems) {
 }
 
 function renderAdminPaymentsPage(data) {
+  const billing = data.billing || {};
+  const states = { pending: "Ждёт первой оплаты", active: "Автопродление подключено", payment_failed: "Не хватило средств — повтор через сутки", needs_attention: "Нужна проверка платежа", canceled: "Автопродление отключено" };
+  const events = { consent: "Согласие на подписку", initial_paid: "Первая оплата подтверждена", renewal_paid: "Продление оплачено", payment_failed: "Неудачная попытка оплаты", canceled: "Отмена пользователем", unknown: "Результат платежа не подтверждён" };
+  const chargeStates = { new: "Ожидает отправки", sending: "Запрос отправляется", unknown: "Результат неизвестен", pending: "Ожидает оплаты", waiting_for_capture: "Ожидает подтверждения", succeeded: "Оплачен", canceled: "Отменён", needs_attention: "Требует проверки" };
+  const reasons = { user_canceled: "Отмена пользователем", account_merged: "Привязка аккаунтов — нужно новое согласие", method_not_saved: "Способ оплаты не сохранён", insufficient_funds: "Недостаточно средств", payment_result_unknown: "Результат платежа не подтверждён", verification_failed: "Данные платежа требуют проверки" };
   return `
     ${renderAdminPageHead("Платежи", "Статусы оплат, сумма и последние события YooKassa.")}
+    <section class="admin-section"><h3>Подписка Plus · 200 ₽ каждые 30 дней</h3>
+      <p class="hint">${billing.enabled && billing.renewals_enabled ? "Подключение и автоматические продления включены." : "Подключение или автоматические продления выключены. Новые автоплатежи не отправляются."}</p>
+      <div class="summary-grid admin-summary">
+        ${renderAdminMetric("Первые плательщики за 30 дней", billing.initial_payers_30d || 0, "Уникальные пользователи с подтверждённой первой оплатой")}
+        ${renderAdminMetric("Пользователи с продлением за 30 дней", billing.renewed_users_30d || 0, "Уникальные пользователи с подтверждённым автоплатежом")}
+        ${renderAdminMetric("Оплаченные продления", billing.paid_renewal_cycles_30d || 0, `Из ${billing.renewal_cycles_30d || 0} циклов с созданной попыткой за 30 дней; повторная попытка не добавляет цикл`)}
+        ${renderAdminMetric("Оплаты подписки за 30 дней", `${billing.revenue_30d_rub || 0} ₽`, "Первая оплата и продления, подтверждённые ЮKassa; до комиссий и возвратов")}
+        ${renderAdminMetric("Платежи для проверки", billing.unresolved_count || 0, "Неизвестный результат или несовпадение данных; в том числе после отмены подписки")}
+      </div>
+    </section>
+    ${renderAdminTable("Текущее состояние подписок", billing.states || [], [
+      { key: "state", label: "Состояние", render: (row) => adminCell(states[row.state] || row.state) },
+      { key: "users", label: "Пользователей" }
+    ], "Подписки ещё не подключали.")}
+    ${renderAdminTable("События подписки за 30 дней", billing.events_30d || [], [
+      { key: "kind", label: "Событие", render: (row) => adminCell(events[row.kind] || row.kind) },
+      { key: "events", label: "Событий" },
+      { key: "users", label: "Уникальных пользователей" }
+    ], "Событий подписки пока нет.")}
+    ${renderAdminTable("Последние подключения подписки", billing.recent || [], [
+      { key: "id", label: "ID" }, { key: "user_id", label: "Пользователь" },
+      { key: "state", label: "Состояние", render: (row) => adminCell(states[row.state] || row.state) },
+      { key: "auto_renew", label: "Автопродление", render: (row) => adminCell(row.auto_renew ? "Включено" : "Отключено") },
+      { key: "payment_status", label: "Последний платёж", render: (row) => adminCell(chargeStates[row.payment_status] || row.payment_status || "—") },
+      { key: "next_charge_at", label: "Следующая попытка", render: (row) => !row.auto_renew ? "—" : row.next_retry_at ? formatDateTime(row.next_retry_at) : row.payment_kind === "renewal" && ["sending", "unknown", "pending", "waiting_for_capture", "needs_attention"].includes(row.payment_status) ? "Проверяется" : formatDateTime(row.next_charge_at) },
+      { key: "reason", label: "Причина", render: (row) => adminCell(reasons[row.reason] || row.reason || "—") }
+    ], "Подключений пока нет.")}
+    ${(billing.unresolved || []).length ? renderAdminTable("Платежи, требующие сверки с ЮKassa", billing.unresolved, [
+      { key: "id", label: "Попытка" }, { key: "agreement_id", label: "Подписка" }, { key: "user_id", label: "Пользователь" },
+      { key: "status", label: "Состояние", render: (row) => adminCell(chargeStates[row.status] || row.status) },
+      { key: "provider_payment_id", label: "ID ЮKassa" },
+      { key: "created_at", label: "Создан", render: (row) => formatDateTime(row.created_at) }
+    ]) + '<p class="hint">Показаны первые 50 нерешённых попыток. До подтверждения результата новый платёж для этих аккаунтов не создаётся.</p>' : ""}
     ${renderAdminTable("Платежи по статусам", data.payments_by_status || [], [
       { key: "status", label: "Статус" },
       { key: "count", label: "Кол-во" },
@@ -3971,6 +3980,7 @@ function applyAccountState(data) {
   state.user = data.user || null;
   state.externalAccounts = data.external_accounts || [];
   state.subscription = data.subscription || null;
+  state.billing = data.billing || null;
   state.telegramProfileSync = data.telegram_profile_sync || null;
   state.lastSyncCheckAt = new Date().toISOString();
   if (state.user?.id) void retentionActivity(api);
@@ -3981,6 +3991,7 @@ function clearAccountState() {
   state.user = null;
   state.externalAccounts = [];
   state.subscription = null;
+  state.billing = null;
   state.pets = [];
   state.currentPetId = null;
   state.pushConfig = null;
@@ -5575,6 +5586,7 @@ async function checkPlusPaymentStatus(options = {}) {
       : "/api/payments/plus/status";
     const data = await api(path);
     state.subscription = data.subscription || state.subscription;
+    await refreshAccountState();
     if (options.silentNotFound && data.status === "not_found") {
       renderSubscription();
       return;
@@ -5610,6 +5622,33 @@ function renderSubscription(statusHtml = "") {
   const quotaLeft = Number.isFinite(Number(sub.quota_left)) ? Number(sub.quota_left) : Math.max(0, quotaTotal - quotaUsed);
   const periodEnd = sub.period_end ? formatDateTime(sub.period_end) : "—";
   const canPay = !sub.plan || sub.plan === "free";
+  const b = state.billing || {};
+  const agreement = b.agreement;
+  const subscriptionAvailable = Boolean(b.available);
+  const agreementOpen = agreement && ["pending", "active", "payment_failed", "needs_attention"].includes(agreement.state);
+  let billingStatus = "";
+  if (agreementOpen && agreement.payment_kind === "renewal" && agreement.payment_in_progress) {
+    billingStatus = '<div class="notice">Проверяем оплату продления Plus. Новый платёж не создаётся. Последующие продления можно отменить в кабинете.</div>';
+  } else if (agreement?.state === "active" && agreement.auto_renew) {
+    billingStatus = b.available
+      ? `<p><strong>Следующее списание:</strong> 200 ₽ · ${escapeHtml(formatDateTime(agreement.next_charge_at))}.</p><p>${escapeHtml(agreement.method_label || "Сохранённый способ оплаты")}</p>`
+      : '<p>Автопродление временно приостановлено. Plus действует до конца оплаченного срока. Подписку можно отменить в кабинете.</p>';
+  } else if (agreement?.state === "payment_failed") {
+    billingStatus = `<div class="notice warning">Не получилось продлить Plus: не хватило средств. Повторим один раз ${agreement.next_retry_at ? escapeHtml(formatDateTime(agreement.next_retry_at)) : "через сутки после неудачной оплаты"}. Подписку можно отменить сейчас.</div>`;
+  } else if (agreement?.state === "needs_attention" || (agreement?.state === "pending" && agreement.payment_in_progress)) {
+    billingStatus = `<div class="notice">${agreement.confirmation_url ? "Оплата подписки ещё не завершена. Можно продолжить на странице ЮKassa." : "Платёж ещё проверяется. Новый платёж не создаётся. Проверьте статус оплаты или напишите в поддержку."}</div>`;
+  } else if (agreement?.state === "pending") {
+    billingStatus = `<p>Подписка ждёт подтверждения оплаты.</p>`;
+  } else if (agreement?.state === "canceled") {
+    billingStatus = `<p>Автопродление отключено. ${agreement.reason === "method_not_saved" ? "ЮKassa не сохранила способ оплаты для продлений. " : ""}Оплаченный доступ останется до конца срока.</p>`;
+  }
+  const subscriptionForm = `
+    <form id="plusSubscriptionForm" class="form-grid one-column">
+      ${state.user?.email ? "" : '<label>Почта для чека<input name="receipt_email" type="email" autocomplete="email" required></label>'}
+      <label class="checkbox-row"><input name="terms" type="checkbox" required>Принимаю <a href="/offer" target="_blank" rel="noopener">условия подписки Plus</a>.</label>
+      <label class="checkbox-row"><input name="autorenew" type="checkbox" required>${escapeHtml(b.consent_text || "")}</label>
+      <button class="primary-button" type="submit" disabled>Подписаться — 200 ₽ за 30 дней</button>
+    </form>`;
   const telegramConnected = isProviderConnected("telegram");
   setWorkspace(`
     <div class="workspace-head">
@@ -5627,11 +5666,16 @@ function renderSubscription(statusHtml = "") {
       </div>
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
       ${telegramConnected || sub.source === "telegram" ? `<p class="hint">Сайт и Telegram используют один аккаунт и одну подписку.</p>` : ""}
-      ${canPay ? `
+      ${billingStatus}
+      ${agreement?.confirmation_url ? `<a class="primary-button" href="${escapeHtml(agreement.confirmation_url)}">Продолжить оплату</a>` : ""}
+      ${agreementOpen ? `<button class="secondary-button" id="cancelPlusSubscription" type="button">Отменить подписку</button>` : ""}
+      ${agreement?.payment_in_progress ? '<p class="hint">Если платёж уже отправлен в ЮKassa, проверим его результат. Отмена остановит следующие списания.</p>' : ""}
+      ${canPay && !agreementOpen && subscriptionAvailable ? subscriptionForm : canPay && !agreementOpen ? `
         <button class="primary-button icon-text-button" data-action="pay-plus" type="button">${renderAppIcon("credit-card")}<span>Подключить Plus — 200 ₽</span></button>
-      ` : `
+      ` : sub.plan && sub.plan !== "free" ? `
         <div class="notice success">Plus активен.</div>
-      `}
+      ` : ""}
+      ${!canPay && subscriptionAvailable && !agreement ? '<p>Текущий Plus оплачен разово. Автосписаний по нему нет. Подписку можно подключить после окончания оплаченного срока.</p>' : ""}
       <div id="paymentResult">${statusHtml}</div>
     </section>
     <section class="profile-card subscription-benefits-card">
@@ -5643,11 +5687,49 @@ function renderSubscription(statusHtml = "") {
         <li>сводка за 30/90 дней или всё время;</li>
         <li>печать и сохранение сводки в PDF.</li>
       </ul>
-      <p class="legal-price-note">200 ₽ за 30 дней. Оплата разовая, автосписаний нет.</p>
+      <p class="legal-price-note">${subscriptionAvailable || agreement ? "200 ₽ каждые 30 дней. Автоматическое продление — только с вашим согласием. Отменить подписку можно в кабинете." : "200 ₽ за 30 дней. Оплата разовая, автосписаний нет."}</p>
       <p class="hint">После окончания Plus данные не удаляются. Питомцы и записи сверх Free остаются доступны для чтения.</p>
-      ${canPay ? `<button class="text-button" data-action="check-plus-payment" type="button">Проверить статус оплаты</button>` : ""}
+      ${canPay || agreement?.payment_in_progress ? `<button class="text-button" data-action="check-plus-payment" type="button">Проверить статус оплаты</button>` : ""}
     </section>
   `);
+  const form = document.querySelector("#plusSubscriptionForm");
+  if (form) {
+    const submit = form.querySelector('button[type="submit"]');
+    form.addEventListener("input", () => { submit.disabled = !form.checkValidity(); });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!form.checkValidity()) return;
+      submit.disabled = true;
+      try {
+        const data = await api("/api/billing/subscription/start", { method: "POST", body: JSON.stringify({
+          accepted_terms: form.elements.terms.checked, accepted_autorenew: form.elements.autorenew.checked,
+          terms_version: b.terms_version, receipt_email: form.elements.receipt_email?.value || null
+        }) });
+        if (data.payment_id) {
+          state.lastPlusPaymentId = data.payment_id;
+          localStorage.setItem("tvv_last_plus_payment_id", data.payment_id);
+        }
+        if (data.confirmation_url) window.location.href = data.confirmation_url;
+        else { await refreshAccountState(); renderSubscription(paymentStatusNotice(data.message)); }
+      } catch (error) {
+        const el = document.querySelector("#paymentResult");
+        if (el) el.innerHTML = paymentStatusNotice(readableError(error.message), "danger");
+        submit.disabled = false;
+      }
+    });
+  }
+  document.querySelector("#cancelPlusSubscription")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      state.billing = await api("/api/billing/subscription/cancel", { method: "POST" });
+      await refreshAccountState();
+      renderSubscription(paymentStatusNotice("Автопродление отключено. Оплаченный доступ сохранён.", "success"));
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      const el = document.querySelector("#paymentResult");
+      if (el) el.innerHTML = paymentStatusNotice(readableError(error.message), "danger");
+    }
+  });
 }
 
 function renderFeedback() {
@@ -6088,8 +6170,9 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("click", async (event) => {
   const legalButton = event.target.closest("[data-open-legal]");
   if (legalButton) {
-    event.preventDefault();
     const legalType = legalButton.dataset.openLegal;
+    if (legalType === "offer") return;
+    event.preventDefault();
     if (legalButton.getAttribute("href") && legalPathMap[legalButton.getAttribute("href")]) {
       window.history.pushState({}, "", legalButton.getAttribute("href"));
     }

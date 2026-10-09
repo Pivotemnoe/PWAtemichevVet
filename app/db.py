@@ -1817,6 +1817,8 @@ def merge_users(db_path: Path, *, source_user_id: int, target_user_id: int) -> d
 
         from app.retention import merge_identity
         merge_identity(cur, source_id, target_id)
+        from app.billing import merge_identity as merge_billing_identity
+        merge_billing_identity(cur, source_id, target_id)
         cur.execute("DELETE FROM users WHERE id = ?", (source_id,))
         conn.commit()
         cur.execute("SELECT * FROM users WHERE id = ?", (target_id,))

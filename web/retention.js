@@ -81,6 +81,8 @@ export async function notificationSettings(api, setWorkspace, escapeHtml) {
 }
 
 const scenarioNames = {
+  billing_renewal: "Перед продлением Plus", billing_success: "Оплата Plus",
+  billing_failed: "Неудачная оплата Plus", billing_canceled: "Отмена автопродления",
   first_pet: "Первый питомец", first_record: "Первая запись",
   history: "История здоровья", followup: "Самочувствие после оценки",
   date: "Важная дата", install: "Установка приложения"
@@ -91,6 +93,7 @@ const statusNames = {
   unknown: "Результат неизвестен", skipped: "Нет доступного канала", cancelled: "Отменено"
 };
 const reasonNames = {
+  subscription_changed: "Условия подписки изменились — напоминание отменено",
   channel_unavailable: "Канал недоступен", disabled: "Сообщения отключены",
   account_merged: "Аккаунты объединены — повтор отменён",
   weekly_disabled: "Недельные предложения отключены", expired: "Срок сообщения истёк",

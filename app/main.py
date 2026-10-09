@@ -26,7 +26,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import db, retention
+from app import db, retention, billing
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
 from app.followups import detect_followup_scenario, followup_due_at, followup_payload
@@ -119,6 +119,7 @@ async def _app_lifespan(_: FastAPI):
 app = FastAPI(title="TemichevVet PWA API", version="0.1.0", lifespan=_app_lifespan)
 db.init_db(settings.database_path)
 retention.init_schema(settings.database_path)
+billing.init_schema(settings.database_path)
 app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 logger = logging.getLogger(__name__)
 _payment_create_lock = threading.Lock()
@@ -3652,19 +3653,10 @@ def _activate_plus_from_valid_payment(*, user: dict, payment: dict[str, Any], re
         expected_user_id=int(record["user_id"]),
         expected_amount_rub=int(record["amount_rub"]),
     )
-    paid_at = str(payment.get("captured_at") or utc_now().isoformat())
-    db.update_payment_status(
-        settings.database_path,
-        provider=YOOKASSA_PROVIDER,
-        provider_payment_id=str(record["provider_payment_id"]),
-        status="succeeded",
-        paid_at=paid_at,
-        raw_payload=payment,
-    )
-    activate_paid_subscription(settings, user_id=int(user["id"]), plan_code="plus", days=PLUS_DAYS)
+    changed = billing.settle_oneoff(settings, record, payment)
     effective = get_effective_subscription(settings, user).to_public()
     _safe_enqueue_subscription_after_payment(effective)
-    if str(record.get("status") or "") != "succeeded":
+    if changed:
         _audit(
             None,
             "payment.succeeded",
@@ -3735,6 +3727,21 @@ def _refresh_yookassa_payment_for_user(*, record: dict[str, Any], user: dict) ->
         )
         raise HTTPException(status_code=502, detail="payment_provider_error") from exc
 
+    try:
+        subscription_payment = billing.safely_apply(settings, payment)
+    except YooKassaPaymentValidationError as exc:
+        _audit(None,"payment.validation_failed",user_id=int(user["id"]),provider=YOOKASSA_PROVIDER,
+               status="error",actor="provider",metadata={"error":type(exc).__name__})
+        raise HTTPException(409,"payment_verification_failed") from exc
+    if subscription_payment is not None:
+        effective = get_effective_subscription(settings,user).to_public()
+        _safe_enqueue_subscription_after_payment(effective)
+        status = subscription_payment["status"]
+        if status=="succeeded" and subscription_payment["changed"]:
+            _audit(None,"payment.succeeded",user_id=int(user["id"]),provider=YOOKASSA_PROVIDER,status="ok",actor="provider",
+                   entity_type="payment",entity_id=str(payment["id"]),metadata={"amount_rub":200,"billing":True})
+        return PaymentStatusResponse(ok=status not in {"canceled","invalid"},status=status,
+            payment_id=str(record["provider_payment_id"]),message=_payment_message(status),subscription=effective)
     status = yookassa_payment_status(payment)
     if status == "succeeded":
         try:
@@ -3837,6 +3844,13 @@ async def _payment_reconcile_loop() -> None:
                 force=first_run,
             )
             first_run = False
+            billing_summary = await asyncio.to_thread(billing.run, settings)
+            if billing_summary["checked"]:
+                logger.info("Automatic subscription reconcile: %s", billing_summary)
+            for uid in billing_summary.get("paid_users",[]):
+                account = db.get_user_by_id(settings.database_path,user_id=uid)
+                if account:
+                    _safe_enqueue_subscription_after_payment(get_effective_subscription(settings,account).to_public())
             if summary["checked"] or summary["changed"] or summary["failed"]:
                 logger.info("Automatic YooKassa reconcile: %s", summary)
         except asyncio.CancelledError:
@@ -3899,7 +3913,17 @@ def review_login(request: Request, token: str = Query(default="", max_length=256
 
 @app.get("/")
 @app.head("/", include_in_schema=False)
-def index() -> FileResponse:
+def index() -> Response:
+    return _index_response()
+
+
+def _index_response() -> Response:
+    if billing.enabled() and billing.renewals_enabled():
+        source = (WEB_ROOT / 'index.html').read_text(encoding='utf-8')
+        source = source.replace('Платная услуга сервиса — доступ Plus на 30 дней. Оплата разовая, автосписаний нет. После окончания срока доступ возвращается на Free.',
+            'Plus — подписка за 200 ₽ каждые 30 дней. Автоматическое продление подключается только с вашим согласием. Отменить подписку можно в кабинете; оплаченный доступ сохранится до конца срока.')
+        source = source.replace('<span>200 ₽ за 30 дней</span>','<span>200 ₽ каждые 30 дней</span>')
+        return HTMLResponse(source,headers={'Cache-Control':'no-store'})
     return FileResponse(WEB_ROOT / "index.html")
 
 
@@ -4198,6 +4222,7 @@ def admin_logout(request: Request, response: Response, token: str = Depends(_req
 def admin_dashboard(request: Request, _: dict = Depends(current_admin_session)) -> dict:
     payload = _admin_dashboard_payload()
     payload["retention"] = retention.stats(settings)
+    payload["billing"] = billing.stats(settings)
     _audit(request, "admin.dashboard_view", status="ok", actor="admin")
     return payload
 
@@ -5173,6 +5198,7 @@ def me(request: Request, response: Response, token: str = Depends(_require_beare
         "user": user,
         "external_accounts": db.list_external_accounts(settings.database_path, user_id=int(user["id"])),
         "subscription": get_effective_subscription(settings, user).to_public(),
+        "billing": billing.public_state(settings,user),
         "telegram_profile_sync": telegram_profile_sync,
     }
 
@@ -5337,6 +5363,10 @@ def payment_plus_create(request: Request, user: dict = Depends(current_user)) ->
 
 def _payment_plus_create_locked(request: Request, user: dict) -> PaymentCreateResponse:
     sub = get_effective_subscription(settings, user)
+    if billing.enabled() and billing.renewals_enabled():
+        raise HTTPException(409,"use_subscription_checkout")
+    if billing.blocks_oneoff(settings,user):
+        raise HTTPException(409,"subscription_already_exists")
     if _is_review_user(user):
         _audit(request, "payment.create_blocked", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="warning", actor="user", metadata={"reason": "review_account"})
         return PaymentCreateResponse(
@@ -6871,7 +6901,9 @@ def _legal_page_response(page_key: str) -> HTMLResponse:
     description = str(page["description"])
     path = str(page["path"])
     canonical = f"{settings.app_base_url.rstrip('/')}{path}"
-    sections = "".join(_legal_section_html(section) for section in page["sections"])
+    page_sections = billing.offer_sections(page["sections"]) if page_key == 'offer' else page["sections"]
+    updated_at = '09.10.2026' if page_key == 'offer' and billing.enabled() and billing.renewals_enabled() else LEGAL_UPDATED_AT
+    sections = "".join(_legal_section_html(section) for section in page_sections)
     page_html = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -6885,7 +6917,7 @@ def _legal_page_response(page_key: str) -> HTMLResponse:
 <body class="legal-standalone">
   <main class="legal-standalone-page">
     <article class="legal-document">
-      <p class="legal-meta">TemichevVet · редакция от {html.escape(LEGAL_UPDATED_AT)}</p>
+      <p class="legal-meta">TemichevVet · редакция от {html.escape(updated_at)}</p>
       <h1>{html.escape(title)}</h1>
       <p>{html.escape(description)}</p>
       {sections}
@@ -6992,11 +7024,15 @@ def service_worker_script() -> FileResponse:
     return response
 
 
+billing.install_routes(app,settings,current_user,current_admin_session,_require_monitoring_api_secret,
+                      get_effective_subscription,_audit,_track_funnel,_is_review_user)
+
+
 @app.get("/{path:path}")
-def spa_fallback(path: str) -> FileResponse:
+def spa_fallback(path: str) -> Response:
     if path.startswith("api/"):
         raise HTTPException(status_code=404, detail="not_found")
-    return FileResponse(WEB_ROOT / "index.html")
+    return _index_response()
 
 
 if __name__ == "__main__":
