@@ -1,4 +1,4 @@
-import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261009-subscription-6";
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261009-subscription-7";
 
 const legacySessionToken = localStorage.getItem("tvv_token") || "";
 
@@ -5668,7 +5668,9 @@ function renderSubscription(statusHtml = "") {
       ${telegramConnected || sub.source === "telegram" ? `<p class="hint">Сайт и Telegram используют один аккаунт и одну подписку.</p>` : ""}
       ${billingStatus}
       ${agreement?.confirmation_url ? `<a class="primary-button" href="${escapeHtml(agreement.confirmation_url)}">Продолжить оплату</a>` : ""}
-      ${agreementOpen ? `<button class="secondary-button" id="cancelPlusSubscription" type="button">Отменить подписку</button>` : ""}
+      <button class="secondary-button" id="cancelPlusSubscription" type="button">${agreementOpen ? "Отменить подписку" : "Отвязать способ оплаты"}</button>
+      <p class="hint">Способ оплаты отвяжется, следующие списания отключатся. Оплаченный доступ сохранится до конца срока.</p>
+      ${!agreement ? '<p class="hint">Сохранённого способа оплаты нет. Автопродление выключено.</p>' : ""}
       ${agreement?.payment_in_progress ? '<p class="hint">Если платёж уже отправлен в ЮKassa, проверим его результат. Отмена остановит следующие списания.</p>' : ""}
       ${canPay && !agreementOpen && subscriptionAvailable ? subscriptionForm : canPay && !agreementOpen ? `
         <button class="primary-button icon-text-button" data-action="pay-plus" type="button">${renderAppIcon("credit-card")}<span>Подключить Plus — 200 ₽</span></button>
@@ -5723,7 +5725,7 @@ function renderSubscription(statusHtml = "") {
     try {
       state.billing = await api("/api/billing/subscription/cancel", { method: "POST" });
       await refreshAccountState();
-      renderSubscription(paymentStatusNotice("Автопродление отключено. Оплаченный доступ сохранён.", "success"));
+      renderSubscription(paymentStatusNotice("Способ оплаты отвязан. Автопродление отключено. Оплаченный доступ сохранён.", "success"));
     } catch (error) {
       event.currentTarget.disabled = false;
       const el = document.querySelector("#paymentResult");
