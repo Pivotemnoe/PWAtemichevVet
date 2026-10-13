@@ -1,4 +1,5 @@
-import { appMode, native } from './platform.js?v=20261013-mobile-8';
+import { petAvatar } from './pet-avatar.js?v=20261013-mobile-13';
+import { appMode, native } from './platform.js?v=20261013-mobile-13';
 
 export const APP_TABS = [
   ['home', 'Главная', 'house'], ['pets', 'Питомцы', 'paw-print'],
@@ -12,13 +13,13 @@ Object.assign(titles, { history: 'История', observations: 'Наблюде
 
 export function mobileDashboardMarkup() {
   return `<section id="dashboardView" class="dashboard-view mobile-dashboard" hidden>
-    <header class="mobile-header">
+    <div class="mobile-chrome"><header class="mobile-header">
       <button type="button" class="mobile-back" data-mobile-back aria-label="Назад" hidden>${icon('chevron-left')}</button>
       <img class="mobile-logo" src="/static/assets/app-icon-192.png" width="48" height="48" alt="" />
       <div><span class="mobile-brand">TemichevVet</span><h1 id="mobilePageTitle">Главная</h1></div>
       <button type="button" class="mobile-profile" data-action="account" aria-label="Профиль">${icon('user-round')}</button>
     </header>
-    <div id="mobileConnection" class="mobile-connection" role="status" hidden>Нет интернета. Проверьте соединение.<button type="button" data-mobile-retry>Повторить</button></div>
+    <div id="mobileConnection" class="mobile-connection" role="status" hidden>Нет интернета. Проверьте соединение.<button type="button" data-mobile-retry>Повторить</button></div></div>
     <div id="workspace" class="workspace mobile-workspace" aria-live="polite"></div>
     <nav class="mobile-tabbar" aria-label="Основное меню">
       ${APP_TABS.map(([action, title, name]) => `<button class="app-nav-item${action === 'home' ? ' is-active' : ''}" data-action="${action}" type="button"${action === 'home' ? ' aria-current="page"' : ''}>${icon(name)}<span>${title}</span></button>`).join('')}
@@ -51,7 +52,7 @@ export function renderMobileHome({ pet, details, followups, escape, date }) {
     <figure class="mobile-companions-photo home-photo"><img src="/static/assets/mobile/companions-v1.webp" alt="" width="1200" height="634" /><figcaption><strong>Здоровье питомца</strong><span>В одной истории</span></figcaption></figure>
     <div class="mobile-section-heading"><h2>Мой питомец</h2><button class="text-button" data-action="pets" type="button">Все питомцы</button></div>
     ${pet ? `<button class="mobile-pet-card" type="button" data-open-pet="${Number(pet.id)}">
-      <span class="mobile-pet-avatar">${icon('paw-print')}</span><span><small>${escape(pet.pet_type || '')}</small><strong>${escape(pet.pet_name)}</strong><span>${weight ? `${escape(weight.weight_kg)} кг` : 'Открыть карточку'}</span></span>${icon('chevron-left')}
+      <span class="mobile-pet-avatar">${petAvatar(pet)}</span><span><small>${escape(pet.pet_type || '')}</small><strong>${escape(pet.pet_name)}</strong><span>${weight ? `${escape(weight.weight_kg)} кг` : 'Открыть карточку'}</span></span>${icon('chevron-left')}
     </button>` : `<section class="mobile-add-pet"><div class="mobile-welcome-symbol">${icon('paw-print')}</div><h3>Добавьте питомца</h3><p>Начните его историю здоровья.</p><button class="primary-button" type="button" data-action="pets">Добавить питомца</button></section>`}
     <div class="mobile-section-heading"><h2>Быстрые действия</h2></div>
     <div class="mobile-quick-grid">
@@ -92,11 +93,6 @@ export function initMobileShell({ user, login, navigate, back, retry }) {
       void (backButton ? back() : retry());
     }
   }, true);
-  const updateNetwork = () => {
-    const banner = document.querySelector('#mobileConnection');
-    if (banner) banner.hidden = navigator.onLine;
-  };
-  addEventListener('online', updateNetwork); addEventListener('offline', updateNetwork);
   document.addEventListener('tvv:navigate', (event) => navigate(event.detail));
 }
 

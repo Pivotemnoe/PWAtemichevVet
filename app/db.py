@@ -170,6 +170,7 @@ def init_db(db_path: Path) -> None:
         _ensure_column(cur, "pets", "sex", "TEXT")
         _ensure_column(cur, "pets", "weight_kg", "REAL")
         _ensure_column(cur, "pets", "breed", "TEXT")
+        _ensure_column(cur, "pets", "photo_data_url", "TEXT")
         _ensure_column(cur, "pets", "is_main", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(cur, "pets", "external_source", "TEXT")
         _ensure_column(cur, "pets", "external_id", "TEXT")
@@ -233,6 +234,8 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_observations_pet ON pet_observations(pet_id, created_at)")
+        _ensure_column(cur, "pet_observations", "client_request_id", "TEXT")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pet_observations_client_request ON pet_observations(user_id, pet_id, client_request_id)")
         _ensure_column(cur, "pet_observations", "external_source", "TEXT")
         _ensure_column(cur, "pet_observations", "external_id", "TEXT")
         cur.execute(
@@ -257,6 +260,8 @@ def init_db(db_path: Path) -> None:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pet_measurements_pet ON pet_measurements(pet_id, created_at)")
+        _ensure_column(cur, "pet_measurements", "client_request_id", "TEXT")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pet_measurements_client_request ON pet_measurements(pet_id, client_request_id)")
         _ensure_column(cur, "pet_measurements", "external_source", "TEXT")
         _ensure_column(cur, "pet_measurements", "external_id", "TEXT")
         cur.execute(
@@ -289,6 +294,8 @@ def init_db(db_path: Path) -> None:
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active, due_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reminders_pet ON reminders(pet_id, is_active, due_date)")
+        _ensure_column(cur, "reminders", "client_request_id", "TEXT")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_client_request ON reminders(user_id, client_request_id)")
         _ensure_column(cur, "reminders", "external_source", "TEXT")
         _ensure_column(cur, "reminders", "external_id", "TEXT")
         cur.execute(
@@ -2442,15 +2449,21 @@ def create_measurement(
     pet_id: int,
     weight_kg: float,
     note: str | None = None,
+    client_request_id: str | None = None,
 ) -> dict[str, Any] | None:
     if not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
         return None
     now = utc_now_iso()
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
+        if client_request_id:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT * FROM pet_measurements WHERE pet_id = ? AND client_request_id = ?", (int(pet_id), client_request_id)).fetchone()
+            if existing:
+                return {**dict(existing), "_idempotent": True}
         cur.execute(
-            "INSERT INTO pet_measurements (pet_id, created_at, weight_kg, note) VALUES (?, ?, ?, ?)",
-            (int(pet_id), now, float(weight_kg), note),
+            "INSERT INTO pet_measurements (pet_id, created_at, weight_kg, note, client_request_id) VALUES (?, ?, ?, ?, ?)",
+            (int(pet_id), now, float(weight_kg), note, client_request_id),
         )
         measurement_id = int(cur.lastrowid)
         cur.execute("UPDATE pets SET weight_kg = ? WHERE id = ?", (float(weight_kg), int(pet_id)))
@@ -2486,18 +2499,24 @@ def create_observation(
     obs_type: str,
     payload: str,
     source: str = "pwa",
+    client_request_id: str | None = None,
 ) -> dict[str, Any] | None:
     if not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
         return None
     now = utc_now_iso()
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
+        if client_request_id:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT * FROM pet_observations WHERE user_id = ? AND pet_id = ? AND client_request_id = ?", (int(owner_id), int(pet_id), client_request_id)).fetchone()
+            if existing:
+                return {**dict(existing), "_idempotent": True}
         cur.execute(
             """
-            INSERT INTO pet_observations (user_id, pet_id, obs_type, payload, source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO pet_observations (user_id, pet_id, obs_type, payload, source, created_at, client_request_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (int(owner_id), int(pet_id), obs_type, payload, source, now),
+            (int(owner_id), int(pet_id), obs_type, payload, source, now, client_request_id),
         )
         observation_id = int(cur.lastrowid)
         cur.execute(
@@ -2535,21 +2554,27 @@ def create_reminder(
     due_time: str | None = None,
     periodicity: str = "once",
     notes: str | None = None,
+    client_request_id: str | None = None,
 ) -> dict[str, Any] | None:
     if pet_id is not None and not get_pet(db_path, owner_id=owner_id, pet_id=pet_id):
         return None
     now = utc_now_iso()
     with closing(connect(db_path)) as conn:
         cur = conn.cursor()
+        if client_request_id:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute("SELECT * FROM reminders WHERE user_id = ? AND client_request_id = ?", (int(owner_id), client_request_id)).fetchone()
+            if existing:
+                return {**dict(existing), "_idempotent": True}
         cur.execute(
             """
             INSERT INTO reminders (
                 user_id, pet_id, reminder_type, title, due_date, due_time,
-                periodicity, notes, is_active, created_at, updated_at
+                periodicity, notes, is_active, created_at, updated_at, client_request_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             """,
-            (int(owner_id), pet_id, reminder_type, title, due_date, due_time, periodicity, notes, now, now),
+            (int(owner_id), pet_id, reminder_type, title, due_date, due_time, periodicity, notes, now, now, client_request_id),
         )
         reminder_id = int(cur.lastrowid)
         if pet_id is not None:
@@ -2816,3 +2841,19 @@ def create_feedback(db_path: Path, *, owner_id: int, text: str, category: str | 
         conn.commit()
         cur.execute("SELECT * FROM feedback WHERE id = ?", (int(cur.lastrowid),))
         return dict(cur.fetchone())
+
+
+def set_pet_photo(db_path: Path, *, owner_id: int, pet_id: int, data_url: str | None) -> dict[str, Any] | None:
+    with closing(connect(db_path)) as conn:
+        updated = conn.execute("UPDATE pets SET photo_data_url = ? WHERE id = ? AND owner_id = ?", (data_url, pet_id, owner_id))
+        conn.commit()
+        if not updated.rowcount:
+            return None
+        return row_to_dict(conn.execute("SELECT * FROM pets WHERE id = ? AND owner_id = ?", (pet_id, owner_id)).fetchone())
+
+
+def get_reminder_by_client_request(db_path: Path, *, owner_id: int, request_id: str | None) -> dict[str, Any] | None:
+    if not request_id:
+        return None
+    with closing(connect(db_path)) as conn:
+        return row_to_dict(conn.execute("SELECT * FROM reminders WHERE user_id = ? AND client_request_id = ?", (owner_id, request_id)).fetchone())

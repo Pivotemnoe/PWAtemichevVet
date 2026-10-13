@@ -20,7 +20,7 @@ window.TVVNative = {
       url: API_BASE + path, method: options.method || 'GET',
       headers: { ...options.headers, 'X-TemichevVet-Client': 'android' },
       data: options.body ? JSON.parse(options.body) : undefined,
-      responseType: 'json', connectTimeout: 15000, readTimeout: 120000
+      responseType: 'json', connectTimeout: (options.method || 'GET') === 'GET' ? 4000 : 15000, readTimeout: 120000
     });
     return new Response(JSON.stringify(result.data), { status: result.status,
       headers: { 'Content-Type': 'application/json' } });

@@ -110,7 +110,7 @@ for (const scenario of ["network", "validation", "pet_limit", "pets_network", "i
     refreshAccountState: async () => {}, attributionRequestHeaders: () => ({}),
     escapeHtml: String, readableError: String, renderAppIcon: () => "",
     setTimeout: (callback) => callback(),
-    native: false,
+    native: false, offlineClient: null,
     appFetch: async (path, options) => {
       requests.push({ path, options });
       if (scenario === "network" || scenario === "pets_network") throw new TypeError("PRIVATE_MEDICAL_CONTENT");

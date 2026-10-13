@@ -27,6 +27,7 @@ from pydantic import BaseModel, EmailStr, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db, retention, billing
+from app.pet_photos import normalize_photo
 from app.config import Settings, get_settings
 from app.emailer import send_login_code
 from app.followups import detect_followup_scenario, followup_due_at, followup_payload
@@ -1108,6 +1109,10 @@ class PetPayload(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=128)
 
 
+class PetPhotoPayload(BaseModel):
+    data_url: str = Field(min_length=30, max_length=2_800_000)
+
+
 class PetPatchPayload(BaseModel):
     pet_type: str | None = Field(default=None, min_length=2, max_length=30)
     pet_name: str | None = Field(default=None, min_length=1, max_length=80)
@@ -1125,17 +1130,20 @@ class MainPetPayload(BaseModel):
 
 
 class MeasurementPayload(BaseModel):
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     weight_kg: float = Field(ge=0.05, le=200)
     note: str | None = Field(default=None, max_length=300)
 
 
 class ObservationPayload(BaseModel):
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     obs_type: str = Field(default="note", max_length=40)
     text: str = Field(min_length=2, max_length=2000)
     triage_id: int | None = Field(default=None, gt=0)
 
 
 class ReminderPayload(BaseModel):
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=128)
     pet_id: int | None = None
     reminder_type: str = Field(default="custom", max_length=40)
     title: str = Field(min_length=2, max_length=120)
@@ -3929,9 +3937,9 @@ def android_download_page() -> FileResponse:
     return FileResponse(WEB_ROOT / 'android.html', media_type='text/html', headers={'Cache-Control': 'no-store'})
 
 
-@app.get('/downloads/TemichevVet-0.1.0.apk', include_in_schema=False)
+@app.get('/downloads/TemichevVet-0.1.1.apk', include_in_schema=False)
 def android_download_apk() -> FileResponse:
-    artifact = PROJECT_ROOT / 'releases' / 'android' / 'TemichevVet-0.1.0.apk'
+    artifact = PROJECT_ROOT / 'releases' / 'android' / 'TemichevVet-0.1.1.apk'
     if not artifact.is_file():
         raise HTTPException(status_code=404, detail='Android build has not been published')
     return FileResponse(artifact, media_type='application/vnd.android.package-archive', filename=artifact.name,
@@ -5221,6 +5229,7 @@ def me(request: Request, response: Response, token: str = Depends(_require_beare
         "subscription": get_effective_subscription(settings, user).to_public(),
         "billing": billing.public_state(settings,user),
         "telegram_profile_sync": telegram_profile_sync,
+        "mobile_features": {"offline_sync": 1, "pet_photos": 1},
     }
 
 
@@ -5853,6 +5862,30 @@ def _pet_what_now(reminders: list[dict], observations: list[dict], weights: list
     return "Добавьте вес, наблюдение или напоминание, чтобы карточка стала полезнее."
 
 
+@app.post("/api/pets/{pet_id}/photo")
+def upload_pet_photo(pet_id: int, payload: PetPhotoPayload, request: Request, user: dict = Depends(current_user)) -> dict:
+    if not db.get_pet(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id):
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
+        raise HTTPException(status_code=404, detail="pet_not_found")
+    try:
+        photo = normalize_photo(payload.data_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    pet = db.set_pet_photo(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, data_url=photo)
+    if not pet:
+        raise HTTPException(status_code=404, detail="pet_not_found")
+    return {"item": _pet_public(pet)}
+
+
+@app.delete("/api/pets/{pet_id}/photo")
+def remove_pet_photo(pet_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
+    pet = db.set_pet_photo(settings.database_path, owner_id=int(user["id"]), pet_id=pet_id, data_url=None)
+    if not pet:
+        _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
+        raise HTTPException(status_code=404, detail="pet_not_found")
+    return {"item": _pet_public(pet)}
+
+
 @app.patch("/api/pets/{pet_id}")
 def update_pet(pet_id: int, payload: PetPatchPayload, request: Request, user: dict = Depends(current_user)) -> dict:
     values = payload.model_dump(exclude_unset=True)
@@ -5935,6 +5968,7 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, request: Request, u
     item = db.create_measurement(
         settings.database_path,
         owner_id=int(user["id"]),
+        client_request_id=payload.client_request_id,
         pet_id=pet_id,
         weight_kg=payload.weight_kg,
         note=_clean_optional_text(payload.note),
@@ -5942,6 +5976,8 @@ def add_pet_weight(pet_id: int, payload: MeasurementPayload, request: Request, u
     if not item:
         _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
+    if item.pop("_idempotent", False):
+        return {"item": item, "idempotent": True}
     sync_result = _safe_sync_pwa_measurement_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
         sync_result,
@@ -5987,6 +6023,7 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, request: Reque
     item = db.create_observation(
         settings.database_path,
         owner_id=int(user["id"]),
+        client_request_id=payload.client_request_id,
         pet_id=pet_id,
         obs_type=_clean_text(payload.obs_type, "note"),
         payload=body,
@@ -5994,6 +6031,8 @@ def add_pet_observation(pet_id: int, payload: ObservationPayload, request: Reque
     if not item:
         _audit_ownership_denied(request, user, entity_type="pet", entity_id=pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
+    if item.pop("_idempotent", False):
+        return {"item": _parse_json_payload(item), "idempotent": True}
     sync_result = _safe_sync_pwa_observation_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
         sync_result,
@@ -6017,10 +6056,14 @@ def reminders(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/reminders")
 def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depends(current_user)) -> dict:
+    existing = db.get_reminder_by_client_request(settings.database_path, owner_id=int(user["id"]), request_id=payload.client_request_id)
+    if existing:
+        return {"item": existing, "idempotent": True}
     _enforce_reminder_creation_limit(user)
     item = db.create_reminder(
         settings.database_path,
         owner_id=int(user["id"]),
+        client_request_id=payload.client_request_id,
         pet_id=payload.pet_id,
         reminder_type=_clean_text(payload.reminder_type, "custom"),
         title=_clean_text(payload.title),
@@ -6033,6 +6076,8 @@ def add_reminder(payload: ReminderPayload, request: Request, user: dict = Depend
         if payload.pet_id is not None:
             _audit_ownership_denied(request, user, entity_type="pet", entity_id=payload.pet_id)
         raise HTTPException(status_code=404, detail="pet_not_found")
+    if item.pop("_idempotent", False):
+        return {"item": item, "idempotent": True}
     sync_result = _safe_sync_pwa_reminder_to_telegram(user, item)
     _enqueue_core_outbound_from_sync(
         sync_result,

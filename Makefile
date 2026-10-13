@@ -19,6 +19,8 @@ check:
 	$(NODE) scripts/test_frontend_attribution.mjs
 	$(NODE) scripts/test_check_save_flow.mjs
 	$(NODE) scripts/test_check_save_validation.mjs
+	$(PYTHON) -m unittest scripts.test_mobile_api scripts.test_pet_photos_offline
+	$(NODE) --test scripts/test_mobile.mjs scripts/test_offline.mjs
 	$(NODE) --check web/app.js
 	$(NODE) --check web/retention.js
 	$(NODE) --check web/sw.js

@@ -1,12 +1,12 @@
 {
   "name": "temichevvet-mobile",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
     "mobile:build": "node mobile/build.mjs",
     "mobile:sync": "npm run mobile:build && cap sync android",
-    "mobile:test": "node --test scripts/test_mobile.mjs"
+    "mobile:test": "node --test scripts/test_mobile.mjs scripts/test_offline.mjs"
   },
   "dependencies": {
     "@capacitor/core": "8.5.3",

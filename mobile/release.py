@@ -49,10 +49,10 @@ command = [args.gradle, '-p', str(ROOT / 'android')]
 if args.maven_init:
     command += ['-I', str(args.maven_init.resolve())]
 subprocess.run(command + [':app:assembleRelease', ':app:bundleRelease', ':app:testReleaseUnitTest', '--console=plain'], cwd=ROOT, env=env, check=True)
-out = ROOT / 'output/mobile/0.1.0'
+out = ROOT / 'output/mobile/0.1.1'
 out.mkdir(parents=True, exist_ok=True)
-apk = out / 'TemichevVet-0.1.0.apk'
-bundle = out / 'TemichevVet-0.1.0.aab'
+apk = out / 'TemichevVet-0.1.1.apk'
+bundle = out / 'TemichevVet-0.1.1.aab'
 shutil.copy2(ROOT / 'android/app/build/outputs/apk/release/app-release.apk', apk)
 shutil.copy2(ROOT / 'android/app/build/outputs/bundle/release/app-release.aab', bundle)
 sdk = ROOT / '.mobile-tools/sdk/build-tools/36.0.0'

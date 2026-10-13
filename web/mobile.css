@@ -144,3 +144,10 @@
 .mobile-loading img { width: 72px; height: 72px; border-radius: 22px; background: white; padding: 8px; }
 .mobile-loading h2 { margin: 20px 0 8px; font-size: 20px; }
 .mobile-loading p { margin: 0; color: #6d8296; }
+
+.mobile-pet-avatar { overflow: hidden; }
+.mobile-connection { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.mobile-connection[hidden] { display: none; }
+
+.mobile-chrome { position: sticky; top: 0; z-index: 20; }
+.mobile-chrome .mobile-header { position: static; }

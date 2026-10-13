@@ -78,7 +78,7 @@ function definition(name) {
   const ctx = {
     state: { token: "" },
     attributionRequestHeaders: () => ({}),
-    native: false,
+    native: false, offlineClient: null,
     appFetch: async () => { throw new TypeError("offline"); },
   };
   vm.createContext(ctx);

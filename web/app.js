@@ -1,6 +1,12 @@
-import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-8";
-import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-8";
-import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-8";
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-13";
+import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-13";
+import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-13";
+
+import { OfflineClient, indexedWorkspace } from "./offline-store.js?v=20261013-mobile-13";
+import { petAvatar, preparePetPhoto } from "./pet-avatar.js?v=20261013-mobile-13";
+
+const offlineClient = appMode ? new OfflineClient({ transport: appFetch, storage: indexedWorkspace(),
+  changed: (status) => window.dispatchEvent(new CustomEvent('tvv:offline-state', { detail: status })) }) : null;
 
 let mobileRoute = { action: "home" };
 let mobileHistory = [];
@@ -891,6 +897,9 @@ function closePetOnboarding() {
 }
 
 async function performLogout() {
+  if (offlineClient?.status().pending && !window.confirm('На устройстве есть записи, ещё не отправленные в базу. При выходе они будут удалены с устройства. Выйти?')) return;
+  if (appMode) localStorage.setItem("tvv_user_logged_out", "1");
+  if (offlineClient) await offlineClient.clear();
   try {
     await api("/api/auth/logout", { method: "POST", body: "{}" });
   } catch {
@@ -912,6 +921,11 @@ function readableError(message) {
     return "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.";
   }
   const messages = {
+    validation_error: "Проверьте заполнение полей: дату, заголовок и значения записей.",
+    pet_photo_invalid: "Не удалось открыть фото. Выберите изображение JPEG, PNG или WebP.",
+    pet_photo_too_large: "Фото слишком большое. Выберите файл до 15 МБ.",
+    offline_storage_unavailable: "Не удалось сохранить запись на устройстве. Проверьте свободное место и попробуйте снова.",
+    offline_internet_required: "Для этого действия нужен интернет. Напоминания, вес и наблюдения можно сохранять без сети.",
     email_not_configured: "Вход по email временно недоступен. Попробуйте позже или используйте Telegram/MAX для подтверждения входа.",
     email_delivery_failed: "Не удалось отправить письмо. Проверьте адрес или попробуйте позже.",
     email_registration_russian_domain_required: "Регистрация по email доступна только с российской почтой .ru или .рф. Войдите через Telegram или MAX либо укажите другую почту.",
@@ -2824,8 +2838,9 @@ function setWorkspace(html, options = {}) {
       if (name) control.setAttribute('aria-label', name);
     });
   }
+  if (offlineClient) updateOfflineBanner();
   if (options.scroll !== false) {
-    workspace.scrollIntoView({ behavior: "smooth", block: "start" });
+    (appMode ? dashboardView : workspace).scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
 
@@ -2853,7 +2868,7 @@ async function api(path, options = {}) {
   }
   let response;
   try {
-    response = await appFetch(path, { ...options, headers, credentials: "same-origin" });
+    response = await (offlineClient ? offlineClient.request(path, { ...options, headers, credentials: "same-origin" }) : appFetch(path, { ...options, headers, credentials: "same-origin" }));
   } catch (error) {
     // DOMException.code can be read-only; do not mutate the browser's error.
     const failure = new Error(error?.message || "request_failed");
@@ -2869,6 +2884,7 @@ async function api(path, options = {}) {
       (typeof data.detail === "string" ? data.detail : "http_error");
     throw error;
   }
+  if (/^\/api\/auth\/(email\/verify|max\/init|telegram\/status|max\/status)$/.test(path.split('?')[0]) && data.user?.id) localStorage.removeItem('tvv_user_logged_out');
   if (native && path.startsWith('/api/reminders') && options.method && options.method !== 'GET') void syncNativeReminders();
   return data;
 }
@@ -4025,6 +4041,7 @@ function applyAccountState(data) {
   state.telegramProfileSync = data.telegram_profile_sync || null;
   state.lastSyncCheckAt = new Date().toISOString();
   if (state.user?.id) void retentionActivity(api);
+  if (state.user?.id && offlineClient) void offlineClient.sync();
 }
 
 function clearAccountState() {
@@ -4048,6 +4065,9 @@ async function bootstrap() {
   if (isAdminRoute) {
     await bootstrapAdmin();
     return;
+  }
+  if (appMode && localStorage.getItem('tvv_user_logged_out') === '1') {
+    clearAccountState(); setAuthMode(false); openAuthDialogFromLink(); return;
   }
   if (appMode) {
     setAuthMode(true);
@@ -4129,6 +4149,7 @@ async function bootstrap() {
 async function refreshPets() {
   const data = await api("/api/pets");
   state.pets = data.items || [];
+  if (offlineClient) void offlineClient.hydrate();
   return state.pets;
 }
 
@@ -4497,7 +4518,7 @@ async function renderHome() {
     ${mainPet ? `
       <section class="profile-card pet-context-card">
         <div class="card-title-row">
-          <div class="card-icon large">${renderAppIcon("paw-print")}</div>
+          <div class="card-icon large pet-avatar">${petAvatar(mainPet)}</div>
           <div><p class="section-label">Выбранный питомец</p><h3>${escapeHtml(petTitle(mainPet))}</h3>${renderPetBadges(mainPet)}</div>
         </div>
         <div class="pet-context-metrics">
@@ -4948,7 +4969,7 @@ async function renderPets() {
           (pet) => `
             <article class="item-card pet-card">
               <div class="pet-card-main">
-                <div class="card-icon">${renderAppIcon("paw-print")}</div>
+                <div class="card-icon pet-avatar">${petAvatar(pet)}</div>
                 <div>
                 <h3>${escapeHtml(petTitle(pet))}</h3>
                 <p>${pet.is_main ? "Основной питомец" : "История, вес и напоминания"}</p>
@@ -5015,6 +5036,10 @@ async function renderPets() {
   });
 }
 
+function pendingRecordLabel(item) {
+  return item.offline_pending ? `<small class="pending-record">${item.sync_error ? "Не отправлено — проверьте синхронизацию" : "На устройстве · ожидает синхронизации"}</small>` : '';
+}
+
 function petPayloadFromForm(form) {
   const numberOrNull = (name) => {
     const value = String(form.get(name) || "").trim().replace(",", ".");
@@ -5053,8 +5078,14 @@ async function renderPetCard(petId) {
     </div>
     <section class="profile-card pet-hero-card">
       <div class="card-title-row">
-        <div class="card-icon large">${renderAppIcon("paw-print")}</div>
+        <div class="card-icon large pet-avatar">${petAvatar(pet)}</div>
         <div><h3>${escapeHtml(pet.pet_name)}</h3><p>${pet.is_main ? "Основной питомец" : "Карточка здоровья"}</p></div>
+      </div>
+      <div class="pet-photo-actions">
+        <button class="secondary-button compact" type="button" id="petPhotoChoose">${pet.photo_data_url ? "Изменить фото" : "Добавить фото"}</button>
+        ${pet.photo_data_url ? '<button class="text-button danger-text" type="button" id="petPhotoRemove">Убрать фото</button>' : ''}
+        <input id="petPhotoFile" type="file" accept="image/*" hidden />
+        <span class="pet-photo-status" id="petPhotoStatus" role="status"></span>
       </div>
       <p>Здесь собраны данные, записи и важные события питомца.</p>
       ${renderPetBadges(pet)}
@@ -5080,6 +5111,27 @@ async function renderPetCard(petId) {
       </div>
     </details>
   `);
+  const choose = document.querySelector('#petPhotoChoose');
+  const input = document.querySelector('#petPhotoFile');
+  const status = document.querySelector('#petPhotoStatus');
+  choose.addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    choose.disabled = true; status.textContent = 'Сохраняем фото…';
+    try {
+      const data_url = await preparePetPhoto(file);
+      await api(`/api/pets/${petId}/photo`, { method: 'POST', body: JSON.stringify({ data_url }) });
+      await refreshPets(); await renderPetCard(petId);
+    } catch (error) { choose.disabled = false; status.textContent = ''; showError(readableError(error.message)); }
+  });
+  document.querySelector('#petPhotoRemove')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/api/pets/${petId}/photo`, { method: 'DELETE' });
+      await refreshPets(); await renderPetCard(petId);
+    } catch (error) { event.currentTarget.disabled = false; showError(readableError(error.message)); }
+  });
 }
 
 function confirmPetDeletion(button) {
@@ -5172,7 +5224,7 @@ async function renderPetSummary(petId, period = "30") {
   const weightRows = (data.weights || []).map((item) => `<tr><td>${formatDateTime(item.created_at)}</td><td>${escapeHtml(item.weight_kg)} кг</td><td>${escapeHtml(item.note || "—")}</td></tr>`).join("");
   const observationItems = (data.observations || []).map((item) => `<li><strong>${escapeHtml(observationTypeLabel(item.obs_type))}</strong><span>${escapeHtml(observationDisplayText(item))}</span><small>${formatDateTime(item.created_at)}</small></li>`).join("");
   const historyItems = (data.history || []).map((item) => `<li><strong>${escapeHtml(historyTitle(item))}</strong><span>${escapeHtml(compactText(humanizeUiText(item.details || ""), 240))}</span><small>${formatDateTime(item.created_at)}</small></li>`).join("");
-  const reminderItems = (data.reminders || []).map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.due_date)}${item.due_time ? `, ${escapeHtml(item.due_time)}` : ""}</span><small>${escapeHtml(periodicityLabel(item.periodicity || "once"))}</small></li>`).join("");
+  const reminderItems = (data.reminders || []).map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.due_date)}${item.due_time ? `, ${escapeHtml(item.due_time)}` : ""}</span><small>${escapeHtml(periodicityLabel(item.periodicity || "once"))}</small>${pendingRecordLabel(item)}</li>`).join("");
   const weightChange = data.weight_change_kg === null || data.weight_change_kg === undefined
     ? ""
     : `<p class="summary-weight-change">Изменение к предыдущей записи: <strong>${data.weight_change_kg > 0 ? "+" : ""}${escapeHtml(data.weight_change_kg)} кг</strong></p>`;
@@ -5216,7 +5268,7 @@ async function renderPetObservations(petId) {
   const items = data.items.length
     ? data.items.map((item) => {
         const text = observationDisplayText(item);
-        return `<article class="item-card"><div><h3>${escapeHtml(observationTypeLabel(item.obs_type))}</h3>${text ? `<p>${escapeHtml(text)}</p>` : ""}<small>${formatDateTime(item.created_at)}</small></div></article>`;
+        return `<article class="item-card"><div><h3>${escapeHtml(observationTypeLabel(item.obs_type))}</h3>${text ? `<p>${escapeHtml(text)}</p>` : ""}<small>${formatDateTime(item.created_at)}</small>${pendingRecordLabel(item)}</div></article>`;
       }).join("")
     : renderEmptyBlock({
         icon: "clipboard-list",
@@ -5253,7 +5305,7 @@ async function renderPetWeights(petId) {
   const pet = state.pets.find((item) => Number(item.id) === Number(petId));
   const data = await api(`/api/pets/${petId}/weights`);
   const items = data.items.length
-    ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.weight_kg)} кг</h3><p>${escapeHtml(item.note || "")}</p><small>${formatDateTime(item.created_at)}</small></div></article>`).join("")
+    ? data.items.map((item) => `<article class="item-card"><div><h3>${escapeHtml(item.weight_kg)} кг</h3><p>${escapeHtml(item.note || "")}</p><small>${formatDateTime(item.created_at)}</small>${pendingRecordLabel(item)}</div></article>`).join("")
     : renderEmptyBlock({
         icon: "scale",
         title: "Истории веса пока нет",
@@ -6545,7 +6597,7 @@ async function syncNativeReminders() {
   if (!native || !state.user) return;
   try {
     const data = await api('/api/reminders');
-    await window.TVVNative.syncReminders(data.items || []);
+    await window.TVVNative.syncReminders((data.items || []).map((item) => ({ ...item, id: item.id < 0 ? 2000000000 + item.id : item.id })));
   } catch { /* Keep the previously scheduled dates while offline. */ }
 }
 
@@ -6562,6 +6614,7 @@ async function resumeApp() {
       await checkPlusPaymentStatus({ silentNotFound: true });
       if (state.subscription?.plan !== 'free') clearPaymentPending();
     }
+    if (offlineClient && state.user) await offlineClient.sync();
     if (state.user && native) await syncNativeReminders();
     if (state.user && native && localStorage.getItem('tvv_open_reminders') === '1') {
       localStorage.removeItem('tvv_open_reminders');
@@ -6569,6 +6622,48 @@ async function resumeApp() {
     }
   } catch (error) { showError(readableError(error.message)); }
   finally { resumingApp = false; }
+}
+
+let previousPending = 0;
+function updateOfflineBanner(status = offlineClient?.status()) {
+  if (!status) return;
+  const banner = document.querySelector('#mobileConnection');
+  if (banner) {
+    banner.hidden = !status.offline && !status.pending && !status.locked;
+    const message = status.locked ? 'Войдите снова, чтобы отправить сохранённые записи.'
+      : status.updateRequired ? 'Записи сохранены. Сервис готовится к обновлению.'
+      : status.failed ? 'Есть записи, которые не удалось отправить.'
+      : status.pending ? `На устройстве: ${status.pending} · ожидают синхронизации.`
+      : 'Без интернета · доступны сохранённые данные.';
+    banner.replaceChildren(document.createTextNode(message));
+    if (status.pending) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button';
+      button.textContent = 'Проверить'; button.onclick = renderSyncQueue; banner.append(button);
+    }
+  }
+  if (native && status.pending < previousPending) void syncNativeReminders();
+  previousPending = status.pending;
+}
+async function renderSyncQueue() {
+  await offlineClient.ready;
+  setWorkspace(`<div class="workspace-head"><h2>Синхронизация</h2><button class="secondary-button compact" data-action="home" type="button">Назад</button></div>
+    <p>Записи сохраняются на этом устройстве и отправляются при восстановлении связи, когда приложение открыто.</p>
+    <div class="list-stack">${offlineClient.state.queue.map((job) => `<article class="item-card"><div><h3>${escapeHtml(job.payload.title || job.payload.text || ({weight:'Запись веса',photo:'Фото питомца',disable:'Отключение напоминания'}[job.kind]))}</h3><small>${formatDateTime(job.createdAt)}</small><p>${job.error ? escapeHtml(readableError(job.error)) : 'Ожидает отправки'}</p></div><button class="secondary-button compact" data-discard-sync="${escapeHtml(job.requestId)}" type="button">Убрать из очереди</button></article>`).join('') || '<p>Все записи отправлены.</p>'}</div>
+    <button class="primary-button" id="retrySync" type="button">Повторить отправку</button>`);
+  document.querySelector('#retrySync').onclick = async () => { await offlineClient.retry(); await renderSyncQueue(); };
+  workspace.querySelectorAll('[data-discard-sync]').forEach((button) => {
+    button.onclick = async () => {
+      if (!window.confirm('Убрать эту запись из очереди на устройстве? Если сервер уже принял её до обрыва связи, запись может оставаться в базе.')) return;
+      await offlineClient.discard(button.dataset.discardSync); await syncNativeReminders(); await renderSyncQueue();
+    };
+  });
+}
+window.addEventListener('tvv:offline-state', (event) => updateOfflineBanner(event.detail));
+window.addEventListener('online', () => { updateOfflineBanner(); if (offlineClient) void resumeApp(); });
+window.addEventListener('offline', () => updateOfflineBanner());
+if (offlineClient) {
+  void offlineClient.ready.then(() => updateOfflineBanner());
+  setInterval(() => { if (!document.hidden && state.user) void offlineClient.sync(); }, 30000);
 }
 
 initMobileShell({ user: () => state.user,
