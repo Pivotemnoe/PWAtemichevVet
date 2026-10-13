@@ -1,3 +1,4 @@
+import { native } from './platform.js?v=20261013-mobile-8';
 let pendingToken = "";
 let device = "";
 try {
@@ -20,7 +21,7 @@ export async function retentionActivity(api, { token = false, kind = "" } = {}) 
       method: "POST",
       body: JSON.stringify({
         token: token ? pendingToken : "",
-        installed: Boolean(window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone),
+        installed: Boolean(native || window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone),
         device: device || "unknown", kind
       })
     });

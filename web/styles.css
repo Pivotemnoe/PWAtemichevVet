@@ -5695,7 +5695,7 @@ body.is-pet-campaign .campaign-pet-media img {
   }
 
   body .topbar,
-  body footer,
+  body .legal-footer,
   #dashboardView > :not(#workspace),
   #workspace > :not(.doctor-summary-print) {
     display: none !important;

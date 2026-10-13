@@ -130,7 +130,7 @@ def public_state(settings, user):
             'consent_text':CONSENT_TEXT,'agreement':item}
 
 
-def _charge(c, settings, agreement, user, kind, cycle_at, now, attempt=0):
+def _charge(c, settings, agreement, user, kind, cycle_at, now, attempt=0, return_to_app=False):
     key = str(uuid.uuid4())
     cur = c.execute("INSERT OR IGNORE INTO billing_charges(agreement_id,original_user_id,kind,cycle_at,attempt,"
                     "idempotence_key,request_payload,created_at) VALUES(?,?,?,?,?,?,'{}',?)",
@@ -139,13 +139,14 @@ def _charge(c, settings, agreement, user, kind, cycle_at, now, attempt=0):
         cid = cur.lastrowid
         payload = yookassa.subscription_payload(settings,user_id=user['id'],user_email=agreement['receipt_email'],
             agreement_id=agreement['id'],charge_id=cid,
-            payment_method_id=agreement['payment_method_id'] if kind=='renewal' else None)
+            payment_method_id=agreement['payment_method_id'] if kind=='renewal' else None,
+            return_to_app=return_to_app)
         c.execute("UPDATE billing_charges SET request_payload=? WHERE id=?",(json.dumps(payload,ensure_ascii=False),cid))
     return dict(c.execute("SELECT * FROM billing_charges WHERE agreement_id=? AND kind=? AND cycle_at=? AND attempt=?",
                          (agreement['id'],kind,cycle_at,attempt)).fetchone())
 
 
-def start(settings, user, effective, consent_version, receipt_email=None):
+def start(settings, user, effective, consent_version, receipt_email=None, return_to_app=False):
     if not enabled() or not renewals_enabled():
         raise HTTPException(503,'subscriptions_not_enabled')
     if consent_version != TERMS_VERSION:
@@ -181,7 +182,7 @@ def start(settings, user, effective, consent_version, receipt_email=None):
                 "consent_text,consent_at,created_at,updated_at,receipt_email) VALUES(?,?,?,?,?,?,?,?,?)",
                 (user['id'],PRICE,DAYS,TERMS_VERSION,CONSENT_TEXT,now,now,now,receipt_email))
             a = dict(c.execute('SELECT * FROM billing_agreements WHERE id=?',(cur.lastrowid,)).fetchone())
-            cid = _charge(c,settings,a,user,'initial',now,now)['id']
+            cid = _charge(c,settings,a,user,'initial',now,now,return_to_app=return_to_app)['id']
             _event(c,a,'consent',now,key=f"consent:{a['id']}")
             c.commit()
     dispatch(settings,cid)
@@ -534,7 +535,8 @@ def install_routes(app,settings,current_user,current_admin,monitor,effective_sub
     def subscribe(payload:StartInput,request:Request,user:dict=Depends(current_user)):
         if is_review(user):
             raise HTTPException(403,'review_payment_disabled')
-        result=start(settings,user,effective_subscription(settings,user),payload.terms_version,payload.receipt_email)
+        result=start(settings,user,effective_subscription(settings,user),payload.terms_version,payload.receipt_email,
+                     return_to_app=getattr(request, 'headers', {}).get('x-temichevvet-client') == 'android')
         audit(request,'subscription.checkout',user_id=user['id'],status='ok',actor='user',metadata={'terms_version':TERMS_VERSION})
         return result
 

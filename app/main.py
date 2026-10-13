@@ -3912,9 +3912,30 @@ def review_login(request: Request, token: str = Query(default="", max_length=256
 
 
 @app.get("/")
+@app.get("/mobile", include_in_schema=False)
 @app.head("/", include_in_schema=False)
 def index() -> Response:
     return _index_response()
+
+
+@app.get('/mobile/payment-return', include_in_schema=False)
+def mobile_payment_return() -> HTMLResponse:
+    return HTMLResponse((WEB_ROOT / 'payment-return.html').read_text(encoding='utf-8'),
+                        headers={'Cache-Control': 'no-store, private', 'X-Robots-Tag': 'noindex'})
+
+
+@app.get('/android', include_in_schema=False)
+def android_download_page() -> FileResponse:
+    return FileResponse(WEB_ROOT / 'android.html', media_type='text/html', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/downloads/TemichevVet-0.1.0.apk', include_in_schema=False)
+def android_download_apk() -> FileResponse:
+    artifact = PROJECT_ROOT / 'releases' / 'android' / 'TemichevVet-0.1.0.apk'
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail='Android build has not been published')
+    return FileResponse(artifact, media_type='application/vnd.android.package-archive', filename=artifact.name,
+                        headers={'Cache-Control': 'public, max-age=3600, immutable'})
 
 
 def _index_response() -> Response:
@@ -5425,6 +5446,7 @@ def _payment_plus_create_locked(request: Request, user: dict) -> PaymentCreateRe
             settings,
             user_id=int(user["id"]),
             user_email=str(user.get("email") or "") or None,
+            **({'return_to_app': True} if getattr(request, 'headers', {}).get('x-temichevvet-client') == 'android' else {}),
         )
     except YooKassaConfigError as exc:
         _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="system", metadata={"reason": "not_configured"})

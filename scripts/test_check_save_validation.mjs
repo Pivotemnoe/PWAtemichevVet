@@ -78,7 +78,8 @@ function definition(name) {
   const ctx = {
     state: { token: "" },
     attributionRequestHeaders: () => ({}),
-    fetch: async () => { throw new TypeError("offline"); },
+    native: false,
+    appFetch: async () => { throw new TypeError("offline"); },
   };
   vm.createContext(ctx);
   vm.runInContext(definition("api"), ctx);
@@ -87,7 +88,7 @@ function definition(name) {
     (error) => error.code === "network_error" && error.httpStatus === 0,
   );
 
-  ctx.fetch = async () => ({
+  ctx.appFetch = async () => ({
     ok: false,
     status: 422,
     json: async () => ({ detail: [{ type: "string_too_long" }] }),

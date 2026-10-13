@@ -1,0 +1,50 @@
+[
+  {
+    "asset": "companions",
+    "source": "/Users/konstantin/.codex/generated_images/01a13363-5984-7851-bacd-d9b59c9d6183/exec-2807852f-0b42-41a8-81f1-ca9a8ba1c0ce.png",
+    "file": "web/assets/mobile/companions-v1.webp",
+    "tool": "built-in image_gen",
+    "size": [
+      1200,
+      634
+    ],
+    "alpha": false,
+    "date": "2026-10-13"
+  },
+  {
+    "asset": "health",
+    "source": "/Users/konstantin/.codex/generated_images/01a13363-5984-7851-bacd-d9b59c9d6183/exec-a9b71569-22ac-4cce-8a00-2f215c632681.png",
+    "file": "web/assets/mobile/health-v1.webp",
+    "tool": "built-in image_gen",
+    "size": [
+      420,
+      420
+    ],
+    "alpha": true,
+    "date": "2026-10-13"
+  },
+  {
+    "asset": "food",
+    "source": "/Users/konstantin/.codex/generated_images/01a13363-5984-7851-bacd-d9b59c9d6183/exec-c695ad51-ae5f-4e88-acd5-816568475c8d.png",
+    "file": "web/assets/mobile/food-v1.webp",
+    "tool": "built-in image_gen",
+    "size": [
+      420,
+      420
+    ],
+    "alpha": true,
+    "date": "2026-10-13"
+  },
+  {
+    "asset": "dates",
+    "source": "/Users/konstantin/.codex/generated_images/01a13363-5984-7851-bacd-d9b59c9d6183/exec-0cf99334-5f2a-485e-872b-3b538fa23219.png",
+    "file": "web/assets/mobile/dates-v1.webp",
+    "tool": "built-in image_gen",
+    "size": [
+      420,
+      420
+    ],
+    "alpha": true,
+    "date": "2026-10-13"
+  }
+]

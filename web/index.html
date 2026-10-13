@@ -2,7 +2,7 @@
 <html lang="ru" translate="no" class="notranslate">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1476d4" />
     <meta name="google" content="notranslate" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -31,6 +31,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
     <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/static/assets/apple-touch-icon-20260627.png" />
     <link rel="stylesheet" href="/static/styles.css?v=20260912-save-diagnostics-1" />
+    <link rel="stylesheet" href="/static/mobile.css?v=20261013-mobile-8" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -454,7 +455,14 @@
       </div>
     </div>
 
+    <dialog id="paymentRedirectDialog" class="payment-redirect-dialog" aria-labelledby="paymentRedirectTitle">
+      <h2 id="paymentRedirectTitle">Переход к оплате</h2>
+      <p>Сейчас вы будете переведены на страницу оплаты ЮKassa.</p>
+      <p class="hint">После оплаты вернитесь в TemichevVet. Проверим платёж и обновим доступ.</p>
+      <button class="primary-button" type="button" data-payment-continue>Перейти к оплате</button>
+      <button class="secondary-button" type="button" data-payment-cancel>Отмена</button>
+    </dialog>
     <script src="https://st.max.ru/js/max-web-app.js"></script>
-    <script src="/static/app.js?v=20261009-subscription-7" type="module"></script>
+    <script src="/static/app.js?v=20261013-mobile-8" type="module"></script>
   </body>
 </html>

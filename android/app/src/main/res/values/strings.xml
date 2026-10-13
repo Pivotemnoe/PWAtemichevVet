@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TemichevVet</string>
+    <string name="title_activity_main">TemichevVet</string>
+    <string name="package_name">ru.temichevvet.app</string>
+    <string name="custom_url_scheme">ru.temichevvet.app</string>
+</resources>

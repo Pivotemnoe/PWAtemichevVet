@@ -1,4 +1,10 @@
-import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261009-subscription-7";
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-8";
+import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-8";
+import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-8";
+
+let mobileRoute = { action: "home" };
+let mobileHistory = [];
+let paymentOpening = false;
 
 const legacySessionToken = localStorage.getItem("tvv_token") || "";
 
@@ -571,7 +577,7 @@ function trackFunnel(eventType, metadata = {}) {
   if (isAdminRoute) return;
   const enrichedMetadata = { ...metadata, ...attributionEventMetadata() };
   trackMetrikaGoal(eventType, enrichedMetadata);
-  fetch("/api/funnel/event", {
+  appFetch("/api/funnel/event", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...attributionRequestHeaders() },
     credentials: "same-origin",
@@ -765,7 +771,7 @@ function createElementFromHtml(html) {
 
 function ensureDashboardView() {
   if (dashboardView && document.body.contains(dashboardView)) return dashboardView;
-  const dashboardNode = createElementFromHtml(DASHBOARD_VIEW_HTML);
+  const dashboardNode = createElementFromHtml(appMode ? mobileDashboardMarkup() : DASHBOARD_VIEW_HTML);
   if (!dashboardNode || !mainView) return null;
   mainView.append(dashboardNode);
   dashboardView = document.querySelector("#dashboardView");
@@ -787,6 +793,7 @@ function setDashboardActiveAction(action) {
     if (isActive) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
+  updateMobileHeader(action, Boolean(mobileRoute.petId));
 }
 
 function ensureAdminView() {
@@ -800,16 +807,24 @@ function ensureAdminView() {
 }
 
 function setAuthMode(isAuthed) {
+  if (appMode) setAppLoading(false);
   if (isAuthed) {
     ensureDashboardView();
   }
+  if (appMode) ensureDashboardView();
   authView.hidden = isAuthed;
-  if (dashboardView) dashboardView.hidden = !isAuthed;
+  if (dashboardView) dashboardView.hidden = !isAuthed && !appMode;
   if (adminView) adminView.hidden = true;
   document.body.classList.toggle("is-authed", Boolean(isAuthed));
   document.body.classList.remove("is-admin");
   if (isAuthed) closeAuthDialog();
-  if (!isAuthed) removeDashboardView();
+  if (!isAuthed && !appMode) removeDashboardView();
+  if (!isAuthed && appMode) {
+    mobileHistory = [];
+    mobileRoute = { action: "home" };
+    setDashboardActiveAction("home");
+    setWorkspace(renderMobileWelcome(escapeHtml));
+  }
 }
 
 function setAdminMode(isAuthed) {
@@ -886,6 +901,8 @@ async function performLogout() {
   stopMaxPolling();
   clearMaxLogin();
   clearAccountState();
+  if (native) await window.TVVNative.clearReminders();
+  clearPaymentPending();
   setAuthMode(false);
 }
 
@@ -2608,7 +2625,10 @@ const legalDocuments = {
 
 function openLegalModal(type = "privacy") {
   if (type === "offer") {
-    window.location.href = "/offer";
+    if (native) {
+      void openExternal((window.TVVNative.debugOrigin || 'https://temichevvet.ru') + '/offer')
+        .catch(() => showError('Не удалось открыть оферту. Попробуйте ещё раз.'));
+    } else window.location.href = "/offer";
     return;
   }
   const doc = legalDocuments[type] || legalDocuments.privacy;
@@ -2616,11 +2636,14 @@ function openLegalModal(type = "privacy") {
   legalContent.innerHTML = doc.html;
   legalModal.hidden = false;
   legalModal.setAttribute("aria-hidden", "false");
+  if (!authDialog.hidden) authDialog.setAttribute('aria-hidden', 'true');
+  legalCloseBtn?.focus();
 }
 
 function closeLegalModal() {
   legalModal.hidden = true;
   legalModal.setAttribute("aria-hidden", "true");
+  if (!authDialog.hidden) authDialog.setAttribute('aria-hidden', 'false');
 }
 
 const legalPathMap = {
@@ -2641,6 +2664,7 @@ function openLegalFromCurrentPath() {
 }
 
 function showCookieBannerIfNeeded() {
+  if (native) { if (cookieBanner) cookieBanner.hidden = true; return; }
   if (!cookieBanner) return;
   const consent = getCookieConsent();
   if (!consent) {
@@ -2683,6 +2707,7 @@ function clearSensitiveMiniAppFragment() {
 }
 
 function loadMetrika() {
+  if (native) return;
   if (metrikaLoaded || typeof window === "undefined" || isAdminRoute) return;
   metrikaLoaded = true;
   window.ym = window.ym || function () {
@@ -2788,7 +2813,17 @@ function observationDisplayText(item) {
 function setWorkspace(html, options = {}) {
   ensureDashboardView();
   if (!workspace) return;
-  workspace.innerHTML = html;
+  workspace.innerHTML = (appMode ? mobileSectionArt(mobileRoute.action) : '') + html;
+  if (native) {
+    workspace.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach((control) => {
+      if (control.hasAttribute('aria-label') || control.hasAttribute('aria-labelledby')) return;
+      const label = control.closest('label')?.cloneNode(true);
+      if (!label) return;
+      label.querySelectorAll('input, select, textarea').forEach((field) => field.remove());
+      const name = label.textContent.replace(/\s+/g, ' ').trim();
+      if (name) control.setAttribute('aria-label', name);
+    });
+  }
   if (options.scroll !== false) {
     workspace.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -2818,7 +2853,7 @@ async function api(path, options = {}) {
   }
   let response;
   try {
-    response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+    response = await appFetch(path, { ...options, headers, credentials: "same-origin" });
   } catch (error) {
     // DOMException.code can be read-only; do not mutate the browser's error.
     const failure = new Error(error?.message || "request_failed");
@@ -2834,6 +2869,7 @@ async function api(path, options = {}) {
       (typeof data.detail === "string" ? data.detail : "http_error");
     throw error;
   }
+  if (native && path.startsWith('/api/reminders') && options.method && options.method !== 'GET') void syncNativeReminders();
   return data;
 }
 
@@ -3915,6 +3951,11 @@ function clearStartupAction() {
 }
 
 async function renderStartupView() {
+  if (native && localStorage.getItem('tvv_open_reminders') === '1') {
+    localStorage.removeItem('tvv_open_reminders');
+    await navigateMobile('reminders');
+    return;
+  }
   const target = await retentionActivity(api, { token: true });
   state.retentionTarget = target;
   const startupAction = target?.action || getStartupAction();
@@ -4000,6 +4041,7 @@ function clearAccountState() {
   state.lastSyncCheckAt = "";
   localStorage.removeItem("tvv_token");
   localStorage.removeItem("tvv_last_plus_payment_id");
+  if (native) void window.TVVNative.clearReminders().catch(() => {});
 }
 
 async function bootstrap() {
@@ -4007,7 +4049,12 @@ async function bootstrap() {
     await bootstrapAdmin();
     return;
   }
-  const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus";
+  if (appMode) {
+    setAuthMode(true);
+    setWorkspace('<section class="mobile-loading" role="status"><img src="/static/assets/app-icon-192.png" alt="" /><h2>Открываем ваш кабинет</h2><p>Загружаем данные питомцев…</p></section>', { scroll: false });
+    setAppLoading(true);
+  }
+  const shouldCheckPayment = new URLSearchParams(window.location.search).get("payment") === "plus" || (appMode && paymentPending());
   if (!state.token) {
     if (await tryMaxMiniAppLogin()) return;
     try {
@@ -4023,7 +4070,11 @@ async function bootstrap() {
       if (await completePendingSaveAfterLogin()) return;
       await renderStartupView();
       return;
-    } catch {
+    } catch (error) {
+      if (appMode && ![401, 403].includes(error.httpStatus)) {
+        showAppConnectionError();
+        return;
+      }
       clearAccountState();
     }
     setAuthMode(false);
@@ -4052,7 +4103,11 @@ async function bootstrap() {
     clearAuthLinkRequest();
     if (await completePendingSaveAfterLogin()) return;
     await renderStartupView();
-  } catch {
+  } catch (error) {
+    if (appMode && ![401, 403].includes(error.httpStatus)) {
+      showAppConnectionError();
+      return;
+    }
     localStorage.removeItem("tvv_token");
     state.token = "";
     clearAccountState();
@@ -4084,7 +4139,7 @@ async function refreshAccountState() {
 }
 
 function pushSupported() {
-  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  return native || ("serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -4111,6 +4166,10 @@ async function loadPushConfig(force = false) {
 }
 
 async function loadPushStatus() {
+  if (native) {
+    const enabled = await window.TVVNative.notificationsEnabled();
+    return { config: { enabled: true }, status: { enabled: true, current_device: enabled, count: enabled ? 1 : 0, items: [] } };
+  }
   const config = await loadPushConfig();
   let status = { enabled: Boolean(config.enabled), count: 0, items: [] };
   try {
@@ -4258,6 +4317,7 @@ function formatTriageAnswer(answer, afterUrgencyHtml = "") {
 }
 
 async function copyTextToClipboard(text) {
+  if (native) return window.TVVNative.copyText(text);
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
@@ -4283,7 +4343,12 @@ const historyEventLabels = {
 };
 
 function humanizeUiText(value) {
-  return String(value || "")
+  let text = String(value || "");
+  if (text.trim().startsWith('{')) {
+    try { text = observationDisplayText({ payload: JSON.parse(text) }) || text; }
+    catch { /* Legacy plain text is preserved. */ }
+  }
+  return text
     .replace(/\btriage\b/gi, "Разбор здоровья")
     .replace(/REMINDER_VACCINATION_CREATED/g, "Создано напоминание: вакцинация")
     .replace(/REMINDER_CREATED/g, "Создано напоминание")
@@ -4401,6 +4466,15 @@ async function renderHome() {
   const dueFollowups = await loadDueFollowups();
   const mainPet = state.pets.find((pet) => pet.is_main) || state.pets[0];
   const petData = mainPet ? await api(`/api/pets/${mainPet.id}`) : null;
+  if (appMode) {
+    state.currentPetId = mainPet?.id || null;
+    setDashboardActiveAction('home');
+    setWorkspace(renderMobileHome({ pet: mainPet, details: petData,
+      followups: renderDueFollowups(dueFollowups), escape: escapeHtml,
+      date: (value) => new Date(`${value}T12:00:00`).toLocaleDateString('ru-RU') }));
+    if (native) void syncNativeReminders();
+    return;
+  }
   const sub = subscriptionSummary();
   const latestWeight = petData?.weights?.[0] || null;
   const previousWeight = petData?.weights?.[1] || null;
@@ -4466,6 +4540,7 @@ function renderMore() {
       </div>
       <button class="secondary-button compact icon-text-button" data-action="home" type="button">${renderAppIcon("chevron-left")}<span>Назад</span></button>
     </div>
+    ${appMode ? mobileDoctorCard() : ''}
     <div class="more-menu-grid">
       <button class="menu-card" data-action="history" type="button">${renderAppIcon("history")}<span><strong>История здоровья</strong><small>Все сохранённые события</small></span></button>
       <button class="menu-card" data-action="food" type="button">${renderAppIcon("utensils")}<span><strong>Питание</strong><small>Продукты и готовые блюда</small></span></button>
@@ -4626,6 +4701,15 @@ async function renderAccountLinks() {
 }
 
 async function enablePushNotifications() {
+  if (native) {
+    if (!await window.TVVNative.enableNotifications()) {
+      setAccountLinkHint('Разрешите уведомления TemichevVet в настройках телефона.');
+      return;
+    }
+    await syncNativeReminders();
+    await renderAccountLinks();
+    return;
+  }
   setAccountLinkHint("Проверяю, поддерживает ли браузер уведомления...");
   if (!pushSupported()) throw new Error("push_unsupported");
   const config = await loadPushConfig(true);
@@ -4649,6 +4733,12 @@ async function enablePushNotifications() {
 }
 
 async function disablePushNotifications() {
+  if (native) {
+    await window.TVVNative.clearReminders();
+    localStorage.removeItem('tvv_native_notifications_enabled');
+    await renderAccountLinks();
+    return;
+  }
   setAccountLinkHint("Отключаю уведомления на этом устройстве...");
   if (!pushSupported()) throw new Error("push_unsupported");
   const registration = await navigator.serviceWorker.ready;
@@ -4703,6 +4793,7 @@ function renderAccountLinkWaiting(provider, url, loginState) {
 }
 
 function openDeferredExternalWindow() {
+  if (native) return { native: true };
   const externalWindow = window.open("about:blank", "_blank");
   if (externalWindow) {
     externalWindow.opener = null;
@@ -4712,11 +4803,16 @@ function openDeferredExternalWindow() {
 }
 
 function closeDeferredExternalWindow(externalWindow) {
+  if (externalWindow?.native) return;
   if (!externalWindow || externalWindow.closed) return;
   externalWindow.close();
 }
 
 function navigateDeferredExternalWindow(externalWindow, url) {
+  if (externalWindow?.native) {
+    void openExternal(url).catch((error) => { messengerHint.textContent = readableError(error.message); });
+    return true;
+  }
   if (externalWindow && !externalWindow.closed) {
     externalWindow.location.href = url;
     return true;
@@ -4771,6 +4867,11 @@ async function pollAccountLink(provider, loginState, attempt = 0) {
 async function downloadAccountData() {
   setAccountLinkHint("Готовлю выгрузку данных...");
   const data = await api("/api/account/export");
+  if (native) {
+    await window.TVVNative.shareFile(`temichevvet-data-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(data, null, 2));
+    setAccountLinkHint('Выгрузка данных сформирована.');
+    return;
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -5555,6 +5656,9 @@ function paymentStatusNotice(message, type = "") {
 }
 
 async function startPlusPayment() {
+  if (paymentOpening) return;
+  paymentOpening = true;
+  if (!await confirmPayment()) { paymentOpening = false; return; }
   trackFunnel("payment.plus_click");
   const resultEl = document.querySelector("#paymentResult");
   if (resultEl) resultEl.innerHTML = paymentStatusNotice("Создаю защищённую ссылку оплаты...");
@@ -5570,9 +5674,12 @@ async function startPlusPayment() {
     }
     state.lastPlusPaymentId = data.payment_id;
     localStorage.setItem("tvv_last_plus_payment_id", data.payment_id);
-    window.location.href = data.confirmation_url;
+    markPaymentPending();
+    await openExternal(data.confirmation_url);
   } catch (error) {
     if (resultEl) resultEl.innerHTML = paymentStatusNotice(`Не удалось открыть оплату. ${readableError(error.message)}`, "danger");
+  } finally {
+    paymentOpening = false;
   }
 }
 
@@ -5586,6 +5693,7 @@ async function checkPlusPaymentStatus(options = {}) {
       : "/api/payments/plus/status";
     const data = await api(path);
     state.subscription = data.subscription || state.subscription;
+    if (['succeeded','canceled','invalid','not_found'].includes(data.status)) clearPaymentPending();
     await refreshAccountState();
     if (options.silentNotFound && data.status === "not_found") {
       renderSubscription();
@@ -5615,6 +5723,10 @@ async function checkPlusPaymentStatus(options = {}) {
 }
 
 function renderSubscription(statusHtml = "") {
+  if (appMode) {
+    mobileRoute = { action: 'subscription' };
+    updateMobileHeader('subscription');
+  }
   const sub = state.subscription || {};
   const plan = sub.title || sub.plan || "Free";
   const quotaTotal = Number.isFinite(Number(sub.quota_total)) ? Number(sub.quota_total) : 0;
@@ -5645,8 +5757,8 @@ function renderSubscription(statusHtml = "") {
   const subscriptionForm = `
     <form id="plusSubscriptionForm" class="form-grid one-column">
       ${state.user?.email ? "" : '<label>Почта для чека<input name="receipt_email" type="email" autocomplete="email" required></label>'}
-      <label class="checkbox-row"><input name="terms" type="checkbox" required>Принимаю <a href="/offer" target="_blank" rel="noopener">условия подписки Plus</a>.</label>
-      <label class="checkbox-row"><input name="autorenew" type="checkbox" required>${escapeHtml(b.consent_text || "")}</label>
+      <label class="checkbox-row"><input id="plusTerms" aria-label="Принимаю условия подписки Plus" name="terms" type="checkbox" required><span>Принимаю <a href="/offer" target="_blank" rel="noopener">условия подписки Plus</a>.</span></label>
+      <label class="checkbox-row"><input id="plusAutoRenew" aria-label="Разрешаю автоматическое продление Plus" name="autorenew" type="checkbox" required><span>${escapeHtml(b.consent_text || "")}</span></label>
       <button class="primary-button" type="submit" disabled>Подписаться — 200 ₽ за 30 дней</button>
     </form>`;
   const telegramConnected = isProviderConnected("telegram");
@@ -5667,7 +5779,7 @@ function renderSubscription(statusHtml = "") {
       ${sub.plan && sub.plan !== "free" ? `<p><strong>Действует до:</strong> ${escapeHtml(periodEnd)}.</p>` : ""}
       ${telegramConnected || sub.source === "telegram" ? `<p class="hint">Сайт и Telegram используют один аккаунт и одну подписку.</p>` : ""}
       ${billingStatus}
-      ${agreement?.confirmation_url ? `<a class="primary-button" href="${escapeHtml(agreement.confirmation_url)}">Продолжить оплату</a>` : ""}
+      ${agreement?.confirmation_url ? `<button type="button" class="primary-button" data-continue-payment="${escapeHtml(agreement.confirmation_url)}">Продолжить оплату</button>` : ""}
       <button class="secondary-button" id="cancelPlusSubscription" type="button">${agreementOpen ? "Отменить подписку" : "Отвязать способ оплаты"}</button>
       <p class="hint">Способ оплаты отвяжется, следующие списания отключатся. Оплаченный доступ сохранится до конца срока.</p>
       ${!agreement ? '<p class="hint">Сохранённого способа оплаты нет. Автопродление выключено.</p>' : ""}
@@ -5701,6 +5813,9 @@ function renderSubscription(statusHtml = "") {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!form.checkValidity()) return;
+      if (paymentOpening) return;
+      paymentOpening = true;
+      if (!await confirmPayment()) { paymentOpening = false; return; }
       submit.disabled = true;
       try {
         const data = await api("/api/billing/subscription/start", { method: "POST", body: JSON.stringify({
@@ -5711,12 +5826,14 @@ function renderSubscription(statusHtml = "") {
           state.lastPlusPaymentId = data.payment_id;
           localStorage.setItem("tvv_last_plus_payment_id", data.payment_id);
         }
-        if (data.confirmation_url) window.location.href = data.confirmation_url;
+        if (data.confirmation_url) { markPaymentPending(); await openExternal(data.confirmation_url); }
         else { await refreshAccountState(); renderSubscription(paymentStatusNotice(data.message)); }
       } catch (error) {
         const el = document.querySelector("#paymentResult");
         if (el) el.innerHTML = paymentStatusNotice(readableError(error.message), "danger");
         submit.disabled = false;
+      } finally {
+        paymentOpening = false;
       }
     });
   }
@@ -6170,6 +6287,16 @@ document.addEventListener("visibilitychange", () => {
 });
 
 document.addEventListener("click", async (event) => {
+  const paymentContinue = event.target.closest('[data-continue-payment]');
+  if (paymentContinue) {
+    if (paymentOpening) return;
+    paymentOpening = true;
+    try {
+      if (await confirmPayment()) { markPaymentPending(); await openExternal(paymentContinue.dataset.continuePayment); }
+    } catch (error) { showError(readableError(error.message)); }
+    finally { paymentOpening = false; }
+    return;
+  }
   const legalButton = event.target.closest("[data-open-legal]");
   if (legalButton) {
     const legalType = legalButton.dataset.openLegal;
@@ -6210,7 +6337,8 @@ document.addEventListener("click", async (event) => {
       const petId = Number(printSummaryButton.dataset.petId);
       const period = printSummaryButton.dataset.summaryPeriod || "30";
       await api(`/api/pets/${petId}/summary/export?period=${encodeURIComponent(period)}`, { method: "POST", body: "{}" });
-      window.print();
+      if (native) await window.TVVNative.print();
+      else window.print();
       return;
     }
     if (saveFoodButton) {
@@ -6259,6 +6387,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (openPetButton) {
+      recordMobileRoute({ action: 'pets', petId: Number(openPetButton.dataset.openPet), view: 'card' });
       setDashboardActiveAction("pets");
       await renderPetCard(Number(openPetButton.dataset.openPet));
       return;
@@ -6266,6 +6395,7 @@ document.addEventListener("click", async (event) => {
     if (petViewButton) {
       const petId = Number(petViewButton.dataset.petId);
       const view = petViewButton.dataset.petView;
+      recordMobileRoute({ action: view === 'triage' ? 'triage' : view === 'reminders' ? 'reminders' : 'pets', petId, view });
       setDashboardActiveAction(view === "triage" ? "triage" : view === "reminders" ? "reminders" : "pets");
       if (view === "history") await renderPetHistory(petId);
       if (view === "observations") await renderPetObservations(petId);
@@ -6299,6 +6429,7 @@ document.addEventListener("click", async (event) => {
     }
     if (!actionButton) return;
     const action = actionButton.dataset.action;
+    if (['home','pets','triage','reminders','more','history','observations','food','account','subscription','notifications','care','faq','feedback'].includes(action)) recordMobileRoute({ action });
     setDashboardActiveAction(action);
     if (action === "home") await renderHome();
     if (action === "pets") await renderPets();
@@ -6350,7 +6481,7 @@ installBtn.addEventListener("click", async () => {
   installBtn.hidden = true;
 });
 
-if ("serviceWorker" in navigator) {
+if (!native && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" })
     .then(() => navigator.serviceWorker.getRegistrations())
     .then((registrations) => Promise.all(
@@ -6361,11 +6492,99 @@ if ("serviceWorker" in navigator) {
     .catch(() => {});
 }
 
+function recordMobileRoute(route) {
+  if (!appMode || JSON.stringify(route) === JSON.stringify(mobileRoute)) return;
+  mobileHistory.push(mobileRoute);
+  mobileRoute = route;
+  updateMobileHeader(route.action, Boolean(route.petId));
+}
+
+function showAppConnectionError() {
+  setAppLoading(false);
+  setWorkspace('<section class="profile-card"><h2>Не удалось загрузить данные</h2><p>Проверьте соединение и попробуйте ещё раз.</p><button type="button" class="primary-button" data-mobile-retry>Повторить</button></section>');
+}
+
+function setAppLoading(loading) {
+  if (!appMode) return;
+  document.querySelectorAll('.mobile-header button, .mobile-tabbar button').forEach((button) => { button.disabled = loading; });
+}
+
+async function navigateMobile(action, route = null) {
+  if (!state.user) { openAuthDialog({ startupAction: action }); return; }
+  if (!route) recordMobileRoute({ action });
+  else mobileRoute = route;
+  setDashboardActiveAction(action);
+  try {
+    if (route?.petId) {
+      const handlers = { card: renderPetCard, history: renderPetHistory, observations: renderPetObservations,
+        weight: renderPetWeights, reminders: renderReminders, triage: renderTriage, summary: renderPetSummary, edit: renderPetEdit };
+      await (handlers[route.view] || renderPetCard)(route.petId);
+      return;
+    }
+    const handlers = { home: renderHome, pets: renderPets, triage: renderTriage, reminders: renderReminders,
+      more: renderMore, food: renderFood, history: renderGlobalHistory, observations: renderGlobalObservations,
+      account: renderAccountLinks, subscription: renderSubscription, feedback: renderFeedback };
+    if (action === 'notifications') await notificationSettings(api, setWorkspace, escapeHtml);
+    else if (action === 'care' || action === 'faq') await renderKnowledgeSection(action);
+    else await (handlers[action] || renderHome)();
+  } catch (error) { showError(readableError(error.message)); }
+}
+
+async function mobileBack() {
+  if (!legalModal.hidden) { closeLegalModal(); return; }
+  if (!authDialog.hidden) { closeAuthDialog(); return; }
+  if (!petOnboardingDialog.hidden) { closePetOnboarding(); return; }
+  if (document.querySelector('#paymentRedirectDialog')?.open) { document.querySelector('[data-payment-cancel]').click(); return; }
+  const previous = mobileHistory.pop();
+  if (previous) { await navigateMobile(previous.action, previous); return; }
+  if (mobileRoute.action !== 'home') { await navigateMobile('home', { action: 'home' }); return; }
+  if (native) await window.TVVNative.minimize();
+}
+
+async function syncNativeReminders() {
+  if (!native || !state.user) return;
+  try {
+    const data = await api('/api/reminders');
+    await window.TVVNative.syncReminders(data.items || []);
+  } catch { /* Keep the previously scheduled dates while offline. */ }
+}
+
+let resumingApp = false;
+async function resumeApp() {
+  if (resumingApp) return;
+  resumingApp = true;
+  try {
+    if (state.telegramLoginState) await pollTelegramLogin(state.telegramLoginState);
+    if (state.maxLoginState) await pollMaxLogin(state.maxLoginState);
+    if (state.user && paymentPending()) {
+      await refreshAccountState();
+      renderSubscription(paymentStatusNotice('Проверяю статус оплаты…'));
+      await checkPlusPaymentStatus({ silentNotFound: true });
+      if (state.subscription?.plan !== 'free') clearPaymentPending();
+    }
+    if (state.user && native) await syncNativeReminders();
+    if (state.user && native && localStorage.getItem('tvv_open_reminders') === '1') {
+      localStorage.removeItem('tvv_open_reminders');
+      await navigateMobile('reminders');
+    }
+  } catch (error) { showError(readableError(error.message)); }
+  finally { resumingApp = false; }
+}
+
+initMobileShell({ user: () => state.user,
+  login: (action) => openAuthDialog({ startupAction: action }),
+  navigate: navigateMobile, back: mobileBack, retry: bootstrap });
+if (appMode) setAuthMode(false);
+window.addEventListener('tvv:back', mobileBack);
+window.addEventListener('tvv:resume', resumeApp);
+window.addEventListener('tvv:external-error', () => showError('Не удалось открыть ссылку. Попробуйте ещё раз.'));
+window.addEventListener('focus', () => { if (appMode) void resumeApp(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && appMode) void resumeApp(); });
+
 clearSensitiveMiniAppFragment();
 showCookieBannerIfNeeded();
 refreshTelegramEntryLinks();
-renderPublicCheckLanding();
-renderPublicCampaignLanding();
+if (!appMode) { renderPublicCheckLanding(); renderPublicCampaignLanding(); }
 if ((location.pathname.replace(/\/+$/, "") || "/") === "/") {
   trackFunnel("landing.view", { path: "/" });
 }

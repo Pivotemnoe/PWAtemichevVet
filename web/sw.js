@@ -1,4 +1,4 @@
-const CACHE_NAME = "temichevvet-pwa-20261009-subscription-7";
+const CACHE_NAME = "temichevvet-pwa-20261013-mobile-8";
 const APP_SHELL = [
   "/",
   "/pet",
@@ -17,8 +17,15 @@ const APP_SHELL = [
   "/check/what-to-do-now",
   "/check/find-out-what-to-do",
   "/static/styles.css?v=20260912-save-diagnostics-1",
-  "/static/app.js?v=20261009-subscription-7",
-  "/static/retention.js?v=20261009-subscription-7",
+  "/static/app.js?v=20261013-mobile-8",
+  "/static/mobile.css?v=20261013-mobile-8",
+  "/static/assets/mobile/companions-v1.webp",
+  "/static/assets/mobile/health-v1.webp",
+  "/static/assets/mobile/food-v1.webp",
+  "/static/assets/mobile/dates-v1.webp",
+  "/static/platform.js?v=20261013-mobile-8",
+  "/static/mobile-shell.js?v=20261013-mobile-8",
+  "/static/retention.js?v=20261013-mobile-8",
   "/static/manifest.webmanifest?v=20260825-service-first-2",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",
   "/static/assets/app-icon-512.png?v=20260627-ios-icon-1",
@@ -64,6 +71,7 @@ const PRIVATE_PATH_PREFIXES = [
   "/admin",
   "/app",
   "/auth/",
+  "/mobile/payment-return",
   "/review-login"
 ];
 

@@ -20,3 +20,12 @@ audits/
 dist/
 build/
 node_modules/
+.playwright-cli/
+
+.mobile-tools/
+android/.gradle/
+android/local.properties
+*.keystore
+*.jks
+*.p12
+/releases/android/*.apk
