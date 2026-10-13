@@ -1,9 +1,9 @@
-import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-13";
-import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-13";
-import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-13";
+import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-14";
+import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-14";
+import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-14";
 
-import { OfflineClient, indexedWorkspace } from "./offline-store.js?v=20261013-mobile-13";
-import { petAvatar, preparePetPhoto } from "./pet-avatar.js?v=20261013-mobile-13";
+import { OfflineClient, indexedWorkspace } from "./offline-store.js?v=20261013-mobile-14";
+import { petAvatar, preparePetPhoto } from "./pet-avatar.js?v=20261013-mobile-14";
 
 const offlineClient = appMode ? new OfflineClient({ transport: appFetch, storage: indexedWorkspace(),
   changed: (status) => window.dispatchEvent(new CustomEvent('tvv:offline-state', { detail: status })) }) : null;

@@ -118,6 +118,17 @@ def _return_url(settings: Settings) -> str:
     return settings.app_base_url.rstrip("/") + "/?payment=plus"
 
 
+def _native_return_url(settings: Settings) -> str:
+    if settings.app_env == "production":
+        from app.max_auth import _app_url
+        from urllib.parse import urlsplit, urlunsplit
+        public = urlsplit(_app_url(settings))
+        base = urlunsplit(public._replace(scheme="https")).rstrip("/")
+    else:
+        base = settings.app_base_url.rstrip("/")
+    return base + "/mobile/payment-return"
+
+
 def create_plus_payment(settings: Settings, *, user_id: int, user_email: str | None = None,
                         return_to_app: bool = False) -> dict[str, Any]:
     amount_rub = _plus_price_rub()
@@ -131,7 +142,7 @@ def create_plus_payment(settings: Settings, *, user_id: int, user_email: str | N
     payload: dict[str, Any] = {
         "amount": {"value": _amount_value(amount_rub), "currency": "RUB"},
         "capture": True,
-        "confirmation": {"type": "redirect", "return_url": settings.app_base_url.rstrip('/') + '/mobile/payment-return' if return_to_app else _return_url(settings)},
+        "confirmation": {"type": "redirect", "return_url": _native_return_url(settings) if return_to_app else _return_url(settings)},
         "description": description[:128],
         "metadata": metadata,
     }
@@ -171,7 +182,7 @@ def subscription_payload(settings: Settings, *, user_id: int, user_email: str | 
         payload["payment_method_id"] = payment_method_id
     else:
         payload["save_payment_method"] = True
-        payload["confirmation"] = {"type": "redirect", "return_url": settings.app_base_url.rstrip('/') + "/mobile/payment-return" if return_to_app else _app_url(settings) + "/?payment=plus"}
+        payload["confirmation"] = {"type": "redirect", "return_url": _native_return_url(settings) if return_to_app else _app_url(settings) + "/?payment=plus"}
     receipt = _build_receipt(settings, amount_rub=200, description=description, user_email=user_email)
     if receipt:
         payload["receipt"] = receipt

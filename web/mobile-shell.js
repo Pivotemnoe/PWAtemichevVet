@@ -1,5 +1,5 @@
-import { petAvatar } from './pet-avatar.js?v=20261013-mobile-13';
-import { appMode, native } from './platform.js?v=20261013-mobile-13';
+import { petAvatar } from './pet-avatar.js?v=20261013-mobile-14';
+import { appMode, native } from './platform.js?v=20261013-mobile-14';
 
 export const APP_TABS = [
   ['home', 'Главная', 'house'], ['pets', 'Питомцы', 'paw-print'],

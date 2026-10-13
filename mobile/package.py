@@ -1,4 +1,4 @@
-"""Package reviewed local artifacts and source, excluding data and signing material."""
+"""Package published 0.1.1 artifacts and source, excluding data and signing material."""
 from pathlib import Path
 import hashlib
 import json
@@ -24,11 +24,13 @@ def archive(name, paths):
 with zipfile.ZipFile(OUT / 'TemichevVet-0.1.1.apk') as apk:
     metadata = json.loads(apk.read('assets/public/mobile-build.json'))
     assert metadata['apiOrigin'] == 'https://temichevvet.ru' and metadata['debugApi'] is False
+    assert b'20261013-mobile-14' in apk.read('assets/public/index.html')
 with zipfile.ZipFile(OUT / 'TemichevVet-QA-0.1.1.apk') as apk:
     qa_metadata = json.loads(apk.read('assets/public/mobile-build.json'))
     assert qa_metadata['apiOrigin'] == 'http://127.0.0.1:8096' and qa_metadata['debugApi'] is True
+    assert b'20261013-mobile-14' in apk.read('assets/public/index.html')
 
-docs = [ROOT / 'docs/MOBILE_APP.md', ROOT / 'docs/MOBILE_QA_REPORT_20261013_REVISION.md']
+docs = [ROOT / 'docs/MOBILE_APP.md', ROOT / 'docs/MOBILE_QA_REPORT_20261013_REVISION.md', ROOT / 'docs/MOBILE_DEPLOYMENT_20261013.md']
 archive('TemichevVet-PWA-server-0.1.1.zip', source_files('app') + source_files('web') + docs +
     [ROOT / 'requirements.txt', ROOT / 'Dockerfile', ROOT / 'releases/android/README.md', ROOT / 'releases/android/TemichevVet-0.1.1.apk'])
 android = [p for p in source_files('android') if '/src/main/assets/public/' not in p.as_posix()]
@@ -36,6 +38,7 @@ archive('TemichevVet-Android-source-0.1.1.zip', android + source_files('mobile')
     [ROOT / 'package.json', ROOT / 'package-lock.json', ROOT / 'capacitor.config.json'])
 shutil.copy2(docs[1], OUT / 'QA_REPORT.md')
 shutil.copy2(docs[0], OUT / 'BUILD_AND_DEPLOY.md')
+shutil.copy2(docs[2], OUT / 'PRODUCTION_DEPLOYMENT.md')
 screens = OUT / 'screenshots'
 screens.mkdir(exist_ok=True)
 for name in ['android-home-final.png', 'android-release-welcome.png', 'android-payment-warning.png', 'android-payment-success.png',
@@ -43,7 +46,7 @@ for name in ['android-home-final.png', 'android-release-welcome.png', 'android-p
              'pwa-pet-photo.png', 'pwa-offline-observation.png', 'pwa-cat-fallback-final.png', 'pwa-dog-fallback-final.png', 'pwa-species-list-final.png',
              'android-reminder-open.png', 'android-offline-retry.png', 'android-export-chooser.png', 'safari-390-home.png',
              'safari-320-health.png', 'safari-payment-dialog.png', 'safari-payment-canceled.png', 'download-page-final.png',
-             'android-summary-final-1.png', 'android-summary-final-2.png']:
+             'android-summary-final-1.png', 'android-summary-final-2.png', 'production-download-20261013.png', 'production-pwa-390-20261013.png']:
     shutil.copy2(ROOT / 'output/playwright' / name, screens / name)
 samples = OUT / 'samples'
 samples.mkdir(exist_ok=True)
@@ -57,25 +60,30 @@ html = (ROOT / 'web/android.html').read_text().replace('/static/android-download
     .replace('/static/assets/app-icon-192.png', 'preview/app-icon-192.png') \
     .replace('/static/assets/mobile/companions-v1.webp', 'preview/companions-v1.webp') \
     .replace('/downloads/TemichevVet-0.1.1.apk', 'TemichevVet-0.1.1.apk') \
-    .replace('href="/mobile"', 'href="http://127.0.0.1:8096/mobile"')
-html = html.replace('<main>', '<main><p class="small">Локальный макет для утверждения. Публичная страница и PWA ещё не обновлены. Здесь APK скачивается из пакета, а PWA открывается в локальном стенде.</p>')
+    .replace('href="/mobile"', 'href="https://temichevvet.ru/mobile"')
+html = html.replace('<main>', '<main><p class="small">Копия опубликованной страницы установки. Здесь APK скачивается из пакета; PWA открывается на боевом сайте. Публичная страница: <a href="https://temichevvet.ru/android">temichevvet.ru/android</a>.</p>')
 for route in ['privacy', 'terms', 'contacts']:
     html = html.replace(f'href="/{route}"', f'href="https://temichevvet.ru/{route}"')
 (OUT / 'review.html').write_text(html)
-(OUT / 'START_HERE.txt').write_text('TemichevVet 0.1.1 — кандидат для проверки\n\n'
+(OUT / 'START_HERE.txt').write_text('TemichevVet 0.1.1 — опубликованный выпуск\n\n'
+    'Установка Android и iPhone: https://temichevvet.ru/android\n'
+    'PWA: https://temichevvet.ru/mobile\n\n'
     'TemichevVet-0.1.1.apk — подписанная обычная Android-версия с рабочим HTTPS API.\n'
     'TemichevVet-0.1.1.aab — подписанный кандидат для магазина; соответствие платёжной схеме проверяется отдельно.\n'
     'TemichevVet-QA-0.1.1.apk — тестовая версия: нужен Mac, QA-сервер и ADB reverse 8096.\n'
-    'TemichevVet-PWA-server-0.1.1.zip — приложение сервера, web/PWA и подписанный APK для выкладки после утверждения.\n'
+    'TemichevVet-PWA-server-0.1.1.zip — исходники опубликованного сервера, web/PWA и подписанный APK.\n'
     'TemichevVet-Android-source-0.1.1.zip — исходники приложения и сборки; npm-зависимости устанавливаются по lock-файлу.\n'
     'QA_REPORT.md — результаты и границы проверки. BUILD_AND_DEPLOY.md — сборка и подпись.\n'
-    'review.html — локальный макет страницы скачивания. screenshots/ — подтверждения. samples/ — только вымышленные QA-данные.\n\n'
-    'Пакет не содержит базы, .env, ключи подписи или пароли. Боевой сервер ещё не обновлён.\n')
+    'PRODUCTION_DEPLOYMENT.md / .json и PUBLIC_VERIFICATION.json — подтверждения публикации.\n'
+    'review.html — копия страницы скачивания. screenshots/ — подтверждения. samples/ — только вымышленные QA-данные.\n\n'
+    'Пакет не содержит базы, .env, ключи подписи или пароли. Боевой сервер и PWA обновлены 13.10.2026.\n')
 files = [p for p in OUT.iterdir() if p.is_file() and p.suffix in {'.apk', '.aab', '.zip'}]
 hashes = {p.name: {'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'bytes': p.stat().st_size} for p in files}
 (OUT / 'SHA256SUMS.txt').write_text(''.join(f"{item['sha256']}  {name}\n" for name, item in sorted(hashes.items())))
 commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+publication = json.loads((OUT / 'PRODUCTION_DEPLOYMENT.json').read_text())
+assert hashes['TemichevVet-0.1.1.apk']['sha256'] == publication['apk_sha256'], 'Packet APK differs from published APK'
 (OUT / 'BUILD_MANIFEST.json').write_text(json.dumps({'version': '0.1.1', 'source_commit': commit, 'release': metadata,
-    'qa': qa_metadata, 'artifacts': hashes}, ensure_ascii=False, indent=2) + '\n')
+    'qa': qa_metadata, 'publication': publication, 'artifacts': hashes}, ensure_ascii=False, indent=2) + '\n')
 print('Local delivery packet:', OUT)
 print('Archives exclude databases, environment files, caches and private signing material.')

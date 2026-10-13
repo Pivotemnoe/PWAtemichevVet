@@ -1,4 +1,4 @@
-import { native } from './platform.js?v=20261013-mobile-13';
+import { native } from './platform.js?v=20261013-mobile-14';
 let pendingToken = "";
 let device = "";
 try {
