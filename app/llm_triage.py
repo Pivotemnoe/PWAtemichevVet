@@ -104,8 +104,19 @@ def _supports_temperature(model_name: str) -> bool:
     return True
 
 
+def _request_options_for_plan(model_name: str, plan_code: str | None) -> dict[str, Any]:
+    base = model_name.lower().split(":", 1)[0]
+    if base == "gpt-6-luna" or base.startswith("gpt-6-luna-"):
+        # Keep Free as a fast non-reasoning request; Plus retains deeper reasoning.
+        # Sampling parameters are supported only with reasoning disabled.
+        if (plan_code or "free").strip().lower() in {"plus", "pro", "vip"}:
+            return {"reasoning_effort": "medium"}
+        return {"reasoning_effort": "none", "temperature": 1}
+    return {"temperature": 1} if _supports_temperature(model_name) else {}
+
+
 def _model_for_plan(plan_code: str | None) -> str:
-    default = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    default = os.getenv("OPENAI_MODEL", "gpt-6-luna")
     plan = (plan_code or "free").strip().lower()
     if plan == "free":
         return os.getenv("OPENAI_MODEL_FREE", default)
@@ -310,8 +321,7 @@ def call_triage_llm(
             },
         ],
     }
-    if _supports_temperature(model):
-        request["temperature"] = 1
+    request.update(_request_options_for_plan(model, plan_code))
 
     response = client.chat.completions.create(**request)
     message = response.choices[0].message.content if response.choices else ""
