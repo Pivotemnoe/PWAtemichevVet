@@ -1,4 +1,5 @@
 """Provider request contracts. The fake client prevents live API calls."""
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -12,9 +13,9 @@ from app import llm_triage
 
 
 class LlmModelRoutingTests(unittest.TestCase):
-    def request_for(self, model, plan):
+    def request_for(self, model, plan, answer='2) Уровень срочности: 🟡 Нужна консультация — свяжитесь с врачом.'):
         client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock(return_value=SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content='2) Уровень срочности: 🟡 Нужна консультация — свяжитесь с врачом.'))],
+            choices=[SimpleNamespace(message=SimpleNamespace(content=answer))],
             usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, total_tokens=150),
         )))))
         environment = {'OPENAI_API_KEY': 'fixture-key', 'OPENAI_BASE_URL': 'http://127.0.0.1:8091/v1', 'OPENAI_MODEL': model,
@@ -39,6 +40,17 @@ class LlmModelRoutingTests(unittest.TestCase):
         self.assertEqual(request['reasoning_effort'], 'medium')
         self.assertNotIn('temperature', request)
         self.assertIn(llm_triage.PLUS_EXPERT_ADDON.strip(), request['messages'][0]['content'])
+        self.assertIn(llm_triage.PLUS_FOLLOWUP_ADDON.strip(), request['messages'][0]['content'])
+
+    def test_plus_prompt_update_preserves_other_tier_prompts(self):
+        # Golden hashes captured before the Plus change protect the other live tiers.
+        for plan, expected in [
+            ('free', '2ba9b1ac6a2fad5a0e8a241908234f2e63a5629b118f409815e9b026edfc06c4'),
+            ('pro', '9f458b07369770eaf5bf58acee2b63432a8fc858036b7276e8de07727d1396bb'),
+            ('vip', '9f458b07369770eaf5bf58acee2b63432a8fc858036b7276e8de07727d1396bb'),
+        ]:
+            with self.subTest(plan=plan):
+                self.assertEqual(hashlib.sha256(llm_triage._system_prompt_for_plan(plan).encode()).hexdigest(), expected)
 
     def test_plan_case_and_snapshot_use_the_same_request_contract(self):
         request, _, _ = self.request_for('gpt-6-luna-2026-10-01', ' PLUS ')
@@ -69,6 +81,17 @@ class LlmModelRoutingTests(unittest.TestCase):
         self.assertEqual(constructor['timeout'], 45.0)
         self.assertEqual((result.prompt_tokens, result.completion_tokens, result.total_tokens), (100, 50, 150))
         self.assertIn(llm_triage.TRUST_PHRASE, result.text)
+
+    def test_plus_emphasized_urgency_is_parseable_without_changing_the_level(self):
+        for markup in ['**', '__']:
+            for level, emoji, label in [('green', '🟢', 'Можно наблюдать'), ('yellow', '🟡', 'Нужна консультация'), ('red', '🟥', 'Срочно в клинику')]:
+                with self.subTest(markup=markup, level=level):
+                    answer = f'1) Кратко: тест.\n\n2) {markup}Уровень срочности: {emoji} {label} —{markup} пояснение.\n\n3) План.'
+                    _, _, result = self.request_for('gpt-6-luna', 'plus', answer)
+                    self.assertEqual(llm_triage.extract_urgency(result.text)[2], level)
+                    self.assertIn('пояснение.', result.text)
+        _, _, free = self.request_for('gpt-6-luna', 'free', answer)
+        self.assertIn(markup, free.text)
 
     def test_missing_key_does_not_call_provider(self):
         constructor = Mock()
