@@ -91,6 +91,10 @@ final class AppUITests: XCTestCase {
     }
 
     private func openPet() {
+        // A cold launch exposes the fixed toolbar before the account dashboard
+        // finishes loading. Mid-test restarts do not run setUp's readiness wait.
+        let homePet = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch
+        XCTAssertTrue(homePet.waitForExistence(timeout: 40))
         tapButton("Питомцы")
         let pet = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch
         XCTAssertTrue(pet.waitForExistence(timeout: 15))
