@@ -20,8 +20,9 @@ html = html.replace(/<script src="https:\/\/st\.max\.ru[^>]+><\/script>/, '')
   .replace(/<script src="\/static\/app\.js[^>]+><\/script>/, '<script src="/static/native.js" type="module"></script>');
 await writeFile(path.join(out, 'index.html'), html);
 await writeFile(path.join(out, 'mobile-build.json'), JSON.stringify({ platform, appVersion: packageInfo.version, apiOrigin: apiUrl.origin,
+  ...(platform === 'ios' ? { minIOSVersion: '15.4' } : {}),
   debugApi: process.env.TVV_DEBUG_API === '1', builtAt: new Date().toISOString() }, null, 2) + '\n');
 await build({ entryPoints: [path.join(root, platform === 'ios' ? 'mobile/ios-entry.js' : 'mobile/native-entry.js')], outfile: path.join(out, 'static/native.js'),
-  bundle: true, format: 'esm', target: 'es2022', minify: true,
+  bundle: true, format: 'esm', target: platform === 'ios' ? 'safari15.4' : 'es2022', minify: true,
   define: { __TVV_API_BASE__: JSON.stringify(apiUrl.origin), __TVV_DEBUG_API__: JSON.stringify(process.env.TVV_DEBUG_API === '1') } });
 console.log(`${platform} assets built; API: ${apiUrl.origin}`);

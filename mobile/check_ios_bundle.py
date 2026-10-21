@@ -1,6 +1,7 @@
 """Build-time checks; no signing material, account or network access is needed."""
 import json
 import plistlib
+import re
 import sys
 from pathlib import Path
 
@@ -12,6 +13,13 @@ def check(assets: Path, configuration: str) -> None:
     package = json.loads((ROOT / 'package.json').read_text())
     if metadata['platform'] != 'ios' or metadata['appVersion'] != package['version']:
         raise ValueError('Build fresh iOS assets with npm run ios:sync')
+    # Offline state uses structuredClone/randomUUID and the UI uses HTML dialog;
+    # these WebKit APIs require iOS 15.4, beyond Capacitor's native minimum 15.0.
+    targets = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET = ([\d.]+);',
+                         (ROOT / 'ios/App/App.xcodeproj/project.pbxproj').read_text())
+    if metadata.get('minIOSVersion') != '15.4' or not targets or any(
+            tuple(map(int, value.split('.'))) < (15, 4) for value in targets):
+        raise ValueError('iPhone app requires iOS 15.4 or later for its WebKit APIs')
     release = configuration == 'Release'
     if release and (metadata['debugApi'] or metadata['apiOrigin'] != 'https://temichevvet.ru'):
         raise ValueError('Release must use the production HTTPS API, without QA access')
