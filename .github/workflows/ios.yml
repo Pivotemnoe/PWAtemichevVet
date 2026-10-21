@@ -39,6 +39,7 @@ jobs:
           python -m pip install -r requirements-test.txt
           npm run mobile:test
           python -m unittest scripts.test_mobile_api scripts.test_pet_photos_offline
+          python -m unittest scripts.test_ios_qa_server
       - name: Compile production iPhone application without signing
         run: |
           mkdir -p output/ios
@@ -50,6 +51,7 @@ jobs:
             -destination 'generic/platform=iOS' -derivedDataPath output/ios/device \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee output/ios/device-build.log
           cp ios/App/App/public/mobile-build.json output/ios/production-build.json
+          tar -czf output/ios/TemichevVet-iPhone-UNSIGNED.tar.gz -C output/ios/device/Build/Products/Release-iphoneos App.app
       - name: Prepare isolated QA fixture and simulator
         run: |
           mkdir -p .mobile-tools
@@ -72,13 +74,22 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as out: out.write('TVV_SIMULATOR_ID=' + device['udid'] + '\n')
           print('Selected simulator:', device['name'], device['udid'])
           PY
+      - name: Compile simulator application and UI tests
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme TemichevVet -configuration Debug \
+            -destination "platform=iOS Simulator,id=$TVV_SIMULATOR_ID" \
+            -derivedDataPath output/ios/simulator CODE_SIGNING_ALLOWED=NO \
+            build-for-testing 2>&1 | tee output/ios/simulator-build.log
       - name: Run iPhone application and UI tests
         run: |
           set -o pipefail
           xcodebuild -project ios/App/App.xcodeproj -scheme TemichevVet -configuration Debug \
             -destination "platform=iOS Simulator,id=$TVV_SIMULATOR_ID" \
             -derivedDataPath output/ios/simulator -resultBundlePath output/ios/SimulatorQA.xcresult \
-            CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test 2>&1 | tee output/ios/simulator-tests.log
+            CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 240 \
+            -maximum-test-execution-time-allowance 300 test-without-building 2>&1 | tee output/ios/simulator-tests.log
           tar -czf output/ios/TemichevVet-iPhone-Simulator.tar.gz -C output/ios/simulator/Build/Products/Debug-iphonesimulator App.app
       - name: Collect evidence and stop the fixture server
         if: always()

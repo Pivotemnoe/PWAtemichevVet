@@ -67,8 +67,14 @@ window.TVVNative = {
   syncReminders(items) {
     notificationSync = notificationSync.catch(() => {}).then(async () => {
       if (!await this.notificationsEnabled()) return;
-      const info = await syncIOSReminders(NativeReminders, items);
-      localStorage.setItem(planKey, JSON.stringify(info));
+      try {
+        const info = await syncIOSReminders(NativeReminders, items);
+        localStorage.setItem(planKey, JSON.stringify(info));
+      } catch (error) {
+        const previous = this.reminderPlanInfo();
+        localStorage.setItem(planKey, JSON.stringify({ ...previous, updateFailed: true }));
+        throw error;
+      }
     });
     return notificationSync;
   },

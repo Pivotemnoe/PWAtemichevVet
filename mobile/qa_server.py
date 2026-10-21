@@ -8,9 +8,11 @@ import sqlite3
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+STATE_DIR = Path(os.environ.get('TVV_QA_STATE_DIR', ROOT / '.mobile-tools')).resolve()
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT))
 os.environ.update({
-    'APP_ENV': 'development', 'DATABASE_PATH': str(ROOT / '.mobile-tools/qa.db'),
+    'APP_ENV': 'development', 'DATABASE_PATH': str(STATE_DIR / 'qa.db'),
     'APP_BASE_URL': os.environ.get('TVV_QA_ORIGIN', 'http://127.0.0.1:8096'),
     'SESSION_SECRET': 'isolated-mobile-qa-session-secret-20261013',
     'DEV_AUTH_CODE_LOG': '1', 'EMAIL_REGISTRATION_RUSSIAN_DOMAIN_ONLY': '0',
@@ -24,7 +26,29 @@ from app import main
 from app.payments import yookassa
 from app.llm_triage import LlmTriageResult
 from fastapi import Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+
+qa_api_unavailable = False
+
+@main.app.middleware('http')
+async def fixture_api_availability(request: Request, call_next):
+    if qa_api_unavailable and request.url.path.startswith('/api/'):
+        return JSONResponse({'detail': 'qa_api_unavailable'}, status_code=503)
+    return await call_next(request)
+
+@main.app.api_route('/mobile/qa-api-state', methods=['GET', 'POST'])
+async def fixture_api_state(request: Request):
+    global qa_api_unavailable
+    if request.client is None or request.client.host not in {'127.0.0.1', '::1', 'testclient'}:
+        raise HTTPException(403)
+    if request.method == 'POST':
+        payload = await request.json()
+        qa_api_unavailable = bool(payload.get('unavailable'))
+    with sqlite3.connect('file:' + str(STATE_DIR / 'qa.db') + '?mode=ro', uri=True) as conn:
+        conn.execute('PRAGMA query_only=ON')
+        count = conn.execute("SELECT COUNT(*) FROM pet_observations o JOIN users u ON u.id=o.user_id "
+            "WHERE u.email='ios-qa@example.ru' AND o.payload LIKE ?", ('%QA iOS offline 20261021%',)).fetchone()[0]
+    return {'unavailable': qa_api_unavailable, 'ios_offline_note_count': count}
 
 def fixture_triage(**kwargs):
     if 'QA_FORCE_FAIL' in str(kwargs.get('complaint_text') or ''):
@@ -35,7 +59,7 @@ def fixture_triage(**kwargs):
         '5. Для реального обращения нужен обычный сервис.\n6. При тревожных симптомах обратитесь в клинику.', model='mobile-qa-fixture')
 main.call_triage_llm = fixture_triage
 
-fixture_path = ROOT / '.mobile-tools/qa-payments.json'
+fixture_path = STATE_DIR / 'qa-payments.json'
 payments = json.loads(fixture_path.read_text()) if fixture_path.exists() else {}
 def persist_payments():
     fixture_path.write_text(json.dumps(payments, ensure_ascii=False, indent=2) + '\n')
@@ -60,8 +84,8 @@ def fake_provider(settings, *, method, path, payload=None, idempotence_key=None)
 yookassa._request_json = fake_provider
 
 # Recover only pending fixtures created by an older run of this local server.
-if (ROOT / '.mobile-tools/qa.db').exists():
-    with sqlite3.connect('file:' + str(ROOT / '.mobile-tools/qa.db') + '?mode=ro', uri=True) as conn:
+if (STATE_DIR / 'qa.db').exists():
+    with sqlite3.connect('file:' + str(STATE_DIR / 'qa.db') + '?mode=ro', uri=True) as conn:
         for payment_id, raw in conn.execute("SELECT provider_payment_id, request_payload FROM billing_charges WHERE status = 'pending' AND provider_payment_id IS NOT NULL"):
             if payment_id not in payments:
                 payments[payment_id] = fixture_item(main.settings, payment_id, json.loads(raw))
@@ -83,7 +107,7 @@ async def checkout_result(payment_id: str, request: Request):
     return RedirectResponse(payments[payment_id]['_return'], status_code=303)
 
 # These QA endpoints must precede the application's HTML fallback route.
-qa_routes = [route for route in main.app.router.routes if getattr(route, 'path', '').startswith('/mobile/qa-checkout/')]
+qa_routes = [route for route in main.app.router.routes if getattr(route, 'path', '').startswith(('/mobile/qa-checkout/', '/mobile/qa-api-state'))]
 main.app.router.routes[:] = qa_routes + [route for route in main.app.router.routes if route not in qa_routes]
 
 if __name__ == '__main__':

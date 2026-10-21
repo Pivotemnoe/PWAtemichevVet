@@ -4670,10 +4670,12 @@ function renderPushCard(push) {
     button = `<button class="secondary-button compact" data-action="enable-push" type="button">Включить уведомления</button>`;
   }
   const plan = push?.status?.reminder_plan;
-  if (count > 0 && plan?.omittedReminders > 0) {
+  if (count > 0 && plan?.updateFailed) {
+    statusText += " iPhone не смог обновить расписание. Сохранились прежние напоминания; откройте приложение ещё раз, чтобы повторить обновление.";
+  } else if (count > 0 && plan?.omittedReminders > 0) {
     statusText += ` Для ${plan.omittedReminders} дат пока не хватило места в локальном расписании iPhone.`;
   } else if (count > 0 && plan?.truncated && plan.refreshBefore) {
-    const deadline = new Date(plan.refreshBefore).toLocaleDateString('ru-RU');
+    const deadline = new Date(plan.refreshBefore).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     statusText += ` Откройте приложение до ${deadline}, чтобы обновить последующие уведомления.`;
   }
   return `

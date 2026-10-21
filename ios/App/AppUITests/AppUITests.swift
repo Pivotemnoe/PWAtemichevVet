@@ -1,10 +1,12 @@
 import XCTest
+import Foundation
 
 final class AppUITests: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "ru.temichevvet.app.qa")
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        _ = try qaRequest("/mobile/qa-api-state", body: ["unavailable": false])
         app.launch()
     }
 
@@ -30,6 +32,45 @@ final class AppUITests: XCTestCase {
             app.swipeUp()
         }
         XCTFail("Button is not reachable: " + label, file: file, line: line)
+    }
+
+    private func tapButtonBeginning(_ label: String) {
+        let button = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 15), label)
+        for _ in 0..<5 {
+            if button.isHittable { button.tap(); return }
+            app.swipeUp()
+        }
+        XCTFail("Button is not reachable: " + label)
+    }
+
+    private func qaRequest(_ path: String, body: [String: Any]? = nil) throws -> [String: Any] {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:8096" + path)!)
+        request.timeoutInterval = 15
+        if let body = body {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        var output: Data?
+        var failure: Error?
+        var status = 0
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            output = data; failure = error; status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            semaphore.signal()
+        }.resume()
+        XCTAssertEqual(semaphore.wait(timeout: .now() + 20), .success)
+        if let failure = failure { throw failure }
+        XCTAssertEqual(status, 200)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(output)) as? [String: Any])
+    }
+
+    private func openPet() {
+        tapButton("Питомцы")
+        let pet = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch
+        XCTAssertTrue(pet.waitForExistence(timeout: 15))
+        pet.tap()
     }
 
     func test01GuestShell() {
@@ -67,5 +108,61 @@ final class AppUITests: XCTestCase {
             tapButton(label)
             XCTAssertTrue(app.buttons["Главная"].exists)
         }
+    }
+
+    func test03OfflineNoteSurvivesColdStartAndSyncsOnce() throws {
+        openPet()
+        tapButtonBeginning("Наблюдения")
+        _ = try qaRequest("/mobile/qa-api-state", body: ["unavailable": true])
+        defer { _ = try? qaRequest("/mobile/qa-api-state", body: ["unavailable": false]) }
+        let note = app.textFields["Что заметили?"]
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        note.tap()
+        note.typeText("QA iOS offline 20261021")
+        tapButton("Добавить наблюдение")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "QA iOS offline 20261021")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertEqual(try qaRequest("/mobile/qa-api-state")["ios_offline_note_count"] as? Int, 0)
+        app.terminate()
+        app.launch()
+        openPet()
+        tapButtonBeginning("Наблюдения")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "QA iOS offline 20261021")).firstMatch.waitForExistence(timeout: 20))
+        _ = try qaRequest("/mobile/qa-api-state", body: ["unavailable": false])
+        tapButton("Повторить отправку")
+        let synced = NSPredicate { _, _ in
+            (try? self.qaRequest("/mobile/qa-api-state")["ios_offline_note_count"] as? Int) == 1
+        }
+        expectation(for: synced, evaluatedWith: nil)
+        waitForExpectations(timeout: 25)
+        app.terminate()
+        app.launch()
+        XCTAssertEqual(try qaRequest("/mobile/qa-api-state")["ios_offline_note_count"] as? Int, 1)
+    }
+
+    func test04LocalNotificationOpensDatesAfterTermination() throws {
+        let auth = try qaRequest("/api/auth/email/start", body: ["email": "ios-qa@example.ru"])
+        _ = try qaRequest("/api/auth/email/verify", body: ["email": "ios-qa@example.ru", "code": try XCTUnwrap(auth["debug_code"])])
+        let pets = try qaRequest("/api/pets")
+        let pet = try XCTUnwrap((pets["items"] as? [[String: Any]])?.first)
+        let due = Date().addingTimeInterval(120)
+        let day = DateFormatter(); day.dateFormat = "yyyy-MM-dd"; day.locale = Locale(identifier: "en_US_POSIX")
+        let time = DateFormatter(); time.dateFormat = "HH:mm"; time.locale = Locale(identifier: "en_US_POSIX")
+        _ = try qaRequest("/api/reminders", body: ["pet_id": try XCTUnwrap(pet["id"]), "reminder_type": "custom",
+            "title": "QA iOS local reminder", "due_date": day.string(from: due), "due_time": time.string(from: due), "periodicity": "once"])
+        tapButton("Профиль")
+        tapButton("Включить уведомления")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = app.alerts.buttons["Allow"]
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
+        else if springboard.buttons["Allow"].exists { springboard.buttons["Allow"].tap() }
+        tapButton("Даты")
+        XCTAssertTrue(app.staticTexts["QA iOS local reminder"].waitForExistence(timeout: 15))
+        XCUIDevice.shared.press(.home)
+        app.terminate()
+        let delivered = springboard.staticTexts["QA iOS local reminder"]
+        XCTAssertTrue(delivered.waitForExistence(timeout: 150))
+        delivered.tap()
+        XCTAssertTrue(app.staticTexts["QA iOS local reminder"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Отключить"].exists)
     }
 }
