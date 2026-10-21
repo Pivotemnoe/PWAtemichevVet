@@ -226,8 +226,8 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.frame.contains(center))
         app.coordinate(withNormalizedOffset: CGVector(dx: (center.x - app.frame.minX) / app.frame.width,
                                                        dy: (center.y - app.frame.minY) / app.frame.height)).tap()
-        let choose = app.buttons.matching(NSPredicate(format: "label IN %@", ["Choose", "Выбрать"])).firstMatch
-        if choose.waitForExistence(timeout: 3) { choose.tap() }
+        let choose = app.buttons.matching(NSPredicate(format: "label IN %@", ["Choose", "Выбрать", "Done", "Готово"])).firstMatch
+        if choose.waitForExistence(timeout: 10) { choose.tap() }
         let add = app.buttons.matching(NSPredicate(format: "label IN %@", ["Add", "Добавить"])).firstMatch
         if add.exists { add.tap() }
         let saved = NSPredicate { _, _ in
