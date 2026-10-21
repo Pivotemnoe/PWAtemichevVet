@@ -100,11 +100,38 @@ jobs:
           if [ -d output/ios/SimulatorQA.xcresult ]; then
             xcrun xcresulttool export attachments --path output/ios/SimulatorQA.xcresult --output-path output/ios/attachments || true
           fi
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          source = Path('output/ios/attachments')
+          evidence = Path('output/ios/evidence')
+          evidence.mkdir(parents=True, exist_ok=True)
+          manifest = source / 'manifest.json'
+          if manifest.exists():
+              shutil.copy2(manifest, evidence / 'manifest.json')
+              for test in json.loads(manifest.read_text()):
+                  for item in test['attachments']:
+                      title = item['suggestedHumanReadableName']
+                      name = item['exportedFileName']
+                      if Path(name).name == name and title.startswith(('Accessibility - ', '-[AppUITests ')):
+                          shutil.copy2(source / name, evidence / name)
+          PY
           if [ -n "$TVV_SIMULATOR_ID" ]; then
             xcrun simctl io "$TVV_SIMULATOR_ID" screenshot output/ios/iphone-final.png || true
             xcrun simctl shutdown "$TVV_SIMULATOR_ID" || true
           fi
           if [ -f output/ios/qa-server.pid ]; then kill "$(cat output/ios/qa-server.pid)" || true; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-evidence-${{ github.sha }}
+          retention-days: 14
+          path: |
+            output/ios/evidence
+            output/ios/*.log
+            output/ios/*.json
+            output/ios/*.txt
+            output/ios/*.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

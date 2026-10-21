@@ -74,7 +74,9 @@ final class AppUITests: XCTestCase {
     }
 
     func test01GuestShell() {
-        XCTAssertTrue(app.buttons["Войти или создать аккаунт"].waitForExistence(timeout: 25))
+        // The hosted simulator's first WebKit launch can finish after its
+        // accessibility snapshot is ready; subsequent launches are much faster.
+        XCTAssertTrue(app.buttons["Войти или создать аккаунт"].waitForExistence(timeout: 60))
         for label in ["Главная", "Питомцы", "Здоровье", "Даты", "Ещё"] {
             XCTAssertTrue(app.buttons[label].exists, "Missing app tab: " + label)
         }
@@ -127,6 +129,7 @@ final class AppUITests: XCTestCase {
         openPet()
         tapButtonBeginning("Наблюдения")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "QA iOS offline 20261021")).firstMatch.waitForExistence(timeout: 20))
+        tapButton("Проверить")
         _ = try qaRequest("/mobile/qa-api-state", body: ["unavailable": false])
         tapButton("Повторить отправку")
         let synced = NSPredicate { _, _ in
@@ -179,14 +182,18 @@ final class AppUITests: XCTestCase {
     func test06PetPhotoIsSavedFromTheSystemPicker() throws {
         openPet()
         tapButton("Добавить фото")
-        let library = app.buttons["Photo Library"]
+        // WebKit localizes its file menu from the document language (Russian),
+        // independently of the simulator's English system locale.
+        let library = app.buttons.matching(NSPredicate(format: "label IN %@", ["Медиатека", "Photo Library"])).firstMatch
         XCTAssertTrue(library.waitForExistence(timeout: 10))
         library.tap()
         let photo = app.collectionViews.cells.firstMatch
         XCTAssertTrue(photo.waitForExistence(timeout: 15))
         photo.tap()
-        if app.buttons["Choose"].waitForExistence(timeout: 3) { app.buttons["Choose"].tap() }
-        if app.buttons["Add"].exists { app.buttons["Add"].tap() }
+        let choose = app.buttons.matching(NSPredicate(format: "label IN %@", ["Choose", "Выбрать"])).firstMatch
+        if choose.waitForExistence(timeout: 3) { choose.tap() }
+        let add = app.buttons.matching(NSPredicate(format: "label IN %@", ["Add", "Добавить"])).firstMatch
+        if add.exists { add.tap() }
         let saved = NSPredicate { _, _ in
             (try? self.qaRequest("/mobile/qa-api-state")["ios_photo_count"] as? Int) == 1
         }

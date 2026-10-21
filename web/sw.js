@@ -1,4 +1,4 @@
-const CACHE_NAME = "temichevvet-pwa-20261017-pwa-ux-4";
+const CACHE_NAME = "temichevvet-pwa-20261021-mobile-15";
 const APP_SHELL = [
   "/",
   "/mobile",
@@ -17,9 +17,9 @@ const APP_SHELL = [
   "/check/general",
   "/check/what-to-do-now",
   "/check/find-out-what-to-do",
-  "/static/styles.css?v=20261017-pwa-ux-4",
-  "/static/app.js?v=20261017-pwa-ux-4",
-  "/static/mobile.css?v=20261017-pwa-ux-4",
+  "/static/styles.css?v=20261021-mobile-15",
+  "/static/app.js?v=20261021-mobile-15",
+  "/static/mobile.css?v=20261021-mobile-15",
   "/static/assets/mobile/companions-v1.webp",
   "/static/assets/mobile/health-v1.webp",
   "/static/assets/mobile/food-v1.webp",
@@ -27,7 +27,7 @@ const APP_SHELL = [
   "/static/platform.js?v=20261013-mobile-14",
   "/static/offline-store.js?v=20261013-mobile-14",
   "/static/pet-avatar.js?v=20261013-mobile-14",
-  "/static/mobile-shell.js?v=20261017-pwa-ux-4",
+  "/static/mobile-shell.js?v=20261021-mobile-15",
   "/static/retention.js?v=20261013-mobile-14",
   "/static/manifest.webmanifest?v=20260825-service-first-2",
   "/static/assets/app-icon-192.png?v=20260627-ios-icon-1",

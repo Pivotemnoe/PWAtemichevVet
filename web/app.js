@@ -1,6 +1,6 @@
 import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-14";
 import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-14";
-import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261017-pwa-ux-4";
+import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261021-mobile-15";
 
 import { OfflineClient, indexedWorkspace } from "./offline-store.js?v=20261013-mobile-14";
 import { petAvatar, preparePetPhoto } from "./pet-avatar.js?v=20261013-mobile-14";
