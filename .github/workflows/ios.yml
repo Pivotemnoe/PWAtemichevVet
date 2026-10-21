@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies and run mobile checks
         run: |
           npm ci
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-test.txt
           npm run mobile:test
           python -m unittest scripts.test_mobile_api scripts.test_pet_photos_offline
       - name: Compile production iPhone application without signing
