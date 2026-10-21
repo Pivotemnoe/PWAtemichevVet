@@ -105,6 +105,8 @@ await App.addListener('appStateChange', ({ isActive }) => { if (isActive) resume
 await App.addListener('appUrlOpen', ({ url }) => handleAppUrl(url));
 const launch = await App.getLaunchUrl();
 if (launch?.url) handleAppUrl(launch.url);
+const notificationLaunch = await NativeReminders.consumeLaunch();
+if (notificationLaunch.openReminders) localStorage.setItem('tvv_open_reminders', '1');
 await Browser.addListener('browserFinished', resume);
 await Network.addListener('networkStatusChange', ({ connected }) => {
   const banner = document.querySelector('#mobileConnection');

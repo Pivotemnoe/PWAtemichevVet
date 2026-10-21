@@ -9,10 +9,31 @@ public class NativeRemindersPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "NativeReminders"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "replace", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "clear", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "clear", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "consumeLaunch", returnType: CAPPluginReturnPromise)
     ]
     private let queue = DispatchQueue(label: "ru.temichevvet.reminders")
     private static let prefix = "tvv-reminder-"
+    // Scene connection precedes plugin loading when a notification launches a
+    // terminated app. Capacitor's scene proxy forwards URLs, not this response.
+    // Both accesses below run on the main queue; nothing is persisted globally.
+    private static var openDatesOnLaunch = false
+
+    static func captureLaunch(_ response: UNNotificationResponse?) {
+        guard let request = response?.notification.request,
+              request.identifier.hasPrefix(prefix),
+              let extra = request.content.userInfo["cap_extra"] as? [String: Any],
+              extra["tvvPetReminder"] as? Bool == true else { return }
+        openDatesOnLaunch = true
+    }
+
+    @objc func consumeLaunch(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            let openDates = Self.openDatesOnLaunch
+            Self.openDatesOnLaunch = false
+            call.resolve(["openReminders": openDates])
+        }
+    }
 
     private func requests(_ items: [JSObject]) throws -> [UNNotificationRequest] {
         var ids = Set<Int>()
