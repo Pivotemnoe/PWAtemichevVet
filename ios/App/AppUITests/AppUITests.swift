@@ -35,12 +35,12 @@ final class AppUITests: XCTestCase {
     private func tapButton(_ label: String, file: StaticString = #filePath, line: UInt = #line) {
         let buttons = app.buttons.matching(NSPredicate(format: "label == %@", label))
         XCTAssertTrue(buttons.firstMatch.waitForExistence(timeout: 15), label, file: file, line: line)
-        for _ in 0..<4 {
+        for _ in 0..<8 {
             if let button = buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) {
                 button.tap()
                 return
             }
-            app.swipeUp()
+            scrollToward(buttons.firstMatch)
         }
         XCTFail("Button is not reachable: " + label, file: file, line: line)
     }
@@ -48,11 +48,19 @@ final class AppUITests: XCTestCase {
     private func tapButtonBeginning(_ label: String) {
         let button = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 15), label)
-        for _ in 0..<5 {
+        for _ in 0..<8 {
             if button.isHittable { button.tap(); return }
-            app.swipeUp()
+            scrollToward(button)
         }
         XCTFail("Button is not reachable: " + label)
+    }
+
+    private func scrollToward(_ element: XCUIElement) {
+        // WebKit may restore the previous scroll position after a cold launch.
+        // A control above the fixed header needs a downward gesture, whereas
+        // one below the bottom bar needs an upward gesture.
+        if element.frame.midY < app.frame.midY { app.swipeDown() }
+        else { app.swipeUp() }
     }
 
     private func qaRequest(_ path: String, body: [String: Any]? = nil) throws -> [String: Any] {
@@ -202,8 +210,11 @@ final class AppUITests: XCTestCase {
         let library = app.buttons.matching(NSPredicate(format: "label IN %@", ["Медиатека", "Photo Library"])).firstMatch
         XCTAssertTrue(library.waitForExistence(timeout: 10))
         library.tap()
-        let photo = app.collectionViews.cells.firstMatch
-        XCTAssertTrue(photo.waitForExistence(timeout: 15))
+        // The current system picker exposes photo thumbnails as Images, not
+        // UICollectionView cells. Match their visible accessibility labels.
+        let photo = app.images.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                     "Photo,", "Фото,")).firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 25))
         photo.tap()
         let choose = app.buttons.matching(NSPredicate(format: "label IN %@", ["Choose", "Выбрать"])).firstMatch
         if choose.waitForExistence(timeout: 3) { choose.tap() }
