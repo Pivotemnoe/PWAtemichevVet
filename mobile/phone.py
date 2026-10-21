@@ -7,6 +7,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--serial', required=True)
+parser.add_argument('--package', help='Refuse actions if another application is in front')
 parser.add_argument('action', choices=['dump', 'tap', 'text', 'back', 'screenshot'])
 parser.add_argument('value', nargs='?')
 parser.add_argument('--id', action='store_true')
@@ -15,9 +16,20 @@ args = parser.parse_args()
 def adb(*command, capture=True):
     return subprocess.run(['adb', '-s', args.serial, *command], check=True, stdout=subprocess.PIPE if capture else None).stdout
 def dump():
-    raw = adb('exec-out', 'uiautomator', 'dump', '/dev/tty').decode()
+    for attempt in range(3):
+        raw = adb('exec-out', 'uiautomator', 'dump', '/dev/tty').decode()
+        if '<?xml' in raw and '</hierarchy>' in raw:
+            break
+    else:
+        raise SystemExit('Android accessibility tree is not ready: ' + raw.strip()[:250])
     raw = raw[raw.index('<?xml'):raw.rindex('</hierarchy>') + len('</hierarchy>')]
-    return ET.fromstring(raw)
+    tree = ET.fromstring(raw)
+    if args.package:
+        windows = list(tree)
+        foreground = windows[0].attrib.get('package', '') if windows else ''
+        if foreground != args.package:
+            raise SystemExit(f'Refusing UI action: expected {args.package}, foreground is {foreground}')
+    return tree
 if args.action in {'dump', 'tap'}:
     tree = dump()
     visible = []
@@ -42,6 +54,9 @@ if args.action in {'dump', 'tap'}:
         adb('shell', 'input', 'tap', str((b[0]+b[2])//2), str((b[1]+b[3])//2))
         print('Tapped:', args.value)
 elif args.action == 'text':
+    if args.package: dump()
     adb('shell', 'input', 'text', args.value.replace(' ', '%s'))
-elif args.action == 'back': adb('shell', 'input', 'keyevent', '4')
+elif args.action == 'back':
+    if args.package: dump()
+    adb('shell', 'input', 'keyevent', '4')
 elif args.action == 'screenshot': Path(args.value).write_bytes(adb('exec-out', 'screencap', '-p'))

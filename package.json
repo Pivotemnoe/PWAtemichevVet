@@ -1,23 +1,27 @@
 {
   "name": "temichevvet-mobile",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "androidVersionCode": 3,
   "private": true,
   "type": "module",
   "scripts": {
     "mobile:build": "node mobile/build.mjs",
     "mobile:sync": "npm run mobile:build && cap sync android",
-    "mobile:test": "node --test scripts/test_mobile.mjs scripts/test_offline.mjs"
+    "ios:build": "TVV_PLATFORM=ios node mobile/build.mjs",
+    "ios:sync": "npm run ios:build && cap sync ios",
+    "mobile:test": "node --test scripts/test_mobile.mjs scripts/test_offline.mjs scripts/test_ios_reminders.mjs"
   },
   "dependencies": {
-    "@capacitor/core": "8.5.3",
     "@capacitor/android": "8.5.3",
     "@capacitor/app": "8.1.2",
     "@capacitor/browser": "^8.0.0",
     "@capacitor/clipboard": "^8.0.0",
+    "@capacitor/core": "8.5.3",
     "@capacitor/filesystem": "^8.0.0",
-    "@capacitor/share": "^8.0.0",
+    "@capacitor/ios": "8.5.3",
+    "@capacitor/local-notifications": "^8.0.0",
     "@capacitor/network": "^8.0.0",
-    "@capacitor/local-notifications": "^8.0.0"
+    "@capacitor/share": "^8.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.3",

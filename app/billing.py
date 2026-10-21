@@ -536,7 +536,7 @@ def install_routes(app,settings,current_user,current_admin,monitor,effective_sub
         if is_review(user):
             raise HTTPException(403,'review_payment_disabled')
         result=start(settings,user,effective_subscription(settings,user),payload.terms_version,payload.receipt_email,
-                     return_to_app=getattr(request, 'headers', {}).get('x-temichevvet-client') == 'android')
+                     return_to_app=getattr(request, 'headers', {}).get('x-temichevvet-client') in {'android', 'ios'})
         audit(request,'subscription.checkout',user_id=user['id'],status='ok',actor='user',metadata={'terms_version':TERMS_VERSION})
         return result
 

@@ -9,7 +9,8 @@ export const APP_TABS = [
 const icon = (name) => `<span class="app-icon icon-${name}" aria-hidden="true"></span>`;
 const titles = Object.fromEntries(APP_TABS.map(([action, label]) => [action, label]));
 Object.assign(titles, { history: 'История', observations: 'Наблюдения', food: 'Питание',
-  subscription: 'Plus', account: 'Профиль', notifications: 'Уведомления', care: 'Уход', faq: 'Вопросы' });
+  subscription: 'Plus', account: 'Профиль', notifications: 'Уведомления', care: 'Уход', faq: 'Вопросы',
+  feedback: 'Обратная связь', install: 'Приложение' });
 
 export function mobileDashboardMarkup() {
   return `<section id="dashboardView" class="dashboard-view mobile-dashboard" hidden>

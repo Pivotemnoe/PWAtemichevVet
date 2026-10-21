@@ -1,0 +1,102 @@
+name: iPhone build and simulator QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-pwa-app-20261013]
+    paths: ['ios/**', 'mobile/**', 'web/**', 'package*.json', 'scripts/*ios*', '.github/workflows/ios.yml']
+  pull_request:
+    branches: [main]
+    paths: ['ios/**', 'mobile/**', 'web/**', 'package*.json', 'scripts/*ios*', '.github/workflows/ios.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  iphone:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      # Xcode is supplied by the hosted runner. Nothing is installed on the user's Mac.
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies and run mobile checks
+        run: |
+          npm ci
+          python -m pip install -r requirements.txt
+          npm run mobile:test
+          python -m unittest scripts.test_mobile_api scripts.test_pet_photos_offline
+      - name: Compile production iPhone application without signing
+        run: |
+          mkdir -p output/ios
+          xcodebuild -version > output/ios/xcode-version.txt
+          npm run ios:sync
+          python mobile/check_ios_bundle.py ios/App/App/public Release
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme TemichevVet -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath output/ios/device \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee output/ios/device-build.log
+          cp ios/App/App/public/mobile-build.json output/ios/production-build.json
+      - name: Prepare isolated QA fixture and simulator
+        run: |
+          mkdir -p .mobile-tools
+          python mobile/qa_server.py > output/ios/qa-server.log 2>&1 &
+          echo $! > output/ios/qa-server.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8096/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          python scripts/seed_ios_qa.py
+          TVV_API_BASE=http://127.0.0.1:8096 TVV_DEBUG_API=1 npm run ios:sync
+          xcrun simctl list devices available -j > output/ios/simulators.json
+          python - <<'PY'
+          import json, os
+          data = json.load(open('output/ios/simulators.json'))
+          phones = [d for runtime, devices in data['devices'].items() if 'iOS' in runtime
+                    for d in devices if d['name'].startswith('iPhone') and d['isAvailable']]
+          if not phones: raise SystemExit('No iPhone runtime on hosted runner')
+          device = phones[0]
+          with open(os.environ['GITHUB_ENV'], 'a') as out: out.write('TVV_SIMULATOR_ID=' + device['udid'] + '\n')
+          print('Selected simulator:', device['name'], device['udid'])
+          PY
+      - name: Run iPhone application and UI tests
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme TemichevVet -configuration Debug \
+            -destination "platform=iOS Simulator,id=$TVV_SIMULATOR_ID" \
+            -derivedDataPath output/ios/simulator -resultBundlePath output/ios/SimulatorQA.xcresult \
+            CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test 2>&1 | tee output/ios/simulator-tests.log
+          tar -czf output/ios/TemichevVet-iPhone-Simulator.tar.gz -C output/ios/simulator/Build/Products/Debug-iphonesimulator App.app
+      - name: Collect evidence and stop the fixture server
+        if: always()
+        run: |
+          if [ -n "$TVV_SIMULATOR_ID" ]; then
+            xcrun simctl io "$TVV_SIMULATOR_ID" screenshot output/ios/iphone-final.png || true
+            xcrun simctl shutdown "$TVV_SIMULATOR_ID" || true
+          fi
+          if [ -f output/ios/qa-server.pid ]; then kill "$(cat output/ios/qa-server.pid)" || true; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-qa-${{ github.sha }}
+          retention-days: 14
+          path: |
+            output/ios/*.log
+            output/ios/*.json
+            output/ios/*.txt
+            output/ios/*.png
+            output/ios/*.tar.gz
+            output/ios/SimulatorQA.xcresult

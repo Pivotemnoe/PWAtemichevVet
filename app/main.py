@@ -5455,7 +5455,7 @@ def _payment_plus_create_locked(request: Request, user: dict) -> PaymentCreateRe
             settings,
             user_id=int(user["id"]),
             user_email=str(user.get("email") or "") or None,
-            **({'return_to_app': True} if getattr(request, 'headers', {}).get('x-temichevvet-client') == 'android' else {}),
+            **({'return_to_app': True} if getattr(request, 'headers', {}).get('x-temichevvet-client') in {'android', 'ios'} else {}),
         )
     except YooKassaConfigError as exc:
         _audit(request, "payment.create_failed", user_id=int(user["id"]), provider=YOOKASSA_PROVIDER, status="error", actor="system", metadata={"reason": "not_configured"})

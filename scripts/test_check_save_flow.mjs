@@ -12,6 +12,44 @@ function definition(name) {
 }
 
 {
+  const classes = new Set();
+  const sticky = {
+    hidden: true,
+    isConnected: true,
+    classList: {
+      add(value) { classes.add(value); },
+      remove(value) { classes.delete(value); },
+    },
+  };
+  const callout = {};
+  let observerCallback = null;
+  const Observer = class {
+    constructor(callback) { observerCallback = callback; }
+    observe(target) { assert.equal(target, callout); }
+  };
+  const ctx = {
+    IntersectionObserver: Observer,
+    window: { IntersectionObserver: Observer },
+  };
+  const resultEl = {
+    querySelector(selector) {
+      return selector === "[data-check-save-sticky]" ? sticky : callout;
+    },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(definition("scheduleCheckStickySave"), ctx);
+  ctx.scheduleCheckStickySave(resultEl);
+  assert.ok(observerCallback);
+  observerCallback([{ isIntersecting: false, intersectionRatio: 0 }]);
+  assert.equal(sticky.hidden, true, "sticky must not cover the answer before the inline save card is seen");
+  observerCallback([{ isIntersecting: true, intersectionRatio: 0.8 }]);
+  assert.equal(sticky.hidden, true, "inline save card remains the only CTA while visible");
+  observerCallback([{ isIntersecting: false, intersectionRatio: 0 }]);
+  assert.equal(sticky.hidden, false, "compact reminder appears only after the inline save card leaves view");
+  assert.ok(classes.has("is-visible"));
+}
+
+{
   const pending = { text: "Тестовый случай", answer: "Тестовый ответ", client_request_id: "stable-case", created_at: "2026-09-10T10:00:00Z", landing_slug: "cat-not-eating", pet_type: "cat", urgency: "green" };
   const node = { innerHTML: "", textContent: "", querySelector() { return {}; } };
   const events = [];

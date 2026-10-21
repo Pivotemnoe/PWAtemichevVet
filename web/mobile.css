@@ -71,7 +71,9 @@
 .is-mobile-app .cookie-banner { bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 55; }
 .payment-redirect-dialog { width: min(380px, calc(100% - 32px)); border: 0; border-radius: 24px; padding: 25px; box-sizing: border-box; color: #1d314a; }
 .payment-redirect-dialog::backdrop { background: #172c4b80; }
-.payment-return-card { max-width: 420px; margin: 8vh auto; padding: 28px; background: white; border-radius: 24px; }
+.payment-return-card { max-width: 420px; margin: 8vh auto; padding: 28px; background: white; border-radius: 24px; box-sizing: border-box; }
+.payment-return-card .primary-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; margin: 18px 0 0; box-sizing: border-box; text-align: center; text-decoration: none; }
+.payment-return-card .text-button { display: inline-flex; align-items: center; min-height: 44px; margin-top: 2px; }
 .payment-redirect-dialog h2 { font-size: 21px; margin: 0 0 12px; }
 .payment-redirect-dialog p { line-height: 1.6; }
 .payment-redirect-dialog .primary-button, .payment-redirect-dialog .secondary-button { width: 100%; margin-top: 10px; }

@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def appPackage = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json'))
+
 android {
     namespace = "ru.temichevvet.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +9,8 @@ android {
         applicationId "ru.temichevvet.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.1.1"
+        versionCode appPackage.androidVersionCode as Integer
+        versionName appPackage.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -44,7 +46,7 @@ tasks.register('validateReleaseAssets') {
         def metadataFile = file('src/main/assets/public/mobile-build.json')
         if (!metadataFile.exists()) throw new GradleException('Run npm run mobile:sync before the release build')
         def metadata = new groovy.json.JsonSlurper().parse(metadataFile)
-        if (metadata.debugApi || metadata.apiOrigin != 'https://temichevvet.ru') {
+        if (metadata.debugApi || metadata.apiOrigin != 'https://temichevvet.ru' || metadata.platform != 'android') {
             throw new GradleException('Release must use the production HTTPS API, without debug mode')
         }
     }

@@ -1,6 +1,6 @@
 import { retentionActivity, currentDevicePush, notificationSettings, retentionAdmin } from "./retention.js?v=20261013-mobile-14";
 import { native, appMode, appFetch, openExternal, confirmPayment, markPaymentPending, paymentPending, clearPaymentPending } from "./platform.js?v=20261013-mobile-14";
-import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261013-mobile-14";
+import { mobileDashboardMarkup, renderMobileWelcome, renderMobileHome, mobileDoctorCard, mobileSectionArt, initMobileShell, updateMobileHeader } from "./mobile-shell.js?v=20261017-pwa-ux-4";
 
 import { OfflineClient, indexedWorkspace } from "./offline-store.js?v=20261013-mobile-14";
 import { petAvatar, preparePetPhoto } from "./pet-avatar.js?v=20261013-mobile-14";
@@ -10,6 +10,10 @@ const offlineClient = appMode ? new OfflineClient({ transport: appFetch, storage
 
 let mobileRoute = { action: "home" };
 let mobileHistory = [];
+const MOBILE_VIEW_ACTIONS = new Set([
+  "home", "pets", "triage", "reminders", "more", "history", "observations",
+  "food", "account", "subscription", "notifications", "care", "faq", "feedback", "install",
+]);
 let paymentOpening = false;
 
 const legacySessionToken = localStorage.getItem("tvv_token") || "";
@@ -300,7 +304,7 @@ const PENDING_CHECK_SAVE_KEY = "tvv_pending_check_save";
 const PENDING_FOOD_SAVE_KEY = "tvv_pending_food_save";
 const PENDING_PET_CREATE_KEY = "tvv_pending_pet_create";
 const PUBLIC_CHECK_USED_KEY = "tvv_public_check_preview_used";
-const CHECK_SAVE_CTA = "Сохранить результат";
+const CHECK_SAVE_CTA = "Сохранить этот разбор";
 const AUTH_DIALOG_DEFAULT_LEAD =
   "Войдите удобным способом. Если аккаунта ещё нет, он создастся автоматически.";
 let currentTouchAttribution = null;
@@ -1299,13 +1303,12 @@ function renderCheckStickySave() {
   `;
 }
 
-function scheduleCheckStickySave(resultEl, level) {
+function scheduleCheckStickySave(resultEl) {
   const sticky = resultEl?.querySelector("[data-check-save-sticky]");
   const callout = resultEl?.querySelector(".check-save-callout");
   if (!sticky || !callout) return;
   let calloutVisible = false;
   let calloutSeen = false;
-  let timerElapsed = false;
   const reveal = () => {
     if (!sticky.isConnected || calloutVisible) return;
     sticky.hidden = false;
@@ -1321,17 +1324,11 @@ function scheduleCheckStickySave(resultEl, level) {
       if (calloutVisible) {
         calloutSeen = true;
         hide();
-      } else if (calloutSeen || timerElapsed) {
+      } else if (calloutSeen) {
         reveal();
       }
     }, { threshold: [0.35] });
     observer.observe(callout);
-  }
-  if (level !== "red") {
-    window.setTimeout(() => {
-      timerElapsed = true;
-      reveal();
-    }, 8000);
   }
 }
 
@@ -1829,7 +1826,7 @@ function renderPublicCheckResult(data, variant, petType, formValues, { restored 
     saveCtaMetadata,
     saveCtaViewKey,
   );
-  scheduleCheckStickySave(resultEl, level);
+  scheduleCheckStickySave(resultEl);
   if (level === "red" && !restored) {
     trackFunnel("check.red_flag", { slug: variant.slug, pet_type: petType || "unknown", level });
   }
@@ -2828,6 +2825,11 @@ function setWorkspace(html, options = {}) {
   ensureDashboardView();
   if (!workspace) return;
   workspace.innerHTML = (appMode ? mobileSectionArt(mobileRoute.action) : '') + html;
+  if (appMode) {
+    workspace.querySelector(
+      ".workspace-head > button:is([data-action='home'], [data-action='more'], [data-action='pets'], [data-action='account'], [data-open-pet])"
+    )?.remove();
+  }
   if (native) {
     workspace.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach((control) => {
       if (control.hasAttribute('aria-label') || control.hasAttribute('aria-labelledby')) return;
@@ -2840,7 +2842,10 @@ function setWorkspace(html, options = {}) {
   }
   if (offlineClient) updateOfflineBanner();
   if (options.scroll !== false) {
-    (appMode ? dashboardView : workspace).scrollIntoView({ behavior: "smooth", block: "start" });
+    (appMode ? dashboardView : workspace).scrollIntoView({
+      behavior: appMode ? "auto" : "smooth",
+      block: "start",
+    });
   }
 }
 
@@ -3976,6 +3981,10 @@ async function renderStartupView() {
   state.retentionTarget = target;
   const startupAction = target?.action || getStartupAction();
   if (startupAction === "install") {
+    if (appMode) {
+      recordMobileRoute({ action: "install" });
+      setDashboardActiveAction("install");
+    }
     await renderInstallInstructions();
     clearStartupAction();
     return;
@@ -4189,7 +4198,8 @@ async function loadPushConfig(force = false) {
 async function loadPushStatus() {
   if (native) {
     const enabled = await window.TVVNative.notificationsEnabled();
-    return { config: { enabled: true }, status: { enabled: true, current_device: enabled, count: enabled ? 1 : 0, items: [] } };
+    return { config: { enabled: true }, status: { enabled: true, current_device: enabled, count: enabled ? 1 : 0, items: [],
+      reminder_plan: window.TVVNative.reminderPlanInfo?.() || null } };
   }
   const config = await loadPushConfig();
   let status = { enabled: Boolean(config.enabled), count: 0, items: [] };
@@ -4658,6 +4668,13 @@ function renderPushCard(push) {
   } else {
     statusText = "Можно включить напоминания на этом устройстве.";
     button = `<button class="secondary-button compact" data-action="enable-push" type="button">Включить уведомления</button>`;
+  }
+  const plan = push?.status?.reminder_plan;
+  if (count > 0 && plan?.omittedReminders > 0) {
+    statusText += ` Для ${plan.omittedReminders} дат пока не хватило места в локальном расписании iPhone.`;
+  } else if (count > 0 && plan?.truncated && plan.refreshBefore) {
+    const deadline = new Date(plan.refreshBefore).toLocaleDateString('ru-RU');
+    statusText += ` Откройте приложение до ${deadline}, чтобы обновить последующие уведомления.`;
   }
   return `
     <div class="profile-card">
@@ -6439,6 +6456,12 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (openPetButton) {
+      if (appMode) {
+        await navigateMobile("pets", {
+          action: "pets", petId: Number(openPetButton.dataset.openPet), view: "card",
+        });
+        return;
+      }
       recordMobileRoute({ action: 'pets', petId: Number(openPetButton.dataset.openPet), view: 'card' });
       setDashboardActiveAction("pets");
       await renderPetCard(Number(openPetButton.dataset.openPet));
@@ -6447,6 +6470,11 @@ document.addEventListener("click", async (event) => {
     if (petViewButton) {
       const petId = Number(petViewButton.dataset.petId);
       const view = petViewButton.dataset.petView;
+      if (appMode) {
+        const action = view === "triage" ? "triage" : view === "reminders" ? "reminders" : "pets";
+        await navigateMobile(action, { action, petId, view });
+        return;
+      }
       recordMobileRoute({ action: view === 'triage' ? 'triage' : view === 'reminders' ? 'reminders' : 'pets', petId, view });
       setDashboardActiveAction(view === "triage" ? "triage" : view === "reminders" ? "reminders" : "pets");
       if (view === "history") await renderPetHistory(petId);
@@ -6481,6 +6509,10 @@ document.addEventListener("click", async (event) => {
     }
     if (!actionButton) return;
     const action = actionButton.dataset.action;
+    if (appMode && MOBILE_VIEW_ACTIONS.has(action)) {
+      await navigateMobile(action);
+      return;
+    }
     if (['home','pets','triage','reminders','more','history','observations','food','account','subscription','notifications','care','faq','feedback'].includes(action)) recordMobileRoute({ action });
     setDashboardActiveAction(action);
     if (action === "home") await renderHome();
@@ -6561,11 +6593,19 @@ function setAppLoading(loading) {
   document.querySelectorAll('.mobile-header button, .mobile-tabbar button').forEach((button) => { button.disabled = loading; });
 }
 
+let mobileNavigationPending = false;
 async function navigateMobile(action, route = null) {
   if (!state.user) { openAuthDialog({ startupAction: action }); return; }
+  if (mobileNavigationPending) return;
+  mobileNavigationPending = true;
+  setAppLoading(true);
   if (!route) recordMobileRoute({ action });
-  else mobileRoute = route;
+  else {
+    mobileRoute = route;
+    updateMobileHeader(route.action, Boolean(route.petId));
+  }
   setDashboardActiveAction(action);
+  setWorkspace('<section class="profile-card mobile-loading-view" role="status"><h2>Открываем раздел</h2><p>Загружаем актуальные данные…</p></section>');
   try {
     if (route?.petId) {
       const handlers = { card: renderPetCard, history: renderPetHistory, observations: renderPetObservations,
@@ -6578,8 +6618,22 @@ async function navigateMobile(action, route = null) {
       account: renderAccountLinks, subscription: renderSubscription, feedback: renderFeedback };
     if (action === 'notifications') await notificationSettings(api, setWorkspace, escapeHtml);
     else if (action === 'care' || action === 'faq') await renderKnowledgeSection(action);
+    else if (action === 'install') await renderInstallInstructions();
+    else if (action === 'subscription') {
+      trackFunnel("subscription.open_click");
+      await refreshAccountState();
+      renderSubscription();
+      if (state.lastPlusPaymentId && state.subscription?.plan === "free") {
+        await checkPlusPaymentStatus({ silentNotFound: true });
+      }
+    }
     else await (handlers[action] || renderHome)();
-  } catch (error) { showError(readableError(error.message)); }
+  } catch (error) {
+    showError(readableError(error.message));
+  } finally {
+    setAppLoading(false);
+    mobileNavigationPending = false;
+  }
 }
 
 async function mobileBack() {

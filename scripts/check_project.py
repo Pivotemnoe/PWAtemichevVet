@@ -117,6 +117,21 @@ def main() -> None:
     html = (ROOT / "web/index.html").read_text(encoding="utf-8")
     js = (ROOT / "web/app.js").read_text(encoding="utf-8")
     styles = (ROOT / "web/styles.css").read_text(encoding="utf-8")
+    mobile_styles = (ROOT / "web/mobile.css").read_text(encoding="utf-8")
+    mobile_shell = (ROOT / "web/mobile-shell.js").read_text(encoding="utf-8")
+    payment_return = (ROOT / "web/payment-return.html").read_text(encoding="utf-8")
+    if "feedback: 'Обратная связь'" not in mobile_shell:
+        raise SystemExit("mobile feedback screen title is missing")
+    if "install: 'Приложение'" not in mobile_shell or "else if (action === 'install')" not in js:
+        raise SystemExit("mobile install screen route/title is missing")
+    for payment_return_guard in (
+        ".payment-return-card .primary-button",
+        "min-height: 52px",
+        'href="temichevvet://payment-return"',
+        "20261017-pwa-ux-4",
+    ):
+        if payment_return_guard not in mobile_styles and payment_return_guard not in payment_return:
+            raise SystemExit(f"mobile payment-return UX guard is missing: {payment_return_guard}")
     doctor_photo_marker = "/* Homepage expert portrait: keep the real clinic photo, but make it part of the hero. */"
     if doctor_photo_marker not in styles:
         raise SystemExit("homepage doctor photo contract marker is missing")
@@ -230,7 +245,6 @@ def main() -> None:
         "ветеринарный врач",
         "Сохранить этот разбор",
         "Сохраните ваше описание и этот разбор вместе. Позже сможете добавить, что изменилось, и показать историю ветеринару.",
-        "Сохранить результат",
         "Добавить питомца",
         "Можно ли собаке этот продукт или блюдо?",
         "Можно ли кошке этот продукт или блюдо?",
@@ -266,10 +280,17 @@ def main() -> None:
         'if (data.usage_consumed) markPublicCheckPreviewUsed();',
         'renderPublicCheckAuthPrompt(readableError("check_preview_already_used"))',
         '"check.save_cta_view"',
-        'function scheduleCheckStickySave(resultEl, level)',
-        'if (level !== "red") {',
-        "timerElapsed = true;",
+        'function scheduleCheckStickySave(resultEl)',
+        "else if (calloutSeen) {",
         '"После входа автоматически вернём вас к результату и сохраним его."',
+        'behavior: appMode ? "auto" : "smooth"',
+        ".workspace-head > button:is([data-action='home']",
+        "[data-action='account']",
+        "if (appMode && MOBILE_VIEW_ACTIONS.has(action))",
+        "let mobileNavigationPending = false",
+        "if (mobileNavigationPending) return",
+        "updateMobileHeader(route.action, Boolean(route.petId))",
+        "Открываем раздел",
     ):
         if public_check_save_guard not in js:
             raise SystemExit(f"public check save/gate guard is missing: {public_check_save_guard}")
