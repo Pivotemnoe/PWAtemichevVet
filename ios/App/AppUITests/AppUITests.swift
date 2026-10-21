@@ -68,9 +68,9 @@ final class AppUITests: XCTestCase {
 
     private func openPet() {
         tapButton("Питомцы")
-        let pet = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch
+        let pet = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch
         XCTAssertTrue(pet.waitForExistence(timeout: 15))
-        pet.tap()
+        tapButton("Открыть карточку")
     }
 
     func test01GuestShell() {
@@ -164,5 +164,38 @@ final class AppUITests: XCTestCase {
         delivered.tap()
         XCTAssertTrue(app.staticTexts["QA iOS local reminder"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["Отключить"].exists)
+    }
+
+    func test05DoctorSummaryExportsToSystemPDFSheet() {
+        openPet()
+        tapButtonBeginning("Сводка для врача")
+        tapButton("Печать или сохранить в PDF")
+        let save = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Save to Files")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 25))
+        if app.buttons["Close"].exists { app.buttons["Close"].tap() }
+        else { app.swipeDown() }
+    }
+
+    func test06PetPhotoIsSavedFromTheSystemPicker() throws {
+        openPet()
+        tapButton("Добавить фото")
+        let library = app.buttons["Photo Library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 10))
+        library.tap()
+        let photo = app.collectionViews.cells.firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 15))
+        photo.tap()
+        if app.buttons["Choose"].waitForExistence(timeout: 3) { app.buttons["Choose"].tap() }
+        if app.buttons["Add"].exists { app.buttons["Add"].tap() }
+        let saved = NSPredicate { _, _ in
+            (try? self.qaRequest("/mobile/qa-api-state")["ios_photo_count"] as? Int) == 1
+        }
+        expectation(for: saved, evaluatedWith: nil)
+        waitForExpectations(timeout: 25)
+        XCTAssertTrue(app.buttons["Изменить фото"].exists)
+        app.terminate()
+        app.launch()
+        openPet()
+        XCTAssertTrue(app.buttons["Изменить фото"].exists)
     }
 }

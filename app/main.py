@@ -3946,6 +3946,15 @@ def android_download_apk() -> FileResponse:
                         headers={'Cache-Control': 'public, max-age=3600, immutable'})
 
 
+@app.get('/downloads/TemichevVet-0.1.2.apk', include_in_schema=False)
+def android_download_apk_012() -> FileResponse:
+    artifact = PROJECT_ROOT / 'releases' / 'android' / 'TemichevVet-0.1.2.apk'
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail='Android build has not been published')
+    return FileResponse(artifact, media_type='application/vnd.android.package-archive', filename=artifact.name,
+                        headers={'Cache-Control': 'public, max-age=3600, immutable'})
+
+
 def _index_response() -> Response:
     if billing.enabled() and billing.renewals_enabled():
         source = (WEB_ROOT / 'index.html').read_text(encoding='utf-8')

@@ -76,6 +76,9 @@ jobs:
           PY
       - name: Compile simulator application and UI tests
         run: |
+          xcrun simctl boot "$TVV_SIMULATOR_ID" || true
+          xcrun simctl bootstatus "$TVV_SIMULATOR_ID" -b
+          xcrun simctl addmedia "$TVV_SIMULATOR_ID" web/assets/logo_temichevvet.jpg
           set -o pipefail
           xcodebuild -project ios/App/App.xcodeproj -scheme TemichevVet -configuration Debug \
             -destination "platform=iOS Simulator,id=$TVV_SIMULATOR_ID" \

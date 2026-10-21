@@ -48,7 +48,9 @@ async def fixture_api_state(request: Request):
         conn.execute('PRAGMA query_only=ON')
         count = conn.execute("SELECT COUNT(*) FROM pet_observations o JOIN users u ON u.id=o.user_id "
             "WHERE u.email='ios-qa@example.ru' AND o.payload LIKE ?", ('%QA iOS offline 20261021%',)).fetchone()[0]
-    return {'unavailable': qa_api_unavailable, 'ios_offline_note_count': count}
+        photos = conn.execute("SELECT COUNT(*) FROM pets p JOIN users u ON u.id=p.owner_id "
+            "WHERE u.email='ios-qa@example.ru' AND p.photo_data_url IS NOT NULL").fetchone()[0]
+    return {'unavailable': qa_api_unavailable, 'ios_offline_note_count': count, 'ios_photo_count': photos}
 
 def fixture_triage(**kwargs):
     if 'QA_FORCE_FAIL' in str(kwargs.get('complaint_text') or ''):
