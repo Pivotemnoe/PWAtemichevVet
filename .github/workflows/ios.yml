@@ -94,6 +94,9 @@ jobs:
       - name: Collect evidence and stop the fixture server
         if: always()
         run: |
+          if [ -d output/ios/SimulatorQA.xcresult ]; then
+            xcrun xcresulttool export attachments --path output/ios/SimulatorQA.xcresult --output-path output/ios/attachments || true
+          fi
           if [ -n "$TVV_SIMULATOR_ID" ]; then
             xcrun simctl io "$TVV_SIMULATOR_ID" screenshot output/ios/iphone-final.png || true
             xcrun simctl shutdown "$TVV_SIMULATOR_ID" || true
@@ -111,3 +114,4 @@ jobs:
             output/ios/*.png
             output/ios/*.tar.gz
             output/ios/SimulatorQA.xcresult
+            output/ios/attachments

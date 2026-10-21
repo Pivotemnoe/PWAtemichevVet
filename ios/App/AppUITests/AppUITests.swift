@@ -74,7 +74,7 @@ final class AppUITests: XCTestCase {
     }
 
     func test01GuestShell() {
-        XCTAssertTrue(app.staticTexts["Всё важное о питомце"].waitForExistence(timeout: 25))
+        XCTAssertTrue(app.buttons["Войти или создать аккаунт"].waitForExistence(timeout: 25))
         for label in ["Главная", "Питомцы", "Здоровье", "Даты", "Ещё"] {
             XCTAssertTrue(app.buttons[label].exists, "Missing app tab: " + label)
         }

@@ -10,10 +10,14 @@
 .mobile-brand { font-size: 11px; font-weight: 750; color: #617891; letter-spacing: .035em; }
 .mobile-header h1 { font-size: 24px; line-height: 1.2; margin: 3px 0 0; }
 .mobile-profile, .mobile-back { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 15px; border: 1px solid #dfE8f2; background: #fff; color: #1476d4; flex: 0 0 auto; }
-.mobile-tabbar { position: fixed; z-index: 25; bottom: 0; left: 50%; transform: translateX(-50%); width: min(100%, 680px); display: grid; grid-template-columns: repeat(5, 1fr); padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: #fffffff5; backdrop-filter: blur(16px); border-top: 1px solid #dce6f0; box-sizing: border-box; }
+.mobile-tabbar { position: fixed; z-index: 25; bottom: 0; left: 0; right: 0; width: 100%; max-width: 680px; margin-inline: auto; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); background: #fffffff5; backdrop-filter: blur(16px); border-top: 1px solid #dce6f0; box-sizing: border-box; }
 .mobile-tabbar .app-nav-item { min-width: 0; min-height: 54px; border: 0; border-radius: 14px; display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center; padding: 6px 2px; background: transparent; color: #728398; font-size: 10px; font-weight: 700; }
 .mobile-tabbar .app-nav-item.is-active { background: #eaf3ff; color: #126bc5; }
 .mobile-tabbar .app-icon { width: 23px; height: 23px; }
+/* Keep the iPhone's input-focus zoom from displacing fixed app navigation. */
+@supports (-webkit-touch-callout: none) {
+  .is-mobile-app input, .is-mobile-app select, .is-mobile-app textarea { font-size: max(16px, 1em); }
+}
 .mobile-workspace { min-height: calc(100dvh - 175px); margin: 0; padding: 8px 20px calc(96px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; }
 .mobile-workspace .workspace-head { margin: 0 0 18px; }
 .mobile-workspace .workspace-head h2 { font-size: 22px; }

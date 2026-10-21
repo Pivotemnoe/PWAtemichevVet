@@ -873,6 +873,7 @@ function openAuthDialogFromLink() {
 
 function closeAuthDialog() {
   if (!authDialog) return;
+  if (authDialog.contains(document.activeElement)) document.activeElement.blur();
   authDialog.hidden = true;
   authDialog.setAttribute("aria-hidden", "true");
   authDialogContextLead = "";
