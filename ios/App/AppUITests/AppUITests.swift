@@ -8,6 +8,17 @@ final class AppUITests: XCTestCase {
         continueAfterFailure = false
         _ = try qaRequest("/mobile/qa-api-state", body: ["unavailable": false])
         app.launch()
+        // Feature tests must still run when the separate login test failed;
+        // obtain a session through the same visible UI, never by injecting it.
+        if !name.contains("test01") && !name.contains("test02") {
+            let ready = NSPredicate { _, _ in
+                self.app.buttons["Войти или создать аккаунт"].exists ||
+                self.app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch.exists
+            }
+            expectation(for: ready, evaluatedWith: nil)
+            waitForExpectations(timeout: 40)
+            if app.buttons["Войти или создать аккаунт"].exists { try signIn() }
+        }
     }
 
     override func tearDownWithError() throws {
@@ -83,7 +94,7 @@ final class AppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Войти или создать аккаунт"].exists)
     }
 
-    func test02EmailLoginAndTabs() throws {
+    private func signIn() throws {
         tapButton("Войти или создать аккаунт")
         let email = app.textFields["Электронная почта"]
         XCTAssertTrue(email.waitForExistence(timeout: 10))
@@ -106,6 +117,10 @@ final class AppUITests: XCTestCase {
         code.typeText(String(text[range]))
         tapButton("Войти")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Лео iOS")).firstMatch.waitForExistence(timeout: 25))
+    }
+
+    func test02EmailLoginAndTabs() throws {
+        try signIn()
         for label in ["Питомцы", "Здоровье", "Даты", "Ещё", "Главная"] {
             tapButton(label)
             XCTAssertTrue(app.buttons["Главная"].exists)
