@@ -29,6 +29,10 @@ window.TVVNative = {
     const timeout = analysis ? 120000 : method === 'GET' ? 4000 : 15000;
     const result = await CapacitorHttp.request({
       url: API_BASE + path, method,
+      // In Capacitor iOS 8.5.3 this also creates a dedicated URLSession, rather
+      // than the shared session/pool used concurrently by analytics and login.
+      // Our JSON API has fixed paths and must not redirect to another origin.
+      disableRedirects: true,
       headers: { ...options.headers, 'X-TemichevVet-Client': 'ios' },
       data: options.body ? JSON.parse(options.body) : undefined,
       responseType: 'json', connectTimeout: timeout, readTimeout: timeout,
