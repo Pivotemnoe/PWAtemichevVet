@@ -59,8 +59,13 @@ final class AppUITests: XCTestCase {
         // WebKit may restore the previous scroll position after a cold launch.
         // A control above the fixed header needs a downward gesture, whereas
         // one below the bottom bar needs an upward gesture.
-        if element.frame.midY < app.frame.midY { app.swipeDown() }
-        else { app.swipeUp() }
+        // Full-screen swipes can jump between the two scroll limits and skip a
+        // card hidden under the fixed bars. A short drag with an end hold stops
+        // inertia and keeps the target within the usable middle of the screen.
+        let down = element.frame.midY < app.frame.midY
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.7 : 0.3))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
     private func qaRequest(_ path: String, body: [String: Any]? = nil) throws -> [String: Any] {
@@ -215,7 +220,12 @@ final class AppUITests: XCTestCase {
         let photo = app.images.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
                                                      "Photo,", "Фото,")).firstMatch
         XCTAssertTrue(photo.waitForExistence(timeout: 25))
-        photo.tap()
+        // The picker exposes a virtual Image with a valid visible frame but no
+        // AX hit point on iOS 26. Tap the displayed thumbnail in screen space.
+        let center = CGPoint(x: photo.frame.midX, y: photo.frame.midY)
+        XCTAssertTrue(app.frame.contains(center))
+        app.coordinate(withNormalizedOffset: CGVector(dx: (center.x - app.frame.minX) / app.frame.width,
+                                                       dy: (center.y - app.frame.minY) / app.frame.height)).tap()
         let choose = app.buttons.matching(NSPredicate(format: "label IN %@", ["Choose", "Выбрать"])).firstMatch
         if choose.waitForExistence(timeout: 3) { choose.tap() }
         let add = app.buttons.matching(NSPredicate(format: "label IN %@", ["Add", "Добавить"])).firstMatch
