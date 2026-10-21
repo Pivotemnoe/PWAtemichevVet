@@ -55,6 +55,10 @@ async def fixture_api_state(request: Request):
 def fixture_triage(**kwargs):
     if 'QA_FORCE_FAIL' in str(kwargs.get('complaint_text') or ''):
         raise RuntimeError('qa_requested_failure')
+    if 'QA_IOS_SLOW_RESPONSE_20261021' in str(kwargs.get('complaint_text') or ''):
+        # Exercise the native client's response deadline without any AI request.
+        import time
+        time.sleep(17)
     return LlmTriageResult(text='ТЕСТОВЫЙ ОТВЕТ. Это локальная проверка сохранения истории, не медицинский разбор.\n'
         '1. Тестовая запись принята.\n2. Ответ сохранён в карточке питомца.\n'
         '3. Данные относятся только к тестовому аккаунту.\n4. Рекомендации по лечению не сформированы.\n'

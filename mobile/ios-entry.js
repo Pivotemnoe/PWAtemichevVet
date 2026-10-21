@@ -21,12 +21,17 @@ window.TVVNative = {
   debugOrigin: DEBUG_API ? API_BASE : null,
   async fetch(path, options = {}) {
     if (!path.startsWith('/api/')) throw new Error('invalid_api_path');
+    const method = (options.method || 'GET').toUpperCase();
+    const analysis = method === 'POST'
+      && ['/api/triage', '/api/check/preview', '/api/food/check'].includes(path.split('?')[0]);
+    // Capacitor iOS uses connectTimeout as the entire URLRequest timeout,
+    // taking precedence over readTimeout. AI responses need the full wait.
+    const timeout = analysis ? 120000 : method === 'GET' ? 4000 : 15000;
     const result = await CapacitorHttp.request({
-      url: API_BASE + path, method: options.method || 'GET',
+      url: API_BASE + path, method,
       headers: { ...options.headers, 'X-TemichevVet-Client': 'ios' },
       data: options.body ? JSON.parse(options.body) : undefined,
-      responseType: 'json', connectTimeout: (options.method || 'GET') === 'GET' ? 4000 : 15000,
-      readTimeout: 120000,
+      responseType: 'json', connectTimeout: timeout, readTimeout: timeout,
     });
     return new Response(JSON.stringify(result.data), { status: result.status,
       headers: { 'Content-Type': 'application/json' } });

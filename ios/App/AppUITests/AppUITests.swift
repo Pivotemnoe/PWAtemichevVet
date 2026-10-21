@@ -205,4 +205,18 @@ final class AppUITests: XCTestCase {
         openPet()
         XCTAssertTrue(app.buttons["Изменить фото"].exists)
     }
+
+    func test07AnalysisCanWaitLongerThanFifteenSeconds() {
+        openPet()
+        tapButtonBeginning("Что изменилось?")
+        let complaint = app.textViews["Что происходит?"]
+        XCTAssertTrue(complaint.waitForExistence(timeout: 10))
+        complaint.tap()
+        complaint.typeText("QA_IOS_SLOW_RESPONSE_20261021: routine test only")
+        let started = Date()
+        tapButton("Получить и сохранить разбор")
+        XCTAssertTrue(app.buttons["Рассказать ещё раз"].waitForExistence(timeout: 50))
+        XCTAssertGreaterThan(Date().timeIntervalSince(started), 16)
+        XCTAssertTrue(app.buttons["Скопировать для врача"].exists)
+    }
 }
