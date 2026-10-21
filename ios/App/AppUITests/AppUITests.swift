@@ -235,11 +235,12 @@ final class AppUITests: XCTestCase {
         }
         expectation(for: saved, evaluatedWith: nil)
         waitForExpectations(timeout: 25)
-        XCTAssertTrue(app.buttons["Изменить фото"].exists)
+        // The server write can finish before WebKit renders the refreshed card.
+        XCTAssertTrue(app.buttons["Изменить фото"].waitForExistence(timeout: 15))
         app.terminate()
         app.launch()
         openPet()
-        XCTAssertTrue(app.buttons["Изменить фото"].exists)
+        XCTAssertTrue(app.buttons["Изменить фото"].waitForExistence(timeout: 15))
     }
 
     func test07AnalysisCanWaitLongerThanFifteenSeconds() {
